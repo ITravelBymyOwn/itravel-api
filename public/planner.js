@@ -138,8 +138,8 @@ const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
 const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,12000];
 // V2.10.66: quality convergence happens internally and Day Trips are isolated physical units. A traveler-facing retry is
 // reserved for genuinely interrupted/technical runs, not normal QA convergence.
-const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 5;
-const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 6;
+const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 3;
+const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 4;
 const ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS = 3;
 let paidGenerationRunning = false;
 let generationRecoveryState = null;
@@ -4089,10 +4089,9 @@ Meals:
 
 Aurora:
 - Include aurora only when plausible by latitude, season and darkness.
-- Do NOT create a standalone aurora activity row by default.
-- When auroras are plausible for the city/date, put aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city, with a realistic dark-hour window, a guided-tour option, weather/cloud/geomagnetic/road checks and a clear statement that visibility is not guaranteed.
-- Because the aurora note is present on EVERY plausible day, the traveler automatically has multiple weather-dependent opportunities across the stay; never rely on only one selected night.
-- Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference through the final-row NOTE and guided-tour recommendation. Do not convert the preference itself into a standalone row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
+- When the authoritative Experience Plan supplies an AURORA_EXPERIENCE window, schedule it as the primary conditional opportunity and state that visibility depends on clouds, geomagnetic activity and local conditions and is never guaranteed.
+- Respect the supplied primary and backup nights. Do not repeat a large aurora note on every day and do not create an aurora row outside an allocated physical window.
+- Present guided tour, safe independent observation, rental vehicle or transfer as alternatives according to the supplied traveler and transport context; never imply that purchasing a tour is mandatory.
 - Avoid identical notes on consecutive nights.
 
 Intelligent day-trip selection:
@@ -4176,11 +4175,9 @@ Itinerary rules (aligned with API v52.5):
 - For every candidate micro-stop, evaluate incremental tourism value and experience diversity. A distinct lighthouse, cliff, historic church, geological formation or viewpoint may outrank another similar waterfall even at comparable distance.
 
 Auroras (only if plausible by latitude/season):
-- Do NOT create a standalone aurora row by default.
-- Put the aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day when auroras are plausible for the city/date.
-- Repeat the opportunity on EVERY plausible day so weather-dependent backup opportunities are naturally preserved across the stay.
-- The note must include a realistic dark-hour window, guided-tour option, cloud/weather/geomagnetic/road checks and no-visibility guarantee.
-- If the user explicitly provides a confirmed aurora booking/time and asks to schedule it, that confirmed fixed booking may be represented as a row.
+- Schedule aurora only inside an authoritative AURORA_EXPERIENCE window or a confirmed fixed booking.
+- Treat the allocated night as the primary conditional opportunity and preserve backup nights from the Experience Plan as metadata rather than repeated itinerary rows.
+- Explain clouds, weather, geomagnetic conditions, safe transport choices and the absence of any visibility guarantee.
 
 Safety:
 - Don't propose activities in areas with relevant risks, impossible hours, or obvious restrictions.
@@ -6107,8 +6104,7 @@ HARD RULES:
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
 - Macro-routes must be geographically sequential, contain meaningful separate micro-stops and end
   with an explicit return to the lodging/base.
-- Do not create a standalone aurora row by default. When plausible, put concise conditional aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city: realistic dark-hour window, safe self-drive when appropriate, guided-tour option, cloud/geomagnetic/road checks and no guarantee.
-- The final-row aurora note must appear on EVERY plausible day, including when auroras were explicitly requested in Preferences. An explicit aurora preference alone NEVER becomes a dedicated row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may become a dedicated row.
+- Generate aurora content only when the authoritative Experience Plan allocates an AURORA_EXPERIENCE window or the user supplies a confirmed fixed booking. Treat it as conditional, describe safe transport alternatives and never guarantee visibility.
 - Preserve official proper names; all generic user-facing text and duration labels must use the
   selected itinerary language.
 - Never use generic destinations such as "nearby village", "local restaurant", "services",
@@ -6306,7 +6302,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','WEEKDAY_DATE_MISMATCH',
+    'MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','WEEKDAY_DATE_MISMATCH',
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
@@ -6520,11 +6516,12 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         }
       }
 
-      if(_isAuroraActivityRow_(r) && !_explicitlyRequestedFixedAurora_()){
+      const plannedAurora=String(r?.commerce_context?.unit_type||'').toUpperCase()==='AURORA_EXPERIENCE';
+      if(_isAuroraActivityRow_(r) && !_explicitlyRequestedFixedAurora_() && !plannedAurora){
         errors.push({
           code:'RIGID_AURORA_ROW',
           day,row,
-          instruction:'Remove the standalone aurora row. Even when auroras or an aurora tour were explicitly requested in Preferences, aurora guidance belongs as an ADDITIONAL note in the FINAL row of EVERY plausible day. Only a genuinely confirmed fixed-time booking may remain as a row.'
+          instruction:'Remove the unallocated standalone aurora row. Aurora must be scheduled through the authoritative AURORA_EXPERIENCE unit or a genuinely confirmed fixed-time booking.'
         });
       }
     }
@@ -6555,20 +6552,9 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
     // Robustness is protected below by route-window utilization and thinness checks,
     // while the generation prompt chooses a natural end from real tourism value.
 
-    // HARD QUALITY RULE: in a plausible aurora city/season, EVERY day must carry
-    // an additional aurora opportunity note in the Notes of that day's FINAL row.
-    // An explicit aurora preference still remains a note; it does not become a row.
-    if(dayRows.length && _isHighLatitudeWinterContext_(city,baseDate)){
-      const lastRow=dayRows[dayRows.length-1] || {};
-      if(!_isAuroraRow_({notes:lastRow.notes||''})){
-        errors.push({
-          code:'MISSING_AURORA_FINAL_NOTE',
-          day,
-          row:dayRows.length,
-          instruction:'Add an aurora opportunity as an ADDITIONAL note in the Notes field of this day\'s FINAL row. Do this for every day in this city when latitude/season/darkness make auroras plausible, even if the user explicitly requested auroras in Preferences. Mention clear/cloud conditions, geomagnetic conditions, no guarantee, and guided-tour option. Do not create a standalone aurora row.'
-        });
-      }
-    }
+    // V86: aurora strategy is allocated once by the Experience Plan as a primary
+    // physical unit with backup nights in metadata. Repetitive per-day notes are
+    // no longer a repair condition.
   }
 
   // Travel Model V2 deterministic route audit. The LLM is not trusted to infer
@@ -6821,7 +6807,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - For a full-day scenic route, evaluate a broad candidate pool and normally retain roughly 4–8 meaningful visit stops when daylight, safety and timing allow. This is not a quota: preserve realistic dwell at anchor experiences and remove weak filler.
 - For macro-tours, evaluate low-detour viewpoints, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops; retain only those with strong incremental tourism value.
 - Prefer experience diversity over repetitive minor variants, and never add rows merely to fill space.
-- In every city/date where auroras are plausible, add an aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day, not just one selected night. This applies even when the user explicitly requested auroras or an aurora tour in Preferences. Each daily note should mention that visibility is not guaranteed and depends on clear/cloud conditions and geomagnetic activity, and should mention the guided-tour option. Do not create a standalone aurora row. Only a genuinely confirmed fixed-time booking separately provided by the user may remain as a dedicated row.
+- Follow the Experience Plan's primary aurora night and backup-night metadata. Do not repeat aurora prose on every day. Visibility remains conditional on clouds, geomagnetic activity and local conditions.
 - Use the selected itinerary language consistently, including duration labels.
 - Write like an expert human concierge:
   * specific, practical and destination-aware;
@@ -7019,7 +7005,7 @@ HARD RULES:
 - A pure movement interval contains only transport; a visit interval contains transport plus activity. Use realistic category dwell and conservative regional transfers.
 - Scenic outdoor stops must fit plausible useful daylight.
 - Regional days require logical micro-stops, a realistic on-route lunch/meal break when the day spans lunch, and explicit return to the lodging/base near the applicable end time.
-- Aurora, when plausible, belongs as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city rather than a standalone activity. This applies even when explicitly requested in Preferences.
+- Aurora follows the authoritative Experience Plan: one primary conditional opportunity plus backup-night metadata, or a user-confirmed fixed booking.
 - One concrete To per row. Local mobility may contain up to three intelligently ranked options, each with an estimated time and a useful condition; the duration upper bound must keep every option feasible.
 - Use one selected language consistently, including duration labels.
 `.trim();
@@ -7228,8 +7214,8 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
     travelers:plannerState?.travelers||null,
     traveler_profiles:plannerState?.travelerProfiles||null,
     calendar_dates:_calendarDatesForStay_(baseDate,Number(dest?.days||0)),
-    // Canonical Trip Story stay cards define generation units. Day Trips belong
-    // to their parent stay and must never become independent generation units.
+    // Canonical Trip Story stays provide the overnight parent. V86 later divides
+    // them into recoverable base chunks and independent full/partial Day Trips.
     trip_story_stays:((_currentTravelModelV2_()?.trip_story?.stays)||[]).map((st,index)=>({
       id:st.id||`story-stay-${index+1}`,
       sequence:index+1,
@@ -7237,9 +7223,17 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
       country:st.country||'',
       startDate:st.startDate||'',
       days:Math.max(1,Number(st.days||1)),
+      experiencePlan:st._itbmo_experience_plan_v86||null,
       dayTrips:(st.dayTrips||[]).map(dt=>({
         id:dt.id||'',day:Math.max(1,Number(dt.day||1)),place:dt.place||'',country:dt.country||st.country||'',
-        outbound:{...(dt.outbound||{})},return:{...(dt.return||{})},scheduleAdjustment:dt.scheduleAdjustment||null
+        outbound:{...(dt.outbound||{})},return:{...(dt.return||{})},scheduleAdjustment:dt.scheduleAdjustment||null,
+        origin:dt._itbmo_origin||'USER_EXPLICIT',mandatory:Boolean(dt._itbmo_mandatory),
+        experienceIdentity:dt._itbmo_experience_identity||dt.place||'',
+        durationClass:_v86InferDayTripClass_(dt),
+        destinationProfile:dt._itbmo_destination_profile||null,
+        recommendedModes:Array.isArray(dt._itbmo_recommended_modes)?dt._itbmo_recommended_modes:[],
+        reason:dt._itbmo_reason||null,weatherSensitive:Boolean(dt._itbmo_weather_sensitive),
+        auroraPrimary:Boolean(dt._itbmo_aurora_primary)
       }))
     })),
     hard_policies:{
@@ -7363,7 +7357,7 @@ function _v3RepairableCodes_(){
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','REGIONAL_DAY_TOO_THIN','UNEXPLAINED_GAP',
     'ROUTE_WINDOW_TOO_THIN',
     'OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
-    'MISSING_AURORA_FINAL_NOTE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
+    'ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
     'DURATION_UNPARSEABLE','REPETITIVE_NOTE_TEMPLATE','UNJUSTIFIED_EXTREME_START','WEEKDAY_DATE_MISMATCH'
   ]);
 }
@@ -7513,6 +7507,16 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
       }
     }
   }
+
+  // V86 adaptive chunks are independent calls, but the traveler must still see
+  // one coherent trip. Reuse the proven semantic duplicate detector only for
+  // cross-day flagship repetition, then invalidate the later unit locally.
+  const semantic=_localGlobalAudit_(contract?.planning_unit||'',rows,maxDay,_v3SyntheticMaster_(maxDay),[],contract?.base_date||'',false);
+  (semantic.errors||[]).filter(error=>error?.code==='GLOBAL_DUPLICATE_POI').forEach(error=>{
+    const laterDay=Math.max(...(Array.isArray(error.days)?error.days.map(Number):[Number(error.day||0)]).filter(Boolean));
+    const owner=(byDay[laterDay]||[]).find(row=>_arePoiAliases_(row?.to||row?.activity,error.second||error.first));
+    errors.push({...error,day:laterDay,stay_unit_id:owner?.stay_unit_id||owner?.commerce_context?.stay_unit_id||null});
+  });
 
   return {errors};
 }
@@ -7678,7 +7682,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v5-daytrip-isolation';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v6-experience-plan-adaptive-chunks';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -7771,6 +7775,19 @@ function _v3ExtractPlanningUnitRows_(parsed,planningUnit,totalDays,expectedDaysO
 
 function _v3PhysicalKey_(value){
   return String(value||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function _v86ChunkBaseWindows_(windows=[],maxDays=3){
+  const ordered=[...(windows||[])].sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  const chunks=[];let current=[];let days=new Set();let previousDay=null;
+  for(const window of ordered){
+    const day=Number(window.day);
+    const beginsNew=Boolean(current.length && ((!days.has(day)&&days.size>=maxDays) || (previousDay!=null&&day>previousDay+1)));
+    if(beginsNew){chunks.push(current);current=[];days=new Set();}
+    current.push(window);days.add(day);previousDay=day;
+  }
+  if(current.length)chunks.push(current);
+  return chunks;
 }
 
 function _v3IsFullTransitDay_(routeDay={}){
@@ -7926,7 +7943,8 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         const routeDay=routeDays.find(day=>String(day.date||'')===String(dtDate||''))||null;
         const dtTransfers=(routeDay?.fixed_transfers||[]).filter(t=>/^daytrip_(?:out|return)$/i.test(String(t?.direction||'')) && (_arePoiAliases_(t.origin,st.place)||_arePoiAliases_(t.destination,st.place)) && (_arePoiAliases_(t.origin,dt.place)||_arePoiAliases_(t.destination,dt.place)));
         const travelerFixed=dtTransfers.length>=2 && dtTransfers.every(t=>String(t?.source||'USER_FIXED').toUpperCase()!=='ROUTE_ESTIMATED' && !t?.route_estimated);
-        return {dt,di,dtDate,travelerFixed,transfers:dtTransfers};
+        const durationClass=_v86DurationClass_(dt.durationClass||'FULL_DAY');
+        return {dt,di,dtDate,travelerFixed,transfers:dtTransfers,durationClass,partialDay:['HALF_DAY_AM','HALF_DAY_PM','EVENING','AURORA_PRIMARY'].includes(durationClass)};
       });
       const metaForWindow=(w)=>dayTripMeta.find(m=>m.dt?.place&&_arePoiAliases_(w.location,m.dt.place)&&(!m.dtDate||String(w.date||'')===String(m.dtDate)))||null;
       const dayTripDays=new Map(dayTripMeta.map(m=>[String(m.dtDate||''),m]));
@@ -7935,18 +7953,23 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         if(w.day_trip||String(w.role||'').toUpperCase()==='DAY_TRIP') return false;
         const meta=dayTripDays.get(String(w.date||''));
         if(!meta) return true;
-        if(!meta.travelerFixed) return false;
+        if(!meta.travelerFixed && !meta.partialDay) return false;
         const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
-        return ws!=null&&we!=null&&(we-ws)>=180;
+        return ws!=null&&we!=null&&(we-ws)>=150;
       });
       if(baseWindows.length){
-        planningUnits.push({
-          id:parentId,unit_type:'BASE_STAY',parent_stay_id:parentId,sequence:0,
-          physical_destination:st.place,base_destination:st.place,physical_key:_v3PhysicalKey_(st.place),
-          allowed_physical_locations:[...new Set([st.place,...baseWindows.map(w=>w.location)].filter(Boolean))],
-          day_trips:[],windows:baseWindows,days:[...new Set(baseWindows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b),
-          previous_destination:previous?.place||null,next_destination:next?.place||null,
-          inbound_boundary:d.inbound||null,outbound_boundary:d.outbound||null
+        const baseChunks=_v86ChunkBaseWindows_(baseWindows,3);
+        baseChunks.forEach((chunk,chunkIndex)=>{
+          const chunkDays=[...new Set(chunk.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b);
+          planningUnits.push({
+            id:`${parentId}-base-${String(chunkIndex+1).padStart(2,'0')}`,unit_type:chunkDays.length===1?'BASE_DAY':'BASE_CHUNK',parent_stay_id:parentId,sequence:0,
+            physical_destination:st.place,base_destination:st.place,physical_key:_v3PhysicalKey_(st.place),
+            allowed_physical_locations:[...new Set([st.place,...chunk.map(w=>w.location)].filter(Boolean))],
+            day_trips:[],windows:chunk,days:chunkDays,experience_plan:st.experiencePlan||null,
+            surface_unscheduled_recommendations:chunkIndex===baseChunks.length-1,
+            previous_destination:previous?.place||null,next_destination:next?.place||null,
+            inbound_boundary:chunkIndex===0?d.inbound:null,outbound_boundary:chunkIndex===baseChunks.length-1?d.outbound:null
+          });
         });
       }
 
@@ -7958,13 +7981,14 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         const out=meta.transfers.find(t=>String(t.direction||'').toLowerCase()==='daytrip_out')||null;
         const ret=meta.transfers.find(t=>String(t.direction||'').toLowerCase()==='daytrip_return')||null;
         planningUnits.push({
-          id:`${parentId}-daytrip-${_v3PhysicalKey_(dt.place)||meta.di+1}-d${day}`,unit_type:'DAY_TRIP',parent_stay_id:parentId,sequence:0,
+          id:`${parentId}-daytrip-${_v3PhysicalKey_(dt.place)||meta.di+1}-d${day}`,unit_type:meta.durationClass==='FULL_DAY'?'DAY_TRIP':(meta.durationClass==='AURORA_PRIMARY'?'AURORA_EXPERIENCE':'DAY_TRIP_PARTIAL'),parent_stay_id:parentId,sequence:0,
           physical_destination:dt.place,base_destination:st.place,physical_key:_v3PhysicalKey_(dt.place),
           allowed_physical_locations:[...new Set([dt.place,...dtWindows.map(w=>w.location)].filter(Boolean))],
           day_trips:[Object.fromEntries(Object.entries(dt).filter(([k])=>k!=='expected_date'))],
           windows:dtWindows,days:[...new Set(dtWindows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b),
           previous_destination:st.place,next_destination:st.place,inbound_boundary:out,outbound_boundary:ret,
-          traveler_fixed_window:Boolean(meta.travelerFixed)
+          traveler_fixed_window:Boolean(meta.travelerFixed),duration_class:meta.durationClass,
+          experience_plan:st.experiencePlan||null
         });
       });
     });
@@ -8013,11 +8037,14 @@ function _v3StayContract_(contract,unit){
     unit_type:unit.unit_type||'BASE_STAY',
     parent_stay_id:unit.parent_stay_id||unit.id,
     traveler_fixed_window:Boolean(unit.traveler_fixed_window),
+    duration_class:unit.duration_class||null,
     sequence:unit.sequence,
     physical_destination:unit.physical_destination,
     base_destination:unit.base_destination||unit.physical_destination,
     allowed_physical_locations:unit.allowed_physical_locations||[unit.physical_destination],
     day_trips:unit.day_trips||[],
+    experience_plan:unit.experience_plan||null,
+    surface_unscheduled_recommendations:Boolean(unit.surface_unscheduled_recommendations),
     itinerary_language:contract.itinerary_language,
     planning_windows:unit.windows,
     boundary_context:{previous_destination:unit.previous_destination,next_destination:unit.next_destination,inbound:unit.inbound_boundary,outbound:unit.outbound_boundary},
@@ -8087,7 +8114,7 @@ function _v3StampStayRows_(rows=[],unit={}){
     const window=candidates[0];
     if(!window) return [];
     const physical=window.location||unit.base_destination||unit.physical_destination;
-    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null}}];
+    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,unit_type:unit.unit_type||'BASE_STAY',planning_window_id:window.window_id||null}}];
   });
   // V71 · if ITBMO had to move an estimated full-day excursion away from an
   // impossible transition day, explain the adjustment once in traveler-facing
@@ -8096,6 +8123,20 @@ function _v3StampStayRows_(rows=[],unit={}){
   if(adjustment&&stamped.length){
     const note=getLang()==='es'?adjustment.note_es:adjustment.note_en;
     if(note&&!String(stamped[0].notes||'').includes(note))stamped[0].notes=[note,stamped[0].notes].filter(Boolean).join(' · ');
+  }
+  if(unit.surface_unscheduled_recommendations&&stamped.length){
+    const alternatives=(Array.isArray(unit.experience_plan?.unscheduled_recommendations)?unit.experience_plan.unscheduled_recommendations:[])
+      .filter(item=>String(item?.identity||'').trim()).slice(0,3);
+    if(alternatives.length){
+      const es=_plannerOutputLang_()==='es';
+      const names=alternatives.map(item=>String(item.identity).trim()).join(', ');
+      const note=es
+        ? `Otras experiencias de alto valor que no se programaron por tiempo o equilibrio del viaje: ${names}. Considéralas como alternativas y compara tour organizado, transporte público, traslado o vehículo rentado según seguridad y viabilidad.`
+        : `Other high-value experiences not scheduled because of time or trip balance: ${names}. Consider them as alternatives and compare an organized tour, public transport, transfer or rental car according to safety and feasibility.`;
+      const last=stamped[stamped.length-1];
+      last.notes=[last.notes,note].filter(Boolean).join(' ');
+      last.commerce_context={...(last.commerce_context||{}),alternative_experiences:alternatives};
+    }
   }
   return _v81ProtectTicketedMealContinuity_(stamped);
 }
@@ -8187,8 +8228,9 @@ ${JSON.stringify(stayContract)}
 Plan ONLY the useful time supplied for this physical planning unit. Its type is ${unit.unit_type||'BASE_STAY'}, its overnight/base destination is ${unit.base_destination||unit.physical_destination}, and its physical tourism destination is ${unit.physical_destination||unit.base_destination}. This is one chronological fragment of a continuous trip.
 - Generate tourism/activity rows only. DO NOT generate fixed movements; ITBMO inserts every supplied transfer deterministically.
 - Every row must remain inside one supplied planning_window, at that window's physical location, and must use that window's original global day number.
-- If unit_type is DAY_TRIP, maximize a coherent, traveler-friendly visit inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it.
-- If unit_type is BASE_STAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
+- If unit_type is DAY_TRIP, DAY_TRIP_PARTIAL or AURORA_EXPERIENCE, maximize a coherent, traveler-friendly experience inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it. For AURORA_EXPERIENCE, explain that visibility is conditional on clouds, geomagnetic activity and local conditions and is never guaranteed; present organized tour, safe independent observation or transport alternatives according to the supplied context.
+- If unit_type is BASE_STAY, BASE_CHUNK or BASE_DAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
+- experience_plan is the trip-wide reservation map. Respect its base-day identities and anchors for the supplied global days, and do not consume experiences reserved for another physical unit.
 - First identify and protect the physical destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
 - When a planning window has no explicit start, choose a traveler-friendly start time appropriate to the destination (normally around 08:00–09:00). Do not invent extreme starts such as 05:30 unless a supplied fixed boundary, reservation, special condition or genuinely time-critical experience requires it.
 - Do not assume that Day 1 of the parent destination is Day 1 here. Preserve the supplied global day numbers exactly.
@@ -8824,10 +8866,7 @@ TRANSPORT (smart priority, no invention):
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
 AURORAS (if plausible):
-- Do NOT create a standalone aurora activity merely because the user asked for auroras.
-- Add an aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city.
-- Each note must use a realistic dark-hour window, explain that visibility is not guaranteed and depends on clouds/weather and geomagnetic activity, and mention a guided-tour option.
-- Only a genuinely confirmed fixed-time booking separately supplied by the user may be represented as a dedicated row.
+- Follow the authoritative Experience Plan. Use one primary conditional opportunity, preserve its backup nights as metadata and describe guided and independent transport options without guaranteeing visibility.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
@@ -9446,6 +9485,9 @@ async function runPaidGeneration({manualRetry=false}={}){
   try{
     // V72: never erase a terminal-success marker before we know the server has opened a genuinely new run.
     // A transient Route Resolver failure must not resurrect an already completed trip.
+    showWOW(true,getLang()==='es'?'✨ ITBMO está diseñando la estructura ideal de tu viaje…':'✨ ITBMO is designing the ideal structure for your trip…');
+    await _v86PrepareExperiencePlanBeforeRoutes_();
+    _assertGenerationRunActive_(runEpoch);
     showWOW(true,getLang()==='es'?'✨ ITBMO está resolviendo la logística de tu recorrido…':'✨ ITBMO is resolving your trip logistics…');
     await _resolveTripStoryRoutesBeforeGeneration_();
     _assertGenerationRunActive_(runEpoch);
@@ -10219,7 +10261,7 @@ Instrucción:
 - Si el usuario no indicó hora final, no existe una hora fija objetivo. Determina el final natural según destino, temporada, horarios reales, logística, comidas/descanso, ritmo y valor turístico. No cierres el día de forma claramente prematura si aún quedan experiencias valiosas y viables, pero tampoco agregues relleno ni sobrecargues el itinerario solo para extender el horario.
 - En el Día 1, la hora indicada significa que el viajero ya está en el alojamiento; completa el check-in o depósito de equipaje antes de cualquier visita y no inventes el traslado de llegada.
 - Si el día atraviesa el horario de almuerzo, integra una comida realista según costumbre local (como referencia, 12:00–15:00).
-- Cuando las auroras sean plausibles por ubicación, época y oscuridad, agrega una nota adicional sobre auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica incluso si el usuario pidió auroras explícitamente en Preferencias. No crees una fila independiente salvo una reserva real confirmada con hora fija y explícitamente solicitada.
+- Cuando el Plan de Experiencias haya definido auroras, usa una oportunidad principal condicionada y conserva las noches alternativas como respaldo. No garantices visibilidad y explica las opciones de transporte seguras.
 - Day trips: decide libremente si aportan valor; si los propones, hazlos completos, realistas, con comida en ruta cuando corresponda y regreso coherente con la hora final.
 - No limites trayectos por regla fija; usa sentido común y experiencia turística real.
 - Valida plausibilidad global y seguridad.
@@ -10573,7 +10615,7 @@ Instrucción del usuario: ${text}
 
 - Integra lo pedido sin borrar lo existente.
 - Si no se indica día concreto, reoptimiza TODA la ciudad.
-- Para auroras: si aplican por ubicación, época y oscuridad, agrega una nota adicional de oportunidad de auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica aunque el usuario las pida explícitamente en Preferencias. No crees una fila independiente por esa preferencia; solo una reserva real confirmada con hora fija, indicada separadamente por el usuario, puede representarse como fila.
+- Para auroras: sigue la oportunidad principal y las noches alternativas del Plan de Experiencias; no garantices visibilidad y mantén las advertencias y opciones seguras de transporte.
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 `.trim();
 
@@ -11266,6 +11308,21 @@ function _v69PdfDayTripMeta_(day={}){
   }
   return null;
 }
+function _v86PdfAuroraMeta_(day={}){
+  const story=_currentTravelModelV2_()?.trip_story;
+  if(!story?.stays?.length||!day?.date)return null;
+  const parsed=parseDMY(day.date);if(!parsed)return null;
+  const iso=`${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`;
+  for(const st of story.stays){
+    const plan=st?._itbmo_experience_plan_v86?.aurora;
+    if(!plan?.plausible||!st?.startDate)continue;
+    const localDay=_tripStoryDiffDays_(st.startDate,iso)+1;
+    if(localDay<1||localDay>Number(st.days||1))continue;
+    const backups=(Array.isArray(plan.backup_days)?plan.backup_days:[]).map(Number);
+    return {base:st.place,primary:Number(plan.primary_day)===localDay,backup:backups.includes(localDay),message:String(plan.message||'')};
+  }
+  return null;
+}
 function _v69PdfRoundTripHeader_(doc,meta,W,es){
   const left=34,right=W-34,mid=W/2,y=137;
   doc.setFillColor(246,250,255);doc.roundedRect(left,119,right-left,61,14,14,'F');
@@ -11347,6 +11404,12 @@ async function exportItineraryToPDF(options={}){
     font('bold',10);doc.setTextColor(8,35,65);doc.text(es?'Tu viaje. Tu estilo. Una ruta diseñada para ti.':'Your trip. Your style. A route designed for you.',34,69);
     font('bold',8.2);doc.setTextColor(128,69,31);
     doc.text(es?'CONFIRMA HORARIOS DE APERTURA Y VIABILIDAD ANTES DE RESERVAR.':'CONFIRM OPENING HOURS AND FEASIBILITY BEFORE BOOKING.',34,87,{maxWidth:W-68});
+    const aurora=_v86PdfAuroraMeta_(day);
+    if(aurora){
+      font('bold',6.7);doc.setTextColor(26,126,145);
+      const role=aurora.primary?(es?'OPORTUNIDAD PRINCIPAL':'PRIMARY OPPORTUNITY'):(aurora.backup?(es?'NOCHE ALTERNATIVA':'BACKUP NIGHT'):(es?'DESTINO CON POSIBILIDAD':'POSSIBLE AT THIS DESTINATION'));
+      doc.text(`${es?'AURORAS POSIBLES':'AURORA POSSIBLE'} · ${role} · ${es?'VISIBILIDAD NO GARANTIZADA':'VISIBILITY NOT GUARANTEED'}`,34,97,{maxWidth:W-160});
+    }
     doc.setFillColor(239,246,255);doc.roundedRect(W-114,18,80,46,10,10,'F');doc.setTextColor(8,35,65);
     font('bold',10);doc.text(`${es?'Día':'Day'} ${day.globalDay}`,W-74,37,{align:'center'});
     font('normal',7.5);doc.text(_itbmoPdfSafeText_(day.date),W-74,52,{align:'center'});
@@ -14080,6 +14143,180 @@ function _v71HasTripCompletionMarker_(tripId=currentTripId){
   if(!tripId)return false;
   try{return Boolean(JSON.parse(localStorage.getItem(_v71TripCompletionMarkerKey_(tripId))||'null')?.completed);}catch(_){return false;}
 }
+
+/* =========================================================
+   ITBMO V86 · EXPERIENCE PLAN
+   One compact strategic pass discovers and allocates destination-defining
+   excursions before Route Resolver. Deterministic browser code protects every
+   user request, calendar capacity and physical-unit identity. The detailed
+   itinerary generator remains unchanged.
+========================================================= */
+function _v86StableHash_(value=''){
+  let hash=2166136261;
+  for(const char of String(value)){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}
+  return (hash>>>0).toString(36);
+}
+function _v86DurationClass_(value=''){
+  const key=String(value||'').trim().toUpperCase();
+  return ['FULL_DAY','HALF_DAY_AM','HALF_DAY_PM','EVENING','AURORA_PRIMARY'].includes(key)?key:'FULL_DAY';
+}
+function _v86InferDayTripClass_(dt={}){
+  if(dt?._itbmo_duration_class||dt?.durationClass)return _v86DurationClass_(dt._itbmo_duration_class||dt.durationClass);
+  const departure=_hhmmToMinutes_(dt?.outbound?.departureTime),arrival=_hhmmToMinutes_(dt?.return?.arrivalTime);
+  if(departure==null||arrival==null)return 'FULL_DAY';
+  const span=(arrival>=departure?arrival:arrival+1440)-departure;
+  if(departure>=17*60&&span<=420)return 'EVENING';
+  if(span<=390&&arrival<=15*60)return 'HALF_DAY_AM';
+  if(span<=390&&departure>=11*60)return 'HALF_DAY_PM';
+  return 'FULL_DAY';
+}
+function _v86ExplicitTransportMode_(value=''){
+  const key=_canonicalText_(value);
+  if(/\b(car|auto|automovil|coche|rental|rentado|alquilado|drive)\b/.test(key))return 'car';
+  if(/\b(train|tren|rail)\b/.test(key))return 'train';
+  if(/\b(bus|coach|autobus)\b/.test(key))return 'bus';
+  if(/\b(ferry|ferri|barco)\b/.test(key))return 'ferry';
+  if(/\b(private transfer|traslado privado|transfer)\b/.test(key))return 'transfer';
+  return '';
+}
+function _v86AutoExperienceCap_(profile='',days=1,explicitCount=0){
+  const total=Math.max(1,Number(days)||1),kind=String(profile||'').toUpperCase();
+  const ratio=['REGIONAL_GATEWAY','NATURE_BASE'].includes(kind)?.68:(kind==='MIXED_BASE'?.48:(kind==='URBAN_CORE'?.28:.35));
+  return Math.max(0,Math.min(total-Math.max(0,Number(explicitCount)||0),Math.round(total*ratio)-Math.max(0,Number(explicitCount)||0)));
+}
+function _v86ExperiencePlanFingerprint_(story={}){
+  const explicit=(story.stays||[]).map(st=>({
+    id:st.id,place:st.place,startDate:st.startDate,days:st.days,
+    dayTrips:(st.dayTrips||[]).filter(dt=>dt?._itbmo_origin!=='AUTO_V86').map(dt=>({id:dt.id,day:dt.day,place:dt.place}))
+  }));
+  return _v86StableHash_(JSON.stringify({
+    explicit,
+    preferences:plannerState?.preferencesV2||null,
+    special:plannerState?.specialConditions||'',
+    travelers:plannerState?.travelerProfiles||plannerState?.travelers||null,
+    cityMeta:Object.fromEntries((story.stays||[]).map(st=>[st.place,cityMeta?.[st.place]?.transport||null]))
+  }));
+}
+async function _v86FetchExperiencePlan_(payload={}){
+  let lastError=null;
+  for(let attempt=1;attempt<=2;attempt++){
+    try{
+      const response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'experience_plan',experience_plan:payload})});
+      const data=await response.json().catch(()=>({}));
+      if(response.ok&&data?.ok&&Array.isArray(data?.stays)){
+        _captureExactUsage_(data);
+        return data;
+      }
+      const error=new Error(data?.code||`EXPERIENCE_PLAN_HTTP_${response.status||0}`);error.status=response.status;throw error;
+    }catch(error){
+      lastError=error;
+      if(attempt<2)await new Promise(resolve=>setTimeout(resolve,900));
+    }
+  }
+  throw lastError||new Error('EXPERIENCE_PLAN_FAILED');
+}
+async function _v86PrepareExperiencePlanBeforeRoutes_(){
+  const engine=_travelV2(),story=engine?.state?.tripStory;
+  if(!story?.stays?.length)return {ok:true,planned:0,reused:false};
+  (story.stays||[]).forEach(st=>(st.dayTrips||[]).forEach(dt=>{
+    if(!dt._itbmo_origin)dt._itbmo_origin='USER_EXPLICIT';
+    if(dt._itbmo_origin==='USER_EXPLICIT')dt._itbmo_mandatory=true;
+  }));
+  const fingerprint=_v86ExperiencePlanFingerprint_(story);
+  if(story._itbmo_experience_plan_v86?.fingerprint===fingerprint){
+    console.info('[ITBMO V86 EXPERIENCE PLAN] accepted plan reused',story._itbmo_experience_plan_v86);
+    return {ok:true,planned:Number(story._itbmo_experience_plan_v86.planned||0),reused:true};
+  }
+  const transitionDates=_v71MainTransitionDates_(story);
+  const firstCity=savedDestinations?.[0]?.city||story.stays[0]?.place||'';
+  const defaultTransport=cityMeta?.[firstCity]?.transport||'recommend me';
+  const payload={
+    version:'ITBMO_EXPERIENCE_PLAN_V86',
+    itinerary_language:String(plannerState?.itineraryLang||getLang()||'es'),
+    global_preferences:plannerState?.preferencesV2?.global||null,
+    special_conditions:String(plannerState?.preferencesV2?.global?.notes||plannerState?.specialConditions||'').trim()||null,
+    travelers:plannerState?.travelers||null,
+    traveler_profiles:plannerState?.travelerProfiles||null,
+    stays:(story.stays||[]).map(st=>({
+      stay_id:st.id,base:st.place,country:st.country||'',start_date:st.startDate,days:Number(st.days||1),
+      dates:Array.from({length:Number(st.days||1)},(_,index)=>({day:index+1,date:_tripStoryAddDays_(st.startDate,index),start:st.perDay?.[index]?.start||null,end:st.perDay?.[index]?.end||null,inter_stay_transition:transitionDates.has(_tripStoryAddDays_(st.startDate,index))})),
+      transport_preference:cityMeta?.[st.place]?.transport||defaultTransport,
+      user_day_trips:(st.dayTrips||[]).filter(dt=>dt?._itbmo_origin!=='AUTO_V86').map(dt=>({id:dt.id,day:Number(dt.day||1),identity:dt.place,mandatory:true,transport_mode:dt.outbound?.transportMode||null}))
+    }))
+  };
+  console.info('[ITBMO V86 EXPERIENCE PLAN] requesting strategic allocation',payload.stays.map(st=>({base:st.base,days:st.days,user_day_trips:st.user_day_trips.length})));
+  let response;
+  try{response=await _v86FetchExperiencePlan_(payload);}
+  catch(error){
+    // Existing explicit Trip Story excursions remain fully operational. A failed
+    // optional discovery pass must not consume a paid generation or erase them.
+    console.warn('[ITBMO V86 EXPERIENCE PLAN] discovery unavailable; preserving explicit route',error);
+    return {ok:false,planned:0,reused:false,error};
+  }
+  const byId=new Map((response.stays||[]).map(plan=>[String(plan?.stay_id||''),plan]));
+  let planned=0;
+  for(const st of (story.stays||[])){
+    const plan=byId.get(String(st.id||''));if(!plan)continue;
+    st.dayTrips=(st.dayTrips||[]).filter(dt=>dt?._itbmo_origin!=='AUTO_V86');
+    const explicit=st.dayTrips.slice(),occupied=new Set(explicit.map(dt=>Number(dt.day||1)));
+    const profile=String(plan.profile||'MIXED_BASE').toUpperCase();
+    const cap=_v86AutoExperienceCap_(profile,st.days,explicit.length);
+    const selected=(Array.isArray(plan.selected_experiences)?plan.selected_experiences:[])
+      .filter(item=>item&&!item.user_requested&&String(item.identity||'').trim())
+      .sort((a,b)=>Number(b.signature_level||0)-Number(a.signature_level||0)||Number(a.day||999)-Number(b.day||999));
+    let added=0;
+    for(const item of selected){
+      if(added>=cap)break;
+      const day=Math.max(1,Math.min(Number(st.days||1),Number(item.day||0)||1));
+      const date=_tripStoryAddDays_(st.startDate,day-1);
+      if(occupied.has(day)||transitionDates.has(date))continue;
+      const physicalDestination=String(item.physical_destination||item.identity||'').trim();
+      if([...explicit,...st.dayTrips].some(dt=>_arePoiAliases_(dt?.place,physicalDestination)||_arePoiAliases_(dt?._itbmo_experience_identity,item.identity)))continue;
+      const durationClass=_v86DurationClass_(item.duration_class);
+      const explicitMode=_v86ExplicitTransportMode_(cityMeta?.[st.place]?.transport||defaultTransport);
+      const dt=_tripStoryEnsureDayTrip_({
+        id:_tripStoryId_('auto_daytrip'),day,countryCode:st.countryCode||'',country:st.country||'',place:physicalDestination,
+        outbound:{transportMode:'',departureTime:'',arrivalTime:'',timeStatus:'estimated'},
+        return:{transportMode:'',departureTime:'',arrivalTime:'',timeStatus:'estimated'}
+      });
+      Object.assign(dt,{
+        _itbmo_origin:'AUTO_V86',_itbmo_mandatory:false,_itbmo_duration_class:durationClass,
+        _itbmo_experience_identity:String(item.identity||physicalDestination).trim(),
+        _itbmo_destination_profile:profile,_itbmo_signature_level:Number(item.signature_level||0),
+        _itbmo_recommended_modes:Array.isArray(item.recommended_modes)?item.recommended_modes.slice(0,4):[],
+        _itbmo_user_mode:'',_itbmo_available_mode:explicitMode||'',_itbmo_reason:String(item.reason||''),
+        _itbmo_weather_sensitive:Boolean(item.weather_sensitive),_itbmo_aurora_primary:durationClass==='AURORA_PRIMARY'
+      });
+      st.dayTrips.push(dt);occupied.add(day);added++;planned++;
+    }
+    const aurora=plan.aurora&&typeof plan.aurora==='object'?plan.aurora:{plausible:false,primary_day:null,backup_days:[],message:''};
+    const hasAurora=(st.dayTrips||[]).some(dt=>dt?._itbmo_aurora_primary||/\b(aurora|northern lights|luces del norte)\b/i.test(String(dt?.place||'')));
+    if(aurora.plausible&&!hasAurora){
+      const candidates=[Number(aurora.primary_day),...(Array.isArray(aurora.backup_days)?aurora.backup_days.map(Number):[]),...Array.from({length:Number(st.days||1)},(_,i)=>i+1)]
+        .filter((day,index,list)=>Number.isInteger(day)&&day>=1&&day<=Number(st.days||1)&&list.indexOf(day)===index);
+      const day=candidates.find(candidate=>!occupied.has(candidate)&&!transitionDates.has(_tripStoryAddDays_(st.startDate,candidate-1)));
+      if(day){
+        const es=String(payload.itinerary_language).toLowerCase().startsWith('es');
+        const dt=_tripStoryEnsureDayTrip_({id:_tripStoryId_('auto_aurora'),day,countryCode:st.countryCode||'',country:st.country||'',place:es?`Zona de observación de auroras desde ${st.place}`:`Aurora observation area from ${st.place}`,outbound:{timeStatus:'estimated'},return:{timeStatus:'estimated'}});
+        Object.assign(dt,{_itbmo_origin:'AUTO_V86',_itbmo_mandatory:false,_itbmo_duration_class:'AURORA_PRIMARY',_itbmo_destination_profile:profile,_itbmo_signature_level:5,_itbmo_recommended_modes:['organized_tour','private_transfer','rental_car'],_itbmo_user_mode:'',_itbmo_available_mode:_v86ExplicitTransportMode_(cityMeta?.[st.place]?.transport||defaultTransport),_itbmo_reason:String(aurora.message||''),_itbmo_weather_sensitive:true,_itbmo_aurora_primary:true});
+        st.dayTrips.push(dt);occupied.add(day);planned++;
+        aurora.primary_day=day;
+      }
+    }
+    st._itbmo_experience_plan_v86={
+      profile,profile_confidence:plan.profile_confidence||'medium',
+      base_days:Array.isArray(plan.base_days)?plan.base_days:[],
+      unscheduled_recommendations:Array.isArray(plan.unscheduled_recommendations)?plan.unscheduled_recommendations:[],
+      aurora
+    };
+  }
+  story._itbmo_experience_plan_v86={version:'V86',fingerprint,planned,created_at:new Date().toISOString()};
+  engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
+  applyTripStoryToCompatibility(story);renderTripStorySummary();
+  if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
+  console.info('[ITBMO V86 EXPERIENCE PLAN] deterministic allocation ready',{planned,stays:story.stays.map(st=>({base:st.place,profile:st._itbmo_experience_plan_v86?.profile,day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place,origin:dt._itbmo_origin,duration:dt._itbmo_duration_class}))}))});
+  return {ok:true,planned,reused:false};
+}
 function _v71DayTripHasTravelerClockAuthority_(dt={}){
   return Boolean(dt?._itbmo_user_clock_authority || (
     dt?.outbound?.departureTime && dt?.outbound?.arrivalTime &&
@@ -14203,7 +14440,27 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
     if(!dt.place)continue;
     const date=_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1));
     const needs=![dt.outbound?.departureTime,dt.outbound?.arrivalTime,dt.return?.departureTime,dt.return?.arrivalTime].every(Boolean)||!dt.outbound?.transportMode||!dt.return?.transportMode;
-    if(needs)movements.push({movement_id:`daytrip:${dt.id}`,kind:'daytrip',origin:st.place,destination:dt.place,departure_date:date,earliest_departure:dt.outbound?.departureTime||'08:00',must_return_same_day:true,user_return_by:dt.return?.arrivalTime||null,user_mode:dt.outbound?.transportMode||null});
+    if(needs){
+      const durationClass=_v86InferDayTripClass_(dt);
+      const slotDefaults={FULL_DAY:{start:'08:00',returnBy:'20:00'},HALF_DAY_AM:{start:'08:30',returnBy:'14:00'},HALF_DAY_PM:{start:'13:00',returnBy:'19:30'},EVENING:{start:'18:30',returnBy:'23:30'},AURORA_PRIMARY:{start:'19:00',returnBy:'23:45'}};
+      const defaults=slotDefaults[durationClass]||slotDefaults.FULL_DAY;
+      movements.push({
+        movement_id:`daytrip:${dt.id}`,kind:'daytrip',origin:st.place,destination:dt.place,departure_date:date,
+        earliest_departure:dt.outbound?.departureTime||defaults.start,must_return_same_day:true,
+        user_return_by:dt.return?.arrivalTime||defaults.returnBy,
+        user_mode:dt.outbound?.transportMode||dt._itbmo_user_mode||null,
+        duration_class:durationClass,
+        recommended_modes:[...(Array.isArray(dt._itbmo_recommended_modes)?dt._itbmo_recommended_modes:[]),dt._itbmo_available_mode].filter(Boolean),
+        weather_sensitive:Boolean(dt._itbmo_weather_sensitive),
+        planning_instruction:durationClass==='FULL_DAY'
+          ? 'Use the broad daytime window and preserve a realistic same-day return.'
+          : (durationClass==='HALF_DAY_AM'
+            ? 'Morning half-day unit: return by user_return_by and preserve the afternoon at the base.'
+            : (durationClass==='HALF_DAY_PM'
+              ? 'Afternoon half-day unit: preserve the morning at the base and return by user_return_by.'
+              : 'Evening unit: preserve daytime tourism, use safe night transport and return the same calendar day.'))
+      });
+    }
   }
   if(!movements.length)return {ok:true,resolved:0};
   console.info('[ITBMO ROUTE RESOLVER] resolving',movements);
