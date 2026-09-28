@@ -3034,6 +3034,9 @@ async function confirmPreferencesAndContinue(){
 
 async function startV2PaidGeneration(){
   if(!currentTripId || preferencesConfirmedTripId!==currentTripId) return;
+  document.querySelector('#guided-personalization-overlay')?.remove();
+  document.body.classList.remove('guided-preferences-open');
+  document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
   _travelV2()?.setLocked?.(true);
   const prefHost=qs('#preferences-v2-host');
   if(prefHost){
@@ -8213,6 +8216,13 @@ function _v76OfflineFeasibilityFindings_(rows=[],unit={}){
       rule={open:10*60,close:17*60,source:'https://ejercito.defensa.gob.es/museo/'};
     }else if(indoors && /coliseo|colosseum/i.test(`${activity} ${place}`) && (month>=11||month<=2)){
       rule={open:8*60+30,lastEntry:15*60+30,close:16*60+30,source:'https://colosseo.it/en/opening-times/'};
+    }else if(indoors && /foro romano|roman forum|monte palatino|palatine hill/i.test(`${activity} ${place}`) && (month>=11||month<=2)){
+      // The same winter closing constraint applies to the adjacent ticketed
+      // archaeological area. Checking only the Colosseum left the second half
+      // of a combined visit outside its actual opening window.
+      rule={open:9*60,lastEntry:15*60+30,close:16*60+30,source:'https://colosseo.it/en/opening-times-and-tickets/'};
+    }else if(indoors && /pompeya|pompeii/i.test(`${activity} ${place}`) && (month>=11||month<=2)){
+      rule={open:9*60,lastEntry:15*60+30,close:17*60,source:'https://pompeiisites.org/en/visiting-info/timetables-and-tickets/'};
     }
     if(rule && (start<rule.open||end>rule.close||start>Number(rule.lastEntry??Infinity))){
       issues.push({code:'KNOWN_VENUE_HOURS',day:Number(row.day),start:row.start,end:row.end,activity,venue:place,
@@ -9295,6 +9305,9 @@ function _hydrateGenerationTrip_(trip){
 }
 
 function _showGenerationRetry_(reason=''){
+  // Recovery is the only visible action after a failed paid generation.
+  document.querySelector('#guided-personalization-overlay')?.remove();
+  document.body.classList.remove('guided-preferences-open');
   const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|V3_INCOMPLETE_AFTER_STAY_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW|POST_STORAGE/i.test(String(reason||''));
   // V68 · nominal row completeness is NOT publication success. During an
   // integrity failure, accepted Stay checkpoints can make every city look
@@ -9412,6 +9425,9 @@ async function _prewarmGeneratedTripContext_(){
 }
 
 function _applyGeneratedUIState({showModal=false}={}){
+  document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
+  document.querySelector('#guided-personalization-overlay')?.remove();
+  document.body.classList.remove('guided-preferences-open');
   if(!showModal) showWOW(false);
   setExportToolbarVisibility(true);
   setPlanningChatLocked(true);
@@ -9470,6 +9486,9 @@ async function _runGenerationPool_(items,worker,limit=ITBMO_GENERATION_CONCURREN
 
 async function runPaidGeneration({manualRetry=false}={}){
   if(generationResetInProgress || paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
+  document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
+  document.querySelector('#guided-personalization-overlay')?.remove();
+  document.body.classList.remove('guided-preferences-open');
   const runEpoch=++generationRunEpoch;
   paidGenerationRunning=true;
   let completionPublished=false;
@@ -9872,6 +9891,7 @@ function bindJourneyHome(){
 
 async function restorePaidGenerationIfNeeded(){
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
+  const restoreEpoch=generationRunEpoch;
   try{
     const token=getStoredSessionToken();
     const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
@@ -9894,7 +9914,7 @@ async function restorePaidGenerationIfNeeded(){
       const data=await tripApi({action:'recoverable',session_token:token});
       trip=data?.trip || null;
     }
-    if(generationResetInProgress) return;
+    if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
     if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
 
     const plannerMode=new URLSearchParams(window.location.search).get('mode');
@@ -9916,6 +9936,7 @@ async function restorePaidGenerationIfNeeded(){
       paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
       applyInfoChatStatus(paymentStatus);
     }catch(_){ }
+    if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch || currentTripId!==trip.id) return;
 
     if(!paymentStatus?.paid && !paymentStatus?.admin_bypass && !paymentStatus?.info_chat_authorized){
       paymentGateSatisfiedTripId=null;
@@ -11378,6 +11399,8 @@ async function exportItineraryToPDF(options={}){
     if(logo){try{doc.addImage(logo,'JPEG',34,17,99,30,undefined,'FAST');}catch(_){font('bold',16);doc.text('ITBMO',34,40);}}
     else{font('bold',16);doc.text('ITBMO',34,40);}
     font('bold',10);doc.setTextColor(8,35,65);doc.text(es?'Tu viaje. Tu estilo. Una ruta diseñada para ti.':'Your trip. Your style. A route designed for you.',34,69);
+    font('bold',8.2);doc.setTextColor(128,69,31);
+    doc.text(es?'CONFIRMA HORARIOS DE APERTURA Y VIABILIDAD ANTES DE RESERVAR.':'CONFIRM OPENING HOURS AND FEASIBILITY BEFORE BOOKING.',34,87,{maxWidth:W-68});
     doc.setFillColor(239,246,255);doc.roundedRect(W-114,18,80,46,10,10,'F');doc.setTextColor(8,35,65);
     font('bold',10);doc.text(`${es?'Día':'Day'} ${day.globalDay}`,W-74,37,{align:'center'});
     font('normal',7.5);doc.text(_itbmoPdfSafeText_(day.date),W-74,52,{align:'center'});
@@ -11410,7 +11433,7 @@ async function exportItineraryToPDF(options={}){
     const dayTrip=_v69PdfDayTripMeta_(day),route=_v67PdfDayTripLabel_(day,day.destinations.join('  →  '));
     let start=dayTrip?178:150,available=footer-start;
     let choice=null;
-    for(const size of [8.1,7.8,7.5,7.2,6.9,6.6]){const candidate=layout(rows,size);if(candidate.max<=available){choice=candidate;break;}}
+    for(const size of [9.0,8.7,8.4,8.1]){const candidate=layout(rows,size);if(candidate.max<=available){choice=candidate;break;}}
     header(day,dayTrip,route);
     if(choice){
       let y=start;choice.cards.slice(0,choice.split).forEach(c=>{paint(c,left,y);y+=c.height+4;});
@@ -11418,7 +11441,7 @@ async function exportItineraryToPDF(options={}){
     }else{
       // Never clip or silently discard text. Extremely verbose days receive a
       // continuation page; ordinary days remain one calendar day per page.
-      const cards=layout(rows,6.6).cards;let column=0,y=start;
+      const cards=layout(rows,8.1).cards;let column=0,y=start;
       for(const card of cards){
         if(y+card.height>footer){column++;y=start;}
         if(column>=2){doc.addPage('a4','portrait');header(day,null,route,true);column=0;y=165;}
