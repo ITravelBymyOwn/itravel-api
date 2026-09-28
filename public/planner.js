@@ -2354,7 +2354,7 @@ function updateAddCityButtonState(){
   $addCity.disabled=atLimit;
   $addCity.setAttribute('aria-disabled',atLimit?'true':'false');
   $addCity.title=atLimit
-    ? (getLang()==='es' ? 'Máximo 3 destinos por generación.' : 'Maximum 3 destinations per generation.')
+    ? (getLang()==='es' ? 'Agrega más estancias desde el recorrido guiado.' : 'Add more stays from the guided journey.')
     : '';
 }
 
@@ -2592,8 +2592,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     updateAddCityButtonState();
     if(pref?.city){
       alert(getLang()==='es'
-        ? 'Puedes incluir un máximo de 3 destinos por generación.'
-        : 'You can include a maximum of 3 destinations per generation.');
+        ? 'Agrega más estancias desde el recorrido guiado.'
+        : 'Add more stays from the guided journey.');
     }
     return;
   }
@@ -3274,8 +3274,8 @@ async function saveDestinations({showReadyModal=true,fromTripStory=false}={}){
   const rows = qsa('.city-row', $cityList);
   if(rows.length>MAX_ITINERARY_CITIES){
     alert(getLang()==='es'
-      ? 'Puedes incluir un máximo de 3 destinos por generación.'
-      : 'You can include a maximum of 3 destinations per generation.');
+      ? 'Agrega más estancias desde el recorrido guiado.'
+      : 'Add more stays from the guided journey.');
     updateAddCityButtonState();
     return;
   }
@@ -10477,8 +10477,8 @@ ${structuredHotelTransport.transport==='recomiéndame' ? '' : structuredHotelTra
     if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
       chatMsg(
         getLang()==='es'
-          ? 'Puedes incluir un máximo de <strong>3 ciudades</strong> por generación.'
-          : 'You can include a maximum of <strong>3 cities</strong> per generation.',
+          ? 'Agrega más estancias desde el <strong>recorrido guiado</strong>.'
+          : 'Add more stays from the <strong>guided journey</strong>.',
         'ai'
       );
       updateAddCityButtonState();
@@ -11475,10 +11475,10 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
       payment:'Pago', trip:'Viaje',
       date:'Fecha', provider:'Proveedor', amount:'Importe',
       destinations:'Destino(s)', service:'Servicio',
-      serviceValue:'1 generación de itinerario ITBMO · hasta 3 ciudades',
+      serviceValue:'1 generación de itinerario ITBMO · hasta 30 días efectivos',
       transaction:'REFERENCIA DE TRANSACCIÓN',
       about:'Sobre este comprobante',
-      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 3 ciudades. Se entrega para control y referencia del usuario.',
+      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 30 días efectivos. Se entrega para control y referencia del usuario.',
       testNote:'Este documento fue generado mediante el bypass administrativo de pruebas. No se procesó ningún pago y este documento no representa una transacción real.',
       important:'IMPORTANTE',
       legal:'Este documento es un comprobante de pago y no constituye factura ni comprobante fiscal. Para soporte: support@itravelbymyown.com',
@@ -11493,10 +11493,10 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
       payment:'Payment', trip:'Trip',
       date:'Date', provider:'Provider', amount:'Amount',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 ITBMO itinerary generation · up to 3 cities',
+      serviceValue:'1 ITBMO itinerary generation · up to 30 effective trip days',
       transaction:'TRANSACTION REFERENCE',
       about:'About this receipt',
-      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 3 cities. It is provided for the user’s records and reference.',
+      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 30 effective trip days. It is provided for the user’s records and reference.',
       testNote:'This document was generated through the administrative test bypass. No payment was processed and this document does not represent a real transaction.',
       important:'IMPORTANT',
       legal:'This document is a payment receipt and is not a tax invoice or fiscal document. For support: support@itravelbymyown.com',
@@ -11511,10 +11511,10 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
       payment:'Pagamento', trip:'Viagem',
       date:'Data', provider:'Provedor', amount:'Valor',
       destinations:'Destino(s)', service:'Serviço',
-      serviceValue:'1 geração de itinerário ITBMO · até 3 cidades',
+      serviceValue:'1 geração de itinerário ITBMO · até 30 dias efetivos de viagem',
       transaction:'REFERÊNCIA DA TRANSAÇÃO',
       about:'Sobre este comprovante',
-      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 3 cidades. É fornecido para controle e referência do usuário.',
+      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 30 dias efetivos de viagem. É fornecido para controle e referência do usuário.',
       testNote:'Este documento foi gerado pelo bypass administrativo de testes. Nenhum pagamento foi processado e este documento não representa uma transação real.',
       important:'IMPORTANTE',
       legal:'Este documento é um comprovante de pagamento e não constitui nota fiscal ou documento fiscal. Suporte: support@itravelbymyown.com',
@@ -11529,10 +11529,10 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
       payment:'Paiement', trip:'Voyage',
       date:'Date', provider:'Prestataire', amount:'Montant',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 3 villes',
+      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 30 jours effectifs de voyage',
       transaction:'RÉFÉRENCE DE TRANSACTION',
       about:'À propos de ce reçu',
-      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 3 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
+      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 30 jours effectifs de voyage. Il est fourni pour les dossiers et la référence de l’utilisateur.',
       testNote:'Ce document a été généré via le mode de test administratif. Aucun paiement n’a été traité et ce document ne représente pas une transaction réelle.',
       important:'IMPORTANT',
       legal:'Ce document est un reçu de paiement et ne constitue pas une facture fiscale ni un document fiscal. Support : support@itravelbymyown.com',
@@ -11547,10 +11547,10 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
       payment:'Zahlung', trip:'Reise',
       date:'Datum', provider:'Anbieter', amount:'Betrag',
       destinations:'Reiseziel(e)', service:'Leistung',
-      serviceValue:'1 ITBMO-Reiseplangenerierung · bis zu 3 Städte',
+      serviceValue:'1 ITBMO-Reiseplangenerierung · bis zu 30 effektive Reisetage',
       transaction:'TRANSAKTIONSREFERENZ',
       about:'Über diesen Beleg',
-      realNote:'Dieser Beleg bestätigt die von ITBMO registrierte Zahlung für eine Reiseplangenerierung mit bis zu 3 Städten. Er dient den Unterlagen und der Referenz des Nutzers.',
+      realNote:'Dieser Beleg bestätigt die von ITBMO registrierte Zahlung für eine Reiseplangenerierung mit bis zu 30 effektiven Reisetagen. Er dient den Unterlagen und der Referenz des Nutzers.',
       testNote:'Dieses Dokument wurde über den administrativen Test-Bypass erstellt. Es wurde keine Zahlung verarbeitet und dieses Dokument stellt keine echte Transaktion dar.',
       important:'WICHTIG',
       legal:'Dieses Dokument ist ein Zahlungsbeleg und keine Steuerrechnung oder steuerliche Bescheinigung. Support: support@itravelbymyown.com',
@@ -11565,10 +11565,10 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
       payment:'Pagamento', trip:'Viaggio',
       date:'Data', provider:'Provider', amount:'Importo',
       destinations:'Destinazione/i', service:'Servizio',
-      serviceValue:'1 generazione itinerario ITBMO · fino a 3 città',
+      serviceValue:'1 generazione itinerario ITBMO · fino a 30 giorni effettivi di viaggio',
       transaction:'RIFERIMENTO TRANSAZIONE',
       about:'Informazioni sulla ricevuta',
-      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 3 città. È fornita per controllo e riferimento dell’utente.',
+      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 30 giorni effettivi di viaggio. È fornita per controllo e riferimento dell’utente.',
       testNote:'Questo documento è stato generato tramite il bypass amministrativo di test. Nessun pagamento è stato elaborato e questo documento non rappresenta una transazione reale.',
       important:'IMPORTANTE',
       legal:'Questo documento è una ricevuta di pagamento e non costituisce fattura fiscale o documento fiscale. Supporto: support@itravelbymyown.com',
@@ -13677,7 +13677,7 @@ function applyTravelBuilderWorkspaceCopy(){
     'planner-account-guide-title':'Tu acceso a ITBMO',
     'planner-account-guide-copy':'Inicia sesión, crea una cuenta o continúa como invitado. Con una cuenta podrás volver a tus viajes desde otros dispositivos.',
     'planner-route-eyebrow':'CONSTRUYE TU RUTA',
-    'planner-route-guide':'Agrega hasta 3 destinos principales. No importa el orden en que los ingreses: ITBMO organizará la ruta según las fechas. Dentro de cada destino puedes añadir traslados, paradas o estancias si ya los tienes definidos.',
+    'planner-route-guide':'Organiza las estancias y excursiones de tu recorrido guiado. ITBMO ordenará la ruta según las fechas; el máximo es de 30 días efectivos por viaje.',
     'planner-route-tip-copy':'Empieza simple y añade detalle solo cuando lo necesites. Si no agregas traslados o paradas, ITBMO seguirá recomendando excursiones de un día como lo hace hoy. Si ya tienes movimientos definidos, agrégalos para que respetemos esas horas y lugares.',
     'planner-travelers-eyebrow':'QUIÉN VIAJA',
     'planner-travelers-guide':'Indica si viajas solo o acompañado. Las edades del grupo ayudan a ajustar ritmos, actividades y desplazamientos.',
