@@ -3834,27 +3834,19 @@ function _workspaceSnapshotViews_(){
     const view=ensure(place,placeCountry(place,sourceUnit));
     if(!view||!date)return;
     if(!view.dates.has(date))view.dates.set(date,[]);
-    view.dates.get(date).push({...row,workspace_source_unit:sourceUnit});
+    view.dates.get(date).push({...row,workspace_source_unit:sourceUnit,
+      workspace_pdf_transport:_v40VisibleTransportForRow_(row),
+      workspace_pdf_duration:_v39VisibleDuration_(row)});
     view.source_units.add(sourceUnit);
   };
-  (savedDestinations||[]).forEach(dest=>{
-    const sourceUnit=dest?.city||'';
-    const route=_routeV2ContextForCity_(sourceUnit)||{};
-    const contexts=new Map((route.day_contexts||[]).map(ctx=>[Number(ctx.day),ctx]));
-    const byDay=itineraries?.[sourceUnit]?.byDay||{};
-    Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNum=>{
-      const date=getDayDateLabel(sourceUnit,dayNum);
-      const ctx=contexts.get(dayNum)||{};
-      const transfers=(ctx.fixed_transfers||[]).filter(t=>t?.origin&&t?.destination).slice().sort((a,b)=>String(a.departure||'99:99').localeCompare(String(b.departure||'99:99')));
-      const finalDay=dayNum===Number(dest?.days||0);
-      const terminal=transfers.find(t=>Boolean(t.terminal_arrival) || (finalDay && !_arePoiAliases_(t.destination,sourceUnit) && !transfers.some(later=>later!==t&&_arePoiAliases_(later.origin,t.destination)&&_arePoiAliases_(later.destination,sourceUnit))));
-      const terminalArrival=_hhmmToMinutes_(terminal?.arrival);
-      (Array.isArray(byDay[dayNum])?byDay[dayNum]:[]).forEach(row=>{
-        const rs=_hhmmToMinutes_(row?.start),re=_hhmmToMinutes_(row?.end);
-        if(terminalArrival!=null && rs!=null && rs>=terminalArrival) return;
-        const resolved=_authoritativePhysicalLocationForRow_(row,ctx,sourceUnit);
-        addRow(resolved.place,date,{...row,physical_location:resolved.place,commerce_context:{...(row?.commerce_context||{}),physical_destination:resolved.place}},sourceUnit);
-      });
+  // The PDF's chronological rows are authoritative for the Workspace too.
+  // A generation unit may span several physical stays: applying a terminal
+  // cutoff relative to its first city discarded last-day excursions.
+  _chronologicalExportDays_().forEach(day=>{
+    (day.rows||[]).forEach(row=>{
+      const resolved=_authoritativePhysicalLocationForRow_(row,day.context||{},day.stayBase||day.sourceUnit);
+      addRow(resolved.place,day.date,{...row,physical_location:resolved.place,
+        commerce_context:{...(row?.commerce_context||{}),physical_destination:resolved.place}},day.sourceUnit);
     });
   });
   const destinations=[];
