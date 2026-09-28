@@ -13,10 +13,10 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
 // V2.10.9: use a stronger mini-tier model for first-pass itinerary construction,
 // while keeping bounded repair work on the fast/cost-efficient Luna tier.
-const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-terra";
+const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-luna";
 const REPAIR_MODEL = process.env.OPENAI_REPAIR_MODEL || "gpt-5.6-luna";
 
 /* =========================================================
@@ -2408,7 +2408,7 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
-    const plannerUsage = (mode === "planner" || mode === "planner_v3") ? _newUsageCollector_() : null;
+    const plannerUsage = (mode === "planner" || mode === "planner_v3" || mode === "experience_plan") ? _newUsageCollector_() : null;
 
     /* ROUTE RESOLVER · planning-grade multimodal logistics.
        It estimates a physically plausible chain when the traveler has not
@@ -2419,6 +2419,7 @@ export default async function handler(req, res) {
       const resolverLang = String(body.lang || lang || "en").toLowerCase().startsWith("es") ? "es" : "en";
       const resolverPrompt = `You are ITBMO Route Resolver. Resolve each movement into a practical planning-grade multimodal route.\n\nAUTHORITATIVE INPUT:\n${JSON.stringify(movements)}\n\nRULES:\n- Preserve movement_id, origin, destination, departure_date and earliest_departure.\n- earliest_departure means the traveler is available to START the door-to-door movement at that time, not a booked train/flight time.\n- If user_mode is supplied, preserve it as the principal long-distance mode, but still resolve access/connection legs needed to make the route physically coherent.\n- If user_mode is NOT supplied, ITBMO is deciding the transport: optimize for the most direct practical origin-to-destination journey. Prefer a direct bookable intercity service over an indirect chain whenever a credible direct option exists. Compare train, flight, coach/bus and ferry as relevant; do not route through an intermediate city merely because that mode is possible. Minimize unnecessary changes and avoid consuming most of a travel day when a materially faster direct mode is ordinarily available. Local access legs to/from the selected terminal are allowed and do not make the commercial journey indirect.\n- For long main-destination movements, choose the principal mode from the optimized direct journey first; alternatives may mention slower/cheaper modes, but they must not replace the direct recommended route unless the user fixed that mode.\n- If user arrival date/time is supplied, preserve it. Otherwise estimate arrival date/time conservatively from a realistic door-to-door chain.\n- For places without a suitable airport/rail node, route through a sensible nearby hub. Multimodal routes are encouraged when appropriate.\n- Write every traveler-facing field (summary, leg note, alternative summary) in ${resolverLang === "es" ? "Spanish" : "English"}.\n- For daytrip movements, ALWAYS produce both an outbound chain AND a return chain on the same date. A daytrip route is invalid without at least one leg direction="outbound" and at least one leg direction="return". Preserve user_return_by when supplied. Also return return_departure_time and return_arrival_time at route level.\n- For multimodal main movements, split the door-to-door route into real physical legs rather than hiding the chain in one prose summary.\n- Mark each leg commerce_eligible=true only when it is a meaningful bookable intercity passenger segment (train, coach/bus, flight or ferry between distinct cities/hubs). Local taxi, metro, walking, hotel access and airport/station access legs must be false. This flag identifies segment granularity only; it does NOT claim provider availability.
 - For every commerce_eligible leg also return commercial_origin and commercial_destination as canonical CITY/MARKET names, never stations or airports. Also return commercial_origin_es/commercial_destination_es using normal Spanish market names and commercial_origin_en/commercial_destination_en using normal English market names. These are marketplace routing labels, not prose. Example: Paris → Brussels has ES Paris → Bruselas and EN Paris → Brussels. For non-commerce legs return these fields as empty strings.\n- Use robust geographic/transport knowledge only. Do NOT claim live schedules, exact current fares, availability, operators or flight numbers. Mark the result as a planning estimate that should be verified before booking.\n- Include up to 2 useful alternatives only when materially different.\n- Times should include realistic interchange/check-in/security/access buffers.\n- Return JSON only, schema: {"routes":[{"movement_id":"...","primary_mode":"train|plane|bus|car|ferry|transfer|other","departure_date":"YYYY-MM-DD","departure_time":"HH:MM","arrival_date":"YYYY-MM-DD","arrival_time":"HH:MM","return_departure_time":"HH:MM|null","return_arrival_time":"HH:MM|null","summary":"concise traveler-facing route","confidence":"planning_estimate","legs":[{"direction":"outbound|return|main","origin":"...","destination":"...","mode":"...","departure_time":"HH:MM","arrival_time":"HH:MM","estimated_minutes":0,"commerce_eligible":true,"commercial_origin":"city/market","commercial_destination":"city/market","commercial_origin_es":"mercado/ciudad ES","commercial_destination_es":"mercado/ciudad ES","commercial_origin_en":"city/market EN","commercial_destination_en":"city/market EN","note":"..."}],"alternatives":[{"summary":"...","estimated_minutes":0}]}]}`;
+      const resolverPromptV86=`${resolverPrompt}\n- Respect duration_class and planning_instruction on daytrip movements. FULL_DAY reserves the useful day; HALF_DAY_AM, HALF_DAY_PM and EVENING reserve only that window and must preserve the supplied return limit; AURORA_PRIMARY is an evening/night opportunity whose visibility is conditional.\n- recommended_modes are alternatives, not purchases or obligations. Do not treat rental_car availability as a fixed user mode unless user_mode is explicitly supplied for that movement.\n- For weather-sensitive experiences, choose a conservative, reversible routing plan and keep the returned timing compatible with the reserved window.`;
       // A large all-routes JSON can exceed the output budget and then every
       // client retry repeats the same oversized request. Bound each model reply
       // to three movements, retaining the exact resolver prompt and schema.
@@ -2428,7 +2429,7 @@ export default async function handler(req, res) {
       for(let offset=0;offset<batches.length;offset+=2){
         const results=await Promise.all(batches.slice(offset,offset+2).map(async batch=>{
           const ids=new Set(batch.map(item=>String(item?.movement_id||'')));
-          const input=resolverPrompt.replace(JSON.stringify(movements),JSON.stringify(batch));
+          const input=resolverPromptV86.replace(JSON.stringify(movements),JSON.stringify(batch));
           for(let attempt=0;attempt<2;attempt++){
             const raw=await callStructured([{role:"user",content:input}],0.1,5000,120000,null,PLANNER_MODEL,"low");
             let parsed=null;
@@ -2445,6 +2446,60 @@ export default async function handler(req, res) {
         results.forEach(routes=>resolved.push(...routes));
       }
       return res.status(200).json({ok:true,routes:resolved});
+    }
+
+    /* EXPERIENCE PLAN V86 · one lightweight strategic pass before Route Resolver.
+       It discovers destination-defining regional experiences and returns a compact
+       allocation proposal. Browser-side deterministic code remains authoritative
+       for dates, user requests, capacity, conflicts and physical units. */
+    if (mode === "experience_plan") {
+      const input = body?.experience_plan && typeof body.experience_plan === "object"
+        ? body.experience_plan : null;
+      const stays = Array.isArray(input?.stays) ? input.stays.slice(0, 30) : [];
+      if (!stays.length) return res.status(200).json({ok:true,version:"V86",stays:[]});
+      const outputLanguage = String(input?.itinerary_language || lang || "en").toLowerCase().startsWith("es") ? "Spanish" : "English";
+      const prompt = `
+You are ITBMO's strategic experience architect. Produce a compact tourism allocation plan, not an itinerary and not prose.
+
+AUTHORITATIVE INPUT:
+${JSON.stringify(input)}
+
+PURPOSE:
+- Detect whether each overnight destination is primarily an urban core, a regional gateway, a mixed city/region base, a nature base or a rest-oriented stay.
+- Protect every user-declared excursion as mandatory. Never delete, rename, move or replace it.
+- Discover destination-defining full-day, half-day and evening experiences that a traveler may not know to request.
+- In regional gateways and nature bases, signature excursions may outrank secondary city filler. Do not assume the city center must receive most days.
+- Recommend an experience independently of how it is purchased. For each experience list viable modes among rental_car, public_transport, organized_tour and private_transfer. Do not require purchase of a tour.
+
+RULES:
+- Use no hard-coded destination list supplied by the client; reason globally from travel knowledge.
+- Respect dates, season, useful daylight, trip length, travelers, preferences, restrictions and supplied transport.
+- One daytime excursion maximum per calendar day. An evening experience may share a day only when fatigue and return logistics remain reasonable.
+- FULL_DAY experiences consume the useful daytime window. HALF_DAY_AM, HALF_DAY_PM and EVENING preserve the other usable fragments.
+- Assign mandatory user experiences first, then the highest-value signature experiences, then strong base-city days.
+- Never place an automatic full-day excursion on an inter-stay transfer date, arrival fragment or final departure fragment.
+- If auroras are plausible by latitude, season and darkness, include one AURORA_PRIMARY evening experience and 1-3 backup day numbers. Visibility is never guaranteed. Prefer an organized tour when winter night driving may be unsuitable; keep safe independent observation as an option when appropriate.
+- Do not claim live schedules, road conditions, weather, availability, operators or guaranteed wildlife/auroras.
+- Keep labels and reasons in ${outputLanguage}. Keep JSON keys/enums exactly as specified.
+
+RETURN JSON ONLY:
+{"version":"V86","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","profile_confidence":"high|medium|low","base_days":[{"day":1,"identity":"short unique day identity","anchors":["place"]}],"selected_experiences":[{"identity":"canonical experience/route name","physical_destination":"real destination, region or route identity usable for planning","day":1,"duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","signature_level":1,"mandatory":false,"user_requested":false,"weather_sensitive":false,"recommended_modes":["organized_tour"],"reason":"short allocation reason"}],"unscheduled_recommendations":[{"identity":"canonical experience name","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING","recommended_modes":["organized_tour"],"reason":"why it remains worthwhile"}],"aurora":{"plausible":false,"primary_day":null,"backup_days":[],"message":""}}]}
+`.trim();
+      const raw = await callStructured(
+        [{role:"system",content:prompt}],
+        0.12,
+        5000,
+        120000,
+        plannerUsage,
+        PLANNER_MODEL,
+        "low"
+      );
+      let parsed = null;
+      try { parsed = JSON.parse(String(raw || "").replace(/^```json\s*/i,"").replace(/```$/i,"").trim()); } catch {}
+      if (!parsed || !Array.isArray(parsed.stays)) {
+        return res.status(502).json({ok:false,code:"EXPERIENCE_PLAN_INVALID_RESPONSE"});
+      }
+      return res.status(200).json({...parsed,ok:true,usage:_usagePayload_(plannerUsage)});
     }
 
     /* CITY NORMALIZATION · isolated pre-save validation.
@@ -2650,8 +2705,8 @@ ${languageLine}
 The client supplies a deterministic GENERATION CONTRACT. Treat dates, location windows, fixed movements, overnight bases, user-fixed times, preferences and restrictions in that contract as hard facts. Do not reinterpret them and never invent transport bookings, airports, flight/train details, reservation status or live conditions.
 
 IDENTITY MODEL (GLOBAL, DATA-DRIVEN):
-- The preferred contract is ITBMO_PHYSICAL_STAY_CONTRACT_V1. It represents one Trip Story STAY CARD inside a larger continuous trip.
-- The stay card is the generation unit. Its base_destination/physical_destination is the overnight anchor; an explicitly supplied Day Trip remains inside that same stay and MUST NOT become another generation unit.
+- The preferred contract is ITBMO_PHYSICAL_STAY_CONTRACT_V2. It represents one bounded physical planning unit inside a larger continuous trip.
+- A unit may be a BASE_CHUNK, BASE_DAY, DAY_TRIP, DAY_TRIP_PARTIAL or AURORA_EXPERIENCE. Treat it as independently recoverable. Its base_destination remains the overnight anchor while physical_destination identifies where tourism occurs.
 - allowed_physical_locations and planning_windows are authoritative. Each row must occur at the physical location of its matching planning_window. Preserve original global day numbers exactly.
 - boundary_context is awareness only: inbound/outbound intercity movements are deterministic route facts and MUST NOT be generated, shifted, embellished or replaced by this call.
 - Returning later to the same city is a different stay_unit_id; do not assume it is contiguous with an earlier stay.
@@ -2953,6 +3008,10 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         return res.status(200).json({
           text: JSON.stringify({ok:false,error:{code:"V3_GENERATION_FAILED",retryable:true}})
         });
+      }
+
+      if (String(body?.mode || "").toLowerCase() === "experience_plan") {
+        return res.status(502).json({ok:false,code:"EXPERIENCE_PLAN_FAILED",retryable:true});
       }
 
       // Do not fabricate city_day for a failed master-plan stage.
