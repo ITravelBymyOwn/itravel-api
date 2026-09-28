@@ -7658,6 +7658,22 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       }else kept.push(candidate);
     }
 
+    // Remove a second end-of-day lodging return only when the traveler is
+    // already at that same lodging and no intervening activity took place.
+    // This avoids paying for another model repair to erase a duplicate rest row.
+    const ordered=[...out].sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    for(let i=1;i<ordered.length;i++){
+      const prior=ordered[i-1],current=ordered[i];
+      if(Number(prior.day)!==Number(current.day)||_isPureTransportRow_(current))continue;
+      const sameLodging=_arePoiAliases_(prior.to||'',current.to||'')&&_arePoiAliases_(current.from||'',current.to||'');
+      const repeatedReturn=_canonicalText_(prior.activity||'')===_canonicalText_(current.activity||'')&&/alojamiento|hotel|lodging|accommodation/i.test(String(current.to||''));
+      const pe=_hhmmToMinutes_(prior.end),cs=_hhmmToMinutes_(current.start);
+      if(sameLodging&&repeatedReturn&&pe!=null&&cs!=null&&cs>=pe){
+        const idx=out.indexOf(current);
+        if(idx>=0){out.splice(idx,1);removed.push({day:Number(current.day),poi:current.to,reason:'repeated_lodging_return'});changed=true;}
+      }
+    }
+
     out=_v3EnforceHardRouteFacts_(out,contract);
     if(!changed) break;
   }
@@ -8181,6 +8197,17 @@ function _v76OfflineFeasibilityFindings_(rows=[],unit={}){
     const date=(unit.windows||[]).find(w=>Number(w.day)===Number(row.day))?.date||'';
     const month=Number(String(date).slice(5,7));
     const indoors=!isExterior(activity) && /visita|visit|recorrido|tour|entrada|access|acceso/i.test(activity);
+    // Louvre's published weekly closure is a stable weekday rule. A future
+    // exceptional opening still needs confirmation, so repair the Tuesday
+    // interior plan in this physical Stay without inventing a reservation.
+    if(indoors && /(?:museo del louvre|mus[eé]e du louvre|louvre museum)/i.test(`${activity} ${place}`) && /^\d{4}-\d{2}-\d{2}$/.test(date)){
+      const [year,mon,day]=date.split('-').map(Number);
+      if(new Date(Date.UTC(year,mon-1,day)).getUTCDay()===2){
+        issues.push({code:'KNOWN_VENUE_HOURS',day:Number(row.day),start:row.start,end:row.end,activity,venue:place,
+          ordinary_window:'Closed Tuesday',last_entry:null,source:'https://www.louvre.fr/en/visit/hours-admission',
+          instruction:'The Louvre museum is ordinarily closed on Tuesdays. Keep fixed transfers and physical windows. Replace this interior visit with a high-value feasible alternative on this SAME day; retain an outdoor Louvre courtyard stop if useful, but do not promise museum entry. Confirm exceptional opening and any substitute venue schedule before travel.'});
+      }
+    }
     let rule=null;
     if(indoors && /museo del ej[eé]rcito|army museum/i.test(`${activity} ${place}`)){
       rule={open:10*60,close:17*60,source:'https://ejercito.defensa.gob.es/museo/'};
@@ -11302,7 +11329,7 @@ function _itbmoPdfRegisterFonts_(doc){
   doc.addFont('itbmo-bold.ttf','ITBMO','bold');
 }
 function _itbmoPdfSafeText_(value){
-  return String(value??'').replace(/\r?\n/g,' ').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g,'').replace(/\s+/g,' ').trim();
+  return String(value??'').replace(/\r?\n/g,' ').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g,'').replace(/[\u2010-\u2015\u2212]/g,'-').replace(/\s+/g,' ').trim();
 }
 
 async function exportItineraryToPDF(options={}){
