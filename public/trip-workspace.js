@@ -87,8 +87,11 @@ function visibleWorkspaceDuration(row={}){
   const hasMovementTime=/\b\d+\s*(?:-\s*\d+\s*)?(?:min|minutos?|minutes?|h|hora|horas|hours?)\b/i.test(String(row?.transport||''));
   return oneMinute&&hasMovementTime?'':raw;
 }
+// Match the PDF's treatment of the original itinerary note. Keep the note
+// attached to its generated activity; never paraphrase it through Context.
+function pdfActivityNote(row){return String(row?.notes??'').replace(/\r?\n/g,' ').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g,'').replace(/[\u2010-\u2015\u2212]/g,'-').replace(/\s+/g,' ').trim()}
 
-function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[],b=base(city),date=b?fmt(addDays(b,day-1)):'',ds=days(city),idx=ds.indexOf(day);let html=`<div class="tw-day-header"><div><span class="tw-kicker">${esc(city)}</span><h2>${lang==='es'?'Día':'Day'} ${day}${date?` · ${esc(date)}`:''}</h2></div><span class="tw-day-count">${idx+1} / ${ds.length}</span></div><div class="tw-timeline">`;rows.forEach((r,i)=>{const activity=String(r.activity||'').replace(/^rev:\s*/i,''),notes=String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim(),route=[r.from,r.to].filter(Boolean).join(' → ');html+=`<article class="tw-stop"><div class="tw-time">${esc(r.start||'')}<small>${esc(r.end||'')}</small></div><div class="tw-node"></div><div class="tw-stop-card"><h3>${esc(activity)}</h3><div class="tw-pills">${r.transport?`<span class="tw-pill">${esc(r.transport)}</span>`:''}${visibleWorkspaceDuration(r)?`<span class="tw-pill">${esc(visibleWorkspaceDuration(r))}</span>`:''}</div>${(route||notes)?`<button class="tw-details-btn" type="button" data-detail="${i}">${esc(t.details)} ＋</button><div class="tw-details" id="tw-detail-${i}" hidden>${route?`<div class="tw-detail"><small>${esc(t.route)}</small><b>${esc(route)}</b></div>`:''}${r.transport?`<div class="tw-detail"><small>${esc(t.transport)}</small><b>${esc(r.transport)}</b></div>`:''}${visibleWorkspaceDuration(r)?`<div class="tw-detail"><small>${esc(t.duration)}</small><b>${esc(visibleWorkspaceDuration(r))}</b></div>`:''}${notes?`<div class="tw-detail"><small>${esc(t.notes)}</small><b>${esc(notes)}</b></div>`:''}</div>`:''}</div></article>`});html+='</div>';$('#tw-content').innerHTML=html;document.querySelectorAll('[data-detail]').forEach(btn=>btn.onclick=()=>{const box=$(`#tw-detail-${btn.dataset.detail}`),open=!box.hidden;box.hidden=open;btn.textContent=(open?t.details:t.hide)+(open?' ＋':' −')})}
+function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[],b=base(city),date=b?fmt(addDays(b,day-1)):'',ds=days(city),idx=ds.indexOf(day);let html=`<div class="tw-day-header"><div><span class="tw-kicker">${esc(city)}</span><h2>${lang==='es'?'Día':'Day'} ${day}${date?` · ${esc(date)}`:''}</h2></div><span class="tw-day-count">${idx+1} / ${ds.length}</span></div><div class="tw-timeline">`;rows.forEach((r,i)=>{const activity=String(r.activity||'').replace(/^rev:\s*/i,''),notes=pdfActivityNote(r),route=[r.from,r.to].filter(Boolean).join(' → ');html+=`<article class="tw-stop"><div class="tw-time">${esc(r.start||'')}<small>${esc(r.end||'')}</small></div><div class="tw-node"></div><div class="tw-stop-card"><h3>${esc(activity)}</h3><div class="tw-pills">${r.transport?`<span class="tw-pill">${esc(r.transport)}</span>`:''}${visibleWorkspaceDuration(r)?`<span class="tw-pill">${esc(visibleWorkspaceDuration(r))}</span>`:''}</div>${(route||notes)?`<button class="tw-details-btn" type="button" data-detail="${i}">${esc(t.details)} ＋</button><div class="tw-details" id="tw-detail-${i}" hidden>${route?`<div class="tw-detail"><small>${esc(t.route)}</small><b>${esc(route)}</b></div>`:''}${r.transport?`<div class="tw-detail"><small>${esc(t.transport)}</small><b>${esc(r.transport)}</b></div>`:''}${visibleWorkspaceDuration(r)?`<div class="tw-detail"><small>${esc(t.duration)}</small><b>${esc(visibleWorkspaceDuration(r))}</b></div>`:''}${notes?`<div class="tw-detail"><small>${esc(t.notes)}</small><b>${esc(notes)}</b></div>`:''}</div>`:''}</div></article>`});html+='</div>';$('#tw-content').innerHTML=html;document.querySelectorAll('[data-detail]').forEach(btn=>btn.onclick=()=>{const box=$(`#tw-detail-${btn.dataset.detail}`),open=!box.hidden;box.hidden=open;btn.textContent=(open?t.details:t.hide)+(open?' ＋':' −')})}
 function _v67CommercialIntercityEndpoints_(origin='',destination=''){
   const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
   if(!a||!b||a===b)return false;
@@ -328,6 +331,16 @@ function workspaceRowsForCity(cityName){
   });
   return rows;
 }
+function originalNoteForNeed(item,cityName){
+  const source=normalizeWorkspaceEntity(String(item?.source_activity||'').replace(/^rev:\s*/i,''));
+  const dayNumber=Number(item?.day);
+  if(!source||!Number.isFinite(dayNumber)||dayNumber<1)return '';
+  const matches=workspaceRowsForCity(cityName).filter(({day,row})=>
+    day===dayNumber&&normalizeWorkspaceEntity(String(row?.activity||'').replace(/^rev:\s*/i,''))===source);
+  // A combined or destination-wide Context item may represent several rows.
+  // Only expose an original note when one activity is unambiguously identified.
+  return matches.length===1?pdfActivityNote(matches[0].row):'';
+}
 function contextualNeedBelongsToCitySlice(item,cityName){
   if(item?.need_type==='intercity_transport'||item?.need_type==='transport_arrangement') return true;
   const facts=workspaceRowsForCity(cityName);
@@ -554,6 +567,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       : item.derived_by==='trip_sequence'
         ? (lang==='es'?'Basado en el orden de tus destinos':'Based on your destination order')
         : `${esc(t.basedOn)} · ${esc(t.dayLabel)} ${esc(item.day)}${dayDate(city,item.day)?` · ${esc(dayDate(city,item.day))}`:''}`;
+    const originalNote=originalNoteForNeed(item,city);
     return `
     <article class="tw-context-item"${index>=visibleCount?' hidden data-context-extra="1"':''}>
       <div class="tw-context-item-top">
@@ -562,6 +576,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       </div>
       <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
       ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
+      ${originalNote?`<details class="tw-context-original-note"><summary><span>${esc(t.details)} ＋</span><span>${esc(t.hide)} −</span></summary><div><small>${esc(t.notes)}</small><p>${esc(originalNote)}</p></div></details>`:''}
       <small class="tw-context-source">${sourceCopy}</small>
       ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && !parseResolvedRouteSource(item.source_route)
         ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`
