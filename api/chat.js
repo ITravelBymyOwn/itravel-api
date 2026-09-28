@@ -752,7 +752,7 @@ For stays of five or more days:
 - Do not schedule a macro-route plus its anchor experience on one day and then repeat that anchor
   or route as a separate day.
 - The arrival and final days must have different scopes and reserved anchors.
-- Aurora opportunities are NOT standalone strategic day buckets. When plausible, require an additional aurora note in the FINAL row/notes of EVERY day in that city. This applies even when auroras were explicitly requested in Preferences; the preference must not consume a day or become a standalone row.
+- When auroras are plausible, reserve at most one primary conditional evening opportunity and identify concise backup-night guidance. Do not consume a daytime bucket or repeat a standalone activity every night.
 - If the requested duration is longer than the premium inventory, a lighter day is preferable to
   repetition. Do not fabricate novelty.
 
@@ -804,7 +804,7 @@ Apply these rules only when producing actual itinerary rows.
 3. REALISTIC EXPERIENCE DWELL — CATEGORY-BASED
 Before assigning a row duration, classify the experience:
 - destination thermal lagoon / major hot-spring or spa complex: normally 2h30–4h;
-- an iconic thermal lagoon comparable to Blue Lagoon: minimum 3h of actual experience time, plus
+- an iconic large-scale thermal lagoon or wellness complex: minimum 3h of actual experience time, plus
   realistic arrival, parking, check-in, changing, shower and exit logistics when material;
 - whale watching / wildlife cruise / marine safari: normally 2h30–4h of activity time, plus
   check-in, boarding and disembarkation logistics;
@@ -859,12 +859,10 @@ day's scope or omit it. Never publish a misleadingly short visit.
 
 7. CONDITIONAL AURORA / NIGHT OPPORTUNITIES
 - Aurora content is forbidden outside plausible auroral latitude and season.
-- Do NOT create a standalone aurora activity row by default.
-- When auroras are plausible for the city/date, place concise aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city.
-- Because the final-row note is present on EVERY plausible day, the traveler has multiple weather-dependent opportunities across the stay; do not select only one aurora night.
-- The note must give a plausible dark-hour window, explain the guided-tour option (and safe independent viewing only when appropriate), state that visibility is not guaranteed, and require checks for cloud cover, geomagnetic activity, road conditions and local safety.
-- Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference by adding the aurora guidance to the FINAL-row note of EVERY plausible day. The preference itself must NEVER create a standalone aurora row or reserve a whole day. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
-- Do not repeat an identical aurora note every night.
+- Follow the supplied experience plan: an allocated AURORA_EXPERIENCE may be represented once as the primary conditional evening opportunity without consuming the daytime plan.
+- Use the plan's backup nights as concise fallback guidance, not as duplicate activity rows or repeated long notes.
+- Explain viable guided-tour and safe independent-viewing options according to the supplied transport and traveler context.
+- State that visibility is never guaranteed and requires checks for cloud cover, geomagnetic activity, weather, road conditions and local safety.
 
 8. QUALITY
 - Use one selected language for all user-facing values.
@@ -1761,10 +1759,10 @@ FINAL SURGICAL REPAIR:
 - NEVER create an umbrella row whose interval covers later rows. Each row is either one pure movement or one leg plus one activity.
 - Recalculate every affected row so pure movements contain only transport time, while visit rows contain transport + activity inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
-- Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
+- An iconic large-scale thermal lagoon or wellness complex requires at least 3h of ACTIVITY plus logistics.
 - Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
 - Long regional returns must be conservative; remove optional stops rather than shortening the return.
-- Aurora, when plausible, must be an ADDITIONAL opportunity note in the NOTES of the FINAL row of EVERY day in that city, not a standalone row. This applies even when auroras or an aurora tour were explicitly requested in Preferences. Each day should preserve a weather-dependent opportunity; only a genuinely confirmed fixed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may remain as a dedicated row.
+- Aurora, when plausible, must follow the supplied experience plan: schedule at most one primary conditional opportunity and use concise backup-night guidance without duplicating a standalone aurora activity every day. Visibility is never guaranteed.
 - If a day has no user-provided end, rebuild it so the final row normally reaches at least approximately 19:00 local. 19:00 is a minimum requirement, not a ceiling. Finishing materially earlier requires a real constraint; the day may continue later for high-value evening experiences.
 - Day 1 starts at the lodging at the user-provided time and completes check-in/luggage drop before sightseeing, without inventing inbound transport.
 - Full days spanning lunch need a realistic meal break; day-trip meals remain on-route.
@@ -1987,13 +1985,7 @@ GENERAL RULES:
     - same harbor/waterfront filler pattern
   • This applies EVEN IF the names are translated, abbreviated, paraphrased, misspelled, or written differently.
   • Treat equivalent routes/areas across languages and naming variants as the SAME underlying itinerary.
-  • Examples of equivalent duplicates:
-    - "Golden Circle" = "Golden Cycle" = "Círculo Dorado" = "Cercle d'Or" = "Circolo d'Oro"
-    - "South Coast" = "Costa Sur" = "Côte Sud" = "Costa Sul"
-    - "Snæfellsnes" = "Snaefellsnes Peninsula" = "Península de Snæfellsnes"
-    - "Reykjanes Peninsula" = "Península de Reykjanes"
-    - "Old Town" = "Centro histórico" = "Historic Center" = "Vieille Ville"
-    - "Waterfront" = "Riverside" = "Harbor area" = "Promenade" when they refer to the same local corridor
+  • Translations, common misspellings, tourism nicknames and paraphrases of the same route, district, waterfront, historic center or regional circuit are equivalent duplicates.
   • The planner MUST reason semantically/geographically, not only textually.
   • If a macro-region, flagship route, neighborhood corridor, or major circuit has already been used, do NOT reuse it unless:
     - the destination genuinely has no strong alternative
@@ -2115,15 +2107,15 @@ MANDATORY ROW CONTRACT:
 - activity: ALWAYS "DESTINATION – SUB-STOP" (– or - with spaces). Generic like "museum", "park", "local restaurant" is forbidden.
   IMPORTANT (GLOBAL):
   - "DESTINATION" is NOT always the base city:
-    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza").
+    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the real macro-tour, corridor or excursion identity supplied in the physical-unit contract.
     • If it's NOT a day trip, "DESTINATION" can be the base city.
   - This also applies to transfers/returns:
-    • Day trip example: "South Coast – Return to Reykjavik"
+    • Day trip pattern: "<Excursion identity> – Return to <overnight base>"
     • City example: "Budapest – Return to hotel"
   - CRITICAL GEOGRAPHIC SEMANTICS:
     • If the stop is clearly outside the base city, do NOT label it as "<Base city> – <Outside stop>" unless it is explicitly a departure or return row.
     • For out-of-city attractions, prefer the real area / corridor / macro-tour name as DESTINATION.
-    • Example: avoid "Reykjavik – Blue Lagoon" as the main visit row; prefer a real external area/macro-tour label.
+    • Never label an external attraction as part of the base city; use its real area, corridor or macro-tour identity.
 - duration and kind:
   • A real visit/experience uses kind "activity". Put genuine mobility + its estimate in transport and only the real dwell in duration: "Activity: <realistic estimate or ~range>". If no movement is meaningful, transport may be empty.
   • A row that only moves the traveler uses kind "transport". Put mode + approximate time together in transport; duration may be empty.
@@ -2155,16 +2147,14 @@ NIGHT TOURS (GLOBAL, when applicable):
 - If the destination has an iconic night highlight or classic night experience, include AT LEAST 1 iconic night activity.
 - Keep realistic times (e.g., 19:00–23:30) and include a logistical tip in notes.
 
-AURORAS (GLOBAL CONDITIONAL-NOTE RULE):
+AURORAS (GLOBAL CONDITIONAL-OPPORTUNITY RULE):
 - FORBIDDEN unless latitude, season and darkness make them genuinely plausible.
-- Do NOT create a standalone aurora activity row by default.
-- When plausible, never guarantee visibility and do not displace a stronger daytime plan.
-- Put the aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city, beginning only after a plausible dark hour.
-- Repeat the opportunity on EVERY plausible day so the traveler naturally has multiple weather-dependent backup opportunities across the stay.
+- Never guarantee visibility and do not displace a stronger daytime plan.
+- Follow an allocated AURORA_EXPERIENCE as the one primary evening opportunity; otherwise keep aurora content to concise conditional guidance.
+- Mention backup nights without creating duplicate aurora rows or repeating a long note every day.
 - Explain the paid guided-tour option and, only when appropriate, safe independent viewing.
 - State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
-- An explicit aurora preference alone must remain in the FINAL-row notes. Only if the user separately provides a genuinely confirmed aurora booking with a fixed time and explicitly asks to schedule that booking may it be represented as a row.
-- Do not repeat the same note every night.
+- An explicit request is mandatory as an experience, but its execution remains conditional on safety and visibility.
 
 DAY TRIPS / MACRO-TOURS:
 - If you create a day trip, you must break it down into 5–15 sub-stops (rows) WHEN IT ADDS REAL VALUE.
@@ -2213,48 +2203,13 @@ DAY TRIPS / MACRO-TOURS:
   • Each day must have a clearly distinct identity.
   • Do NOT use translated naming to disguise repetition.
 
-ICELAND CURATION (when relevant):
-  • From Reykjavik, prioritize high-value realistic day trips such as Golden Circle, South Coast, Reykjanes / Blue Lagoon area, Snæfellsnes, Silver Circle / Borgarfjörður, lava tunnel / geothermal route, whale watching / marine experience, and realistic Southwest / West Iceland options.
-  • For a 7-day Reykjavik itinerary in winter, avoid using 4+ days as pure urban museum/harbor/café filler.
-  • Keep pure Reykjavik city content limited unless the user specifically requested a city-only trip.
-  • For South Coast:
-    - If the route reaches the Reynisfjara / Vík area, Vík should normally be included unless there is a strong reason not to.
-    - Prefer a coherent progression such as Seljalandsfoss → Skógafoss → Vík and/or Reynisfjara → return.
-    - Reynisfjara must appear as a real row if that South Coast stretch is being used; do NOT leave it only in notes.
-  • For Snæfellsnes:
-    - Prefer specific iconic stops such as Kirkjufell, Arnarstapi/Hellnar, Djúpalónssandur, Lóndrangar, Búðir/Búðakirkja when appropriate.
-    - Avoid vague placeholders like only "National Park" if specific named stops are available.
-  • For Reykjanes / Blue Lagoon:
-    - Reserve Blue Lagoon and the Reykjanes corridor to ONE day only.
-    - Allocate at least 3h of actual lagoon activity plus realistic arrival/check-in/changing/exit
-      logistics.
-    - Only after protecting that time, select the best feasible subset from the full corridor
-      inventory, which may include Bridge Between Continents, Sandvík, Gunnuhver, Reykjanesviti,
-      Valahnúkur, Brimketill, Kleifarvatn and Seltún/Krýsuvík.
-    - Do not include all stops blindly: useful daylight, safety, access, route continuity and the
-      user's pace decide.
-    - Never create a second Reykjanes or second Blue Lagoon day elsewhere in the same trip.
-  • For Silver Circle / Borgarfjörður:
-    - Prefer real stops such as Borgarnes, Deildartunguhver, Hraunfossar, Barnafoss, Reykholt, and Krauma when they fit naturally.
-  • For lava tunnel / geothermal route:
-    - Prefer real stops such as Raufarhólshellir, Hveragerði, Hellisheiði, geothermal exhibition area, or nearby coherent geothermal/scenic stops.
-  • For whale watching / marine experience:
-    - Use it only if plausible for season, operating location and traveler profile.
-    - Normally protect at least 2h30 of actual marine-tour time plus check-in, boarding and return.
-    - Reserve the wildlife/marine anchor to one day only and do not repeat the same harbor filler
-      pattern on other days.
-  • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights when they would be exhausting and low quality.
-  • Do NOT repeat the same Iceland macro-route across different days.
-  • If Golden Circle was already used, do NOT create another Golden Circle variant later in the itinerary.
-  • If South Coast was already used, avoid rebuilding another equivalent South Coast corridor day.
-  • If Snæfellsnes was already used, do not recycle the same peninsula structure.
-  • If Reykjanes / Blue Lagoon area was already used, do not create a second equivalent Reykjanes day unless the route is truly different and there are no better alternatives.
-  • Prefer new geographic corridors before repeating known ones.
-  • Iceland itineraries must maximize geographic diversity across days.
-  • Regional Iceland days should feel dense, continuous, and exploratory:
-    - avoid giant dead gaps
-    - enrich routes with real scenic/geothermal/coastal micro-stops
-    - ensure the day feels like a full coherent expedition.
+DESTINATION-AGNOSTIC REGIONAL CURATION:
+  • Use the supplied experience-plan identity as the authoritative regional corridor or macro-tour.
+  • Select its genuine signature anchors from travel knowledge, useful daylight, season, traveler profile and physical route continuity; never substitute generic base-city filler.
+  • Protect the realistic dwell time of wildlife, wellness, adventure, archaeological, scenic or guided anchors before adding secondary stops.
+  • Do not repeat an equivalent macro-region, directional corridor or experience bucket on another day.
+  • Reject extreme same-day journeys whose transport burden overwhelms the experience, and surface a closer strong alternative when appropriate.
+  • Regional days should be specific, geographically continuous and rich enough for their real window without adding filler or inventing live operating conditions.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
@@ -2448,7 +2403,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ok:true,routes:resolved});
     }
 
-    /* EXPERIENCE PLAN V86 · one lightweight strategic pass before Route Resolver.
+    /* EXPERIENCE PLAN V87 · one lightweight strategic pass before Route Resolver.
        It discovers destination-defining regional experiences and returns a compact
        allocation proposal. Browser-side deterministic code remains authoritative
        for dates, user requests, capacity, conflicts and physical units. */
@@ -2456,7 +2411,7 @@ export default async function handler(req, res) {
       const input = body?.experience_plan && typeof body.experience_plan === "object"
         ? body.experience_plan : null;
       const stays = Array.isArray(input?.stays) ? input.stays.slice(0, 30) : [];
-      if (!stays.length) return res.status(200).json({ok:true,version:"V86",stays:[]});
+      if (!stays.length) return res.status(200).json({ok:true,version:"V87",stays:[]});
       const outputLanguage = String(input?.itinerary_language || lang || "en").toLowerCase().startsWith("es") ? "Spanish" : "English";
       const prompt = `
 You are ITBMO's strategic experience architect. Produce a compact tourism allocation plan, not an itinerary and not prose.
@@ -2467,6 +2422,7 @@ ${JSON.stringify(input)}
 PURPOSE:
 - Detect whether each overnight destination is primarily an urban core, a regional gateway, a mixed city/region base, a nature base or a rest-oriented stay.
 - Protect every user-declared excursion as mandatory. Never delete, rename, move or replace it.
+- Represent every excursion explicitly requested anywhere in the input in selected_experiences with mandatory=true and user_requested=true, including requests found in special_conditions. Do not assume free-text requests already exist as structured user_day_trips.
 - Discover destination-defining full-day, half-day and evening experiences that a traveler may not know to request.
 - In regional gateways and nature bases, signature excursions may outrank secondary city filler. Do not assume the city center must receive most days.
 - Recommend an experience independently of how it is purchased. For each experience list viable modes among rental_car, public_transport, organized_tour and private_transfer. Do not require purchase of a tour.
@@ -2476,6 +2432,7 @@ RULES:
 - Respect dates, season, useful daylight, trip length, travelers, preferences, restrictions and supplied transport.
 - One daytime excursion maximum per calendar day. An evening experience may share a day only when fatigue and return logistics remain reasonable.
 - FULL_DAY experiences consume the useful daytime window. HALF_DAY_AM, HALF_DAY_PM and EVENING preserve the other usable fragments.
+- selected_experiences are physical excursions away from the overnight base. Never return the overnight base itself as physical_destination. City walks, museums and other experiences inside the base belong only in base_days with useful anchors.
 - Assign mandatory user experiences first, then the highest-value signature experiences, then strong base-city days.
 - Never place an automatic full-day excursion on an inter-stay transfer date, arrival fragment or final departure fragment.
 - If auroras are plausible by latitude, season and darkness, include one AURORA_PRIMARY evening experience and 1-3 backup day numbers. Visibility is never guaranteed. Prefer an organized tour when winter night driving may be unsuitable; keep safe independent observation as an option when appropriate.
@@ -2483,7 +2440,7 @@ RULES:
 - Keep labels and reasons in ${outputLanguage}. Keep JSON keys/enums exactly as specified.
 
 RETURN JSON ONLY:
-{"version":"V86","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","profile_confidence":"high|medium|low","base_days":[{"day":1,"identity":"short unique day identity","anchors":["place"]}],"selected_experiences":[{"identity":"canonical experience/route name","physical_destination":"real destination, region or route identity usable for planning","day":1,"duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","signature_level":1,"mandatory":false,"user_requested":false,"weather_sensitive":false,"recommended_modes":["organized_tour"],"reason":"short allocation reason"}],"unscheduled_recommendations":[{"identity":"canonical experience name","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING","recommended_modes":["organized_tour"],"reason":"why it remains worthwhile"}],"aurora":{"plausible":false,"primary_day":null,"backup_days":[],"message":""}}]}
+{"version":"V87","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","profile_confidence":"high|medium|low","base_days":[{"day":1,"identity":"short unique day identity","anchors":["place"]}],"selected_experiences":[{"identity":"canonical experience/route name","physical_destination":"real destination, region or route identity away from the overnight base","day":1,"duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","signature_level":1,"mandatory":false,"user_requested":false,"weather_sensitive":false,"recommended_modes":["organized_tour"],"reason":"short allocation reason"}],"unscheduled_recommendations":[{"identity":"canonical experience name","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING","recommended_modes":["organized_tour"],"reason":"why it remains worthwhile"}],"aurora":{"plausible":false,"primary_day":null,"backup_days":[],"message":""}}]}
 `.trim();
       const raw = await callStructured(
         [{role:"system",content:prompt}],
