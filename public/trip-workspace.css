@@ -1592,6 +1592,8 @@ body{
 /* Partner solutions: blue action, warm benefit. */
 .tw-partner-offer{background:linear-gradient(135deg,rgba(249,253,255,.96),rgba(245,248,255,.93))!important;border-color:rgba(52,86,130,.18)!important;}
 .tw-partner-benefit{background:linear-gradient(135deg,rgba(255,244,232,.90),rgba(244,183,64,.11))!important;border-color:rgba(195,138,86,.17)!important;color:#80624f!important;}
+.tw-partner-offer[data-partner-slug="airalo"] .tw-partner-benefit,
+.tw-partner-offer[data-partner-slug="holafly"] .tw-partner-benefit{background:linear-gradient(135deg,#FFE49B,#FFD15E)!important;border-color:#D98720!important;color:#542B0D!important;font-size:11px!important;font-weight:950!important;box-shadow:0 3px 12px rgba(205,116,30,.18)!important;}
 .tw-partner-offer button,.tw-partner-option button{background:linear-gradient(135deg,#087BFA,#4E74D8)!important;box-shadow:0 9px 21px rgba(57,91,166,.15)!important;}
 
 /* Auth surfaces stay quiet but coherent. */
@@ -1626,5 +1628,15 @@ body{
 .tw-context-item:has(.tw-route-segments){grid-column:1/-1}
 .tw-context-item:has(.tw-route-segments)>h4{font-size:15px}
 @media(max-width:760px){.tw-route-segments{grid-template-columns:1fr}}
+
+/* The activity's own PDF note is available on matching preparation cards. */
+.tw-context-original-note{margin-top:12px;border:1px solid rgba(32,76,108,.11);border-radius:12px;background:#f6f9fc;padding:10px 12px}
+.tw-context-original-note summary{cursor:pointer;list-style:none;color:#5267be;font-size:12px;font-weight:900}
+.tw-context-original-note summary::-webkit-details-marker{display:none}
+.tw-context-original-note summary span:nth-child(2),.tw-context-original-note[open] summary span:first-child{display:none}
+.tw-context-original-note[open] summary span:nth-child(2){display:inline}
+.tw-context-original-note>div{margin-top:10px;padding-top:9px;border-top:1px solid rgba(32,76,108,.1)}
+.tw-context-original-note>div small{display:block;color:#78909e;font-weight:800;font-size:11px}
+.tw-context-original-note>div p{margin:4px 0 0;color:#183550;font-weight:650;white-space:normal}
 
 .tw-route-local{grid-column:1/-1;margin-top:10px;border-top:1px dashed #d9e8ed;padding-top:9px;color:#68808c}.tw-route-local summary{cursor:pointer;font-size:10px;font-weight:900;color:#39728a}.tw-route-local>div{display:grid;gap:2px;padding:7px 0;border-bottom:1px solid #eef4f6}.tw-route-local>div:last-child{border-bottom:0}.tw-route-local b{font-size:10px;color:var(--ink)}.tw-route-local span{font-size:9.5px;line-height:1.4}
