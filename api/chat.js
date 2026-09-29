@@ -2403,15 +2403,16 @@ export default async function handler(req, res) {
       return res.status(200).json({ok:true,routes:resolved});
     }
 
-    /* EXPERIENCE PLAN V87 · one lightweight strategic pass before Route Resolver.
-       It discovers destination-defining regional experiences and returns a compact
-       allocation proposal. Browser-side deterministic code remains authoritative
-       for dates, user requests, capacity, conflicts and physical units. */
+    /* EXPERIENCE PLAN V89 · one lightweight strategic pass before Route Resolver.
+       It discovers a bounded but complete destination inventory, classifies the
+       overnight base and proposes an allocation. Browser-side deterministic code
+       remains authoritative for priorities, dates, capacity, conservation,
+       conflicts and physical units. */
     if (mode === "experience_plan") {
       const input = body?.experience_plan && typeof body.experience_plan === "object"
         ? body.experience_plan : null;
       const stays = Array.isArray(input?.stays) ? input.stays.slice(0, 30) : [];
-      if (!stays.length) return res.status(200).json({ok:true,version:"V87",stays:[]});
+      if (!stays.length) return res.status(200).json({ok:true,version:"V89",stays:[]});
       const outputLanguage = String(input?.itinerary_language || lang || "en").toLowerCase().startsWith("es") ? "Spanish" : "English";
       const prompt = `
 You are ITBMO's strategic experience architect. Produce a compact tourism allocation plan, not an itinerary and not prose.
@@ -2419,33 +2420,39 @@ You are ITBMO's strategic experience architect. Produce a compact tourism alloca
 AUTHORITATIVE INPUT:
 ${JSON.stringify(input)}
 
-PURPOSE:
+PURPOSE — COMPLETE THE STRATEGIC INVENTORY BEFORE ALLOCATING DAYS:
 - Detect whether each overnight destination is primarily an urban core, a regional gateway, a mixed city/region base, a nature base or a rest-oriented stay.
 - Protect every user-declared excursion as mandatory. Never delete, rename, move or replace it.
 - Represent every excursion explicitly requested anywhere in the input in selected_experiences with mandatory=true and user_requested=true, including requests found in special_conditions. Do not assume free-text requests already exist as structured user_day_trips.
-- Discover destination-defining full-day, half-day and evening experiences that a traveler may not know to request.
+- First build must_see_inventory: the destination's bounded, non-redundant set of defining, essential and high-value BASE and EXCURSION experiences appropriate to this trip. This inventory must exist before deciding what fits.
+- Discover destination-defining full-day, half-day and evening experiences that a traveler may not know to request. Include the experiences whose omission would materially weaken the purpose of the trip.
 - In regional gateways and nature bases, signature excursions may outrank secondary city filler. Do not assume the city center must receive most days.
 - Recommend an experience independently of how it is purchased. For each experience list viable modes among rental_car, public_transport, organized_tour and private_transfer. Do not require purchase of a tour.
 
 RULES:
 - Use no hard-coded destination list supplied by the client; reason globally from travel knowledge.
 - Respect dates, season, useful daylight, trip length, travelers, preferences, restrictions and supplied transport.
+- Classify every inventory item as DEFINING, ESSENTIAL, HIGH or STANDARD. DEFINING means the destination would feel materially incomplete without it; use it sparingly and honestly.
+- For each EXCURSION inventory item, list the real internal route/experience anchors that make it worthwhile. Anchors are components inside one excursion, never separate day-trip units. Mark an anchor conditional only when season, weather, safety or access can genuinely make it unavailable.
+- seasonal_feasibility is STRONG, CONDITIONAL or UNSUITABLE for the supplied dates. Without live data, prefer CONDITIONAL plus a clear verification reason over an invented closure.
 - One daytime excursion maximum per calendar day. An evening experience may share a day only when fatigue and return logistics remain reasonable.
 - FULL_DAY experiences consume the useful daytime window. HALF_DAY_AM, HALF_DAY_PM and EVENING preserve the other usable fragments.
 - selected_experiences are physical excursions away from the overnight base. Never return the overnight base itself as physical_destination. City walks, museums and other experiences inside the base belong only in base_days with useful anchors.
 - Assign mandatory user experiences first, then the highest-value signature experiences, then strong base-city days.
+- Every DEFINING or ESSENTIAL inventory item must be accounted for exactly once: in a base_day, in selected_experiences, or in unscheduled_recommendations. Never omit it silently merely because it did not fit.
+- selected_experiences must reference inventory_id. unscheduled_recommendations must reference inventory_id and state the real capacity, balance, season or logistics reason.
 - Never place an automatic full-day excursion on an inter-stay transfer date, arrival fragment or final departure fragment.
 - If auroras are plausible by latitude, season and darkness, include one AURORA_PRIMARY evening experience and 1-3 backup day numbers. Visibility is never guaranteed. Prefer an organized tour when winter night driving may be unsuitable; keep safe independent observation as an option when appropriate.
 - Do not claim live schedules, road conditions, weather, availability, operators or guaranteed wildlife/auroras.
 - Keep labels and reasons in ${outputLanguage}. Keep JSON keys/enums exactly as specified.
 
 RETURN JSON ONLY:
-{"version":"V87","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","profile_confidence":"high|medium|low","base_days":[{"day":1,"identity":"short unique day identity","anchors":["place"]}],"selected_experiences":[{"identity":"canonical experience/route name","physical_destination":"real destination, region or route identity away from the overnight base","day":1,"duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","signature_level":1,"mandatory":false,"user_requested":false,"weather_sensitive":false,"recommended_modes":["organized_tour"],"reason":"short allocation reason"}],"unscheduled_recommendations":[{"identity":"canonical experience name","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING","recommended_modes":["organized_tour"],"reason":"why it remains worthwhile"}],"aurora":{"plausible":false,"primary_day":null,"backup_days":[],"message":""}}]}
+{"version":"V89","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","profile_confidence":"high|medium|low","inventory_complete":true,"coverage_rationale":"brief explanation of why the inventory captures the destination-defining options","must_see_inventory":[{"inventory_id":"stable short id unique inside this stay","identity":"canonical experience or route name","scope":"BASE|EXCURSION","physical_destination":"overnight base for BASE, real region/route/destination for EXCURSION","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","priority":"DEFINING|ESSENTIAL|HIGH|STANDARD","signature_level":1,"seasonal_feasibility":"STRONG|CONDITIONAL|UNSUITABLE","weather_sensitive":false,"recommended_day":1,"recommended_modes":["organized_tour"],"anchors":[{"identity":"protected internal place or experience","priority":"DEFINING|ESSENTIAL|HIGH","conditional":false,"reason":"why it belongs inside this experience"}],"reason":"why this belongs in the inventory"}],"base_days":[{"day":1,"identity":"short unique day identity","anchors":["place"],"inventory_ids":["inventory id"]}],"selected_experiences":[{"inventory_id":"inventory id","identity":"canonical experience/route name","physical_destination":"real destination, region or route identity away from the overnight base","day":1,"duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","priority":"DEFINING|ESSENTIAL|HIGH|STANDARD","signature_level":1,"mandatory":false,"user_requested":false,"seasonal_feasibility":"STRONG|CONDITIONAL|UNSUITABLE","weather_sensitive":false,"recommended_modes":["organized_tour"],"anchors":[{"identity":"protected internal place or experience","priority":"DEFINING|ESSENTIAL|HIGH","conditional":false,"reason":"why it belongs"}],"reason":"short allocation reason"}],"unscheduled_recommendations":[{"inventory_id":"inventory id","identity":"canonical experience name","priority":"DEFINING|ESSENTIAL|HIGH|STANDARD","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING","recommended_modes":["organized_tour"],"reason":"why it remains worthwhile and why it did not fit"}],"aurora":{"plausible":false,"primary_day":null,"backup_days":[],"message":""}}]}
 `.trim();
       const raw = await callStructured(
         [{role:"system",content:prompt}],
         0.12,
-        5000,
+        7000,
         120000,
         plannerUsage,
         PLANNER_MODEL,
