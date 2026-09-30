@@ -7206,6 +7206,25 @@ function _v3CanonicalUserFixedTransfers_(baseDate){
   return ledger.map(({_key,...x})=>x).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.departure).localeCompare(String(b.departure)));
 }
 
+function _v94NormalizePlanningWindow_(window={},context={}){
+  const type=String(window?.type||'plannable');
+  let start=String(context?.protected_start||window?.start||'').trim()||null;
+  let end=String(window?.end||'').trim()||null;
+  const openEnd=Boolean(window?.open_end||(!end&&type!=='fixed_transfer'));
+  // An all-day/base window with neither a movement nor a traveler-supplied clock
+  // is still a real planning day. V93 preserved it as "-open", which no generated
+  // row could claim by planning_window_id and caused futile MISSING_DAY repairs.
+  // Apply the product's global 09:00 planning baseline only when no stronger
+  // physical/user boundary exists. Fixed movements and known starts are untouched.
+  if(type!=='fixed_transfer'&&openEnd&&!start){
+    const supplied=String(context?.user_start||'').trim();
+    start=/^\d{2}:\d{2}$/.test(supplied)?supplied:'09:00';
+  }
+  const minimumTarget=String(window?.minimum_useful_target||'').trim()||
+    (type!=='fixed_transfer'&&openEnd?'19:00':null);
+  return {start,end,open_end:openEnd,minimum_useful_target:minimumTarget,start_defaulted:Boolean(type!=='fixed_transfer'&&openEnd&&!window?.start&&!context?.protected_start)};
+}
+
 function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
   const route=_routeV2ContextForCity_(city) || {};
   const canonicalLedger=_v3CanonicalUserFixedTransfers_(baseDate);
@@ -7273,14 +7292,16 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
           const protect=canProtectMorning && !morningProtected && w.type!=='fixed_transfer' &&
             _arePoiAliases_(w.location,day.start_location) && beginning!=null && beginning>10*60+30 && beginning<firstDeparture;
           if(protect) morningProtected=true;
+          const normalizedWindow=_v94NormalizePlanningWindow_(w,{protected_start:protect?'09:00':null,user_start:userDay?.start||null});
           return {
           window_id:w.window_id||`day-${dayNum}-window-${windowIndex+1}`,
           location:w.location||null,
-          start:protect?'09:00':(w.start||null),
-          end:w.end||null,
+          start:normalizedWindow.start,
+          end:normalizedWindow.end,
           type:w.type||'plannable',
-          open_end:Boolean(w.open_end),
-          minimum_useful_target:w.minimum_useful_target||null,
+          open_end:normalizedWindow.open_end,
+          minimum_useful_target:normalizedWindow.minimum_useful_target,
+          start_defaulted:normalizedWindow.start_defaulted,
           terminal_arrival:Boolean(w.terminal_arrival||Boolean(inferredTerminalTransfer && w.type==='fixed_transfer' && _arePoiAliases_(w.location,`${inferredTerminalTransfer.origin} → ${inferredTerminalTransfer.destination}`)))
         };}),
         fixed_transfers:fixedTransfers.map(t=>({
@@ -7802,7 +7823,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v13-sealed-poi-ownership';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v14-balanced-aurora-window-contract';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -8039,35 +8060,40 @@ function _v93SealPhysicalPlanningUnits_(units=[]){
       group.forEach(unit=>{unit.contract_source='USER_ROUTE';unit.contract_seal_id=null;unit.owned_pois=[];unit.excluded_pois=[];});
       continue;
     }
+    const inventoryById=new Map((plan.must_see_inventory||[]).map(item=>[String(item?.inventory_id||''),item]));
     const unique=[];
     for(const raw of (plan.poi_ownership||[])){
       if(!String(raw?.identity||'').trim())continue;
       if(_v93OwnershipAliases_(unique,raw.identity))continue;
       let owner=null;
-      if(String(raw.owner_scope||'').toUpperCase()==='EXCURSION')owner=group.find(unit=>String(unit?.inventory_id||'')===String(raw?.owner_inventory_id||''));
+      const inventoryItem=inventoryById.get(String(raw?.owner_inventory_id||''));
+      const auroraClaim=_v86DurationClass_(inventoryItem?.duration_class)==='AURORA_PRIMARY';
+      if(auroraClaim)owner=group.find(unit=>String(unit?.unit_type||'')==='AURORA_EXPERIENCE'&&String(unit?.inventory_id||'')===String(raw?.owner_inventory_id||''));
+      else if(String(raw.owner_scope||'').toUpperCase()==='EXCURSION')owner=group.find(unit=>String(unit?.inventory_id||'')===String(raw?.owner_inventory_id||''));
       else owner=group.find(unit=>['BASE_STAY','BASE_CHUNK','BASE_DAY'].includes(String(unit?.unit_type||''))&&(unit.days||[]).includes(Number(raw.owner_day)));
       if(!owner){
-        const error=new Error(`V93_PHYSICAL_CONTRACT_SEAL_BLOCK:${parentId}:${raw.identity}`);
-        error.code='V93_PHYSICAL_CONTRACT_SEAL_BLOCK';error.unownedPoi=raw;throw error;
+        const code=auroraClaim?'V94_AURORA_CONTRACT_BLOCK':'V94_PHYSICAL_CONTRACT_SEAL_BLOCK';
+        const error=new Error(`${code}:${parentId}:${raw.identity}`);
+        error.code=code;error.unownedPoi=raw;throw error;
       }
       unique.push({...raw,owner_stay_unit_id:String(owner.id)});
     }
     group.forEach(unit=>{
       const owned=unique.filter(claim=>String(claim.owner_stay_unit_id)===String(unit.id));
       const excluded=unique.filter(claim=>String(claim.owner_stay_unit_id)!==String(unit.id));
-      unit.contract_source='ITBMO_COMPILED_V93';
+      unit.contract_source='ITBMO_COMPILED_V94';
       unit.owned_pois=owned.map(claim=>({identity:claim.identity,priority:claim.priority,required:Boolean(claim.required),conditional:Boolean(claim.conditional),owner_day:claim.owner_day||null,owner_inventory_id:claim.owner_inventory_id||null}));
       unit.excluded_pois=excluded.map(claim=>({identity:claim.identity,stay_unit_id:claim.owner_stay_unit_id,day:claim.owner_day||null}));
       unit.contract_seal_id=`seal-${_v86StableHash_(`${parentId}|${unit.id}|${owned.map(x=>x.identity).join('|')}|${excluded.map(x=>x.identity).join('|')}`)}`;
       unit.experience_plan={
-        profile:plan.profile||null,profile_confidence:plan.profile_confidence||null,inventory_coverage:plan.inventory_coverage||null,
+        profile:plan.profile||null,profile_confidence:plan.profile_confidence||null,inventory_coverage:plan.inventory_coverage||null,allocation_budget:plan.allocation_budget||null,
         base_days:(plan.base_days||[]).filter(day=>(unit.days||[]).includes(Number(day?.day))),
         unscheduled_recommendations:unit.surface_unscheduled_recommendations?(plan.unscheduled_recommendations||[]):[],
-        aurora:plan.aurora||null,contract_state:'SEALED',contract_source:'ITBMO_COMPILED_V93'
+        aurora:plan.aurora||null,contract_state:'SEALED',contract_source:'ITBMO_COMPILED_V94'
       };
       if(['DAY_TRIP','DAY_TRIP_PARTIAL','AURORA_EXPERIENCE'].includes(String(unit.unit_type||''))&&!unit.inventory_id){
-        const error=new Error(`V93_PHYSICAL_CONTRACT_SEAL_BLOCK:${parentId}:${unit.id}:missing_inventory_id`);
-        error.code='V93_PHYSICAL_CONTRACT_SEAL_BLOCK';throw error;
+        const error=new Error(`V94_PHYSICAL_CONTRACT_SEAL_BLOCK:${parentId}:${unit.id}:missing_inventory_id`);
+        error.code='V94_PHYSICAL_CONTRACT_SEAL_BLOCK';throw error;
       }
     });
   }
@@ -8334,7 +8360,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     });
     planningUnits.forEach((u,i)=>u.sequence=i+1);
     const sealedUnits=_v93SealPhysicalPlanningUnits_(planningUnits);
-    console.info('[ITBMO V93 PHYSICAL UNITS]',sealedUnits.map(u=>({type:u.unit_type,id:u.id,base:u.base_destination,destination:u.physical_destination,days:u.days,windows:u.windows.length,source:u.contract_source,owned_pois:u.owned_pois?.length||0,excluded_pois:u.excluded_pois?.length||0,seal:u.contract_seal_id||null})));
+    console.info('[ITBMO V94 PHYSICAL UNITS]',sealedUnits.map(u=>({type:u.unit_type,id:u.id,base:u.base_destination,destination:u.physical_destination,days:u.days,windows:u.windows.length,source:u.contract_source,owned_pois:u.owned_pois?.length||0,excluded_pois:u.excluded_pois?.length||0,seal:u.contract_seal_id||null})));
     return sealedUnits.filter(u=>u.windows.length||u.days.length);
   }
 
@@ -8376,7 +8402,7 @@ function _v3StayContract_(contract,unit){
     return {...window,light_context:lightContext};
   });
   return {
-    version:'ITBMO_PHYSICAL_STAY_CONTRACT_V3_V93_SEALED_OWNERSHIP',
+    version:'ITBMO_PHYSICAL_STAY_CONTRACT_V3_V94_BALANCED_AURORA_WINDOW',
     trip_context_id:contract.trip_context_id||'continuous-trip',
     stay_unit_id:unit.id,
     contract_source:unit.contract_source||'USER_ROUTE',
@@ -8806,9 +8832,9 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
   };
 
   const removeUnownedAurora=(input=[])=>{
-    if(unit?.contract_source!=='ITBMO_COMPILED_V93'||String(unit?.unit_type||'')==='AURORA_EXPERIENCE')return input;
+    if(unit?.contract_source!=='ITBMO_COMPILED_V94'||String(unit?.unit_type||'')==='AURORA_EXPERIENCE')return input;
     const kept=input.filter(row=>!_isAuroraActivityRow_(row));
-    if(kept.length!==input.length)console.info(`[ITBMO V93 AURORA OWNERSHIP] ${unitCity} · ${unit.id}: removed ${input.length-kept.length} unallocated aurora row(s) before model repair`);
+    if(kept.length!==input.length)console.info(`[ITBMO V94 AURORA OWNERSHIP] ${unitCity} · ${unit.id}: removed ${input.length-kept.length} unallocated aurora row(s) before model repair`);
     return kept;
   };
   let rows=_v3StampStayRows_(_dedupeRows_(removeUnownedAurora(initialRows||[])),unit);
@@ -9810,7 +9836,7 @@ function _showGenerationRetry_(reason=''){
   // Recovery is the only visible action after a failed paid generation.
   document.querySelector('#guided-personalization-overlay')?.remove();
   document.body.classList.remove('guided-preferences-open');
-  const integrityFailure=/V93_EXPERIENCE_CONTRACT_REQUIRED|V93_PHYSICAL_CONTRACT_SEAL_BLOCK|V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|V3_INCOMPLETE_AFTER_STAY_MERGE|V3_PHYSICAL_UNIT_CONSTRUCTION_BLOCK|ROUTE_RESOLVER_SEMANTIC_INVALID|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW|POST_STORAGE/i.test(String(reason||''));
+  const integrityFailure=/V9[34]_EXPERIENCE_CONTRACT_REQUIRED|V9[34]_(?:AURORA_CONTRACT_BLOCK|PHYSICAL_CONTRACT_SEAL_BLOCK)|V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|V3_INCOMPLETE_AFTER_STAY_MERGE|V3_PHYSICAL_UNIT_CONSTRUCTION_BLOCK|ROUTE_RESOLVER_SEMANTIC_INVALID|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW|POST_STORAGE/i.test(String(reason||''));
   // V68 · nominal row completeness is NOT publication success. During an
   // integrity failure, accepted Stay checkpoints can make every city look
   // complete even though the canonical merge was rejected. Never suppress the
@@ -10156,7 +10182,7 @@ async function runPaidGeneration({manualRetry=false}={}){
       }
     }catch(_){ }
     const recoveryReason=err?.code || err?.message || 'Generation failed';
-    const integrityFailure=/V93_EXPERIENCE_CONTRACT_REQUIRED|V93_PHYSICAL_CONTRACT_SEAL_BLOCK|V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|V3_INCOMPLETE_AFTER_STAY_MERGE|V3_PHYSICAL_UNIT_CONSTRUCTION_BLOCK|ROUTE_RESOLVER_SEMANTIC_INVALID|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW/i.test(String(recoveryReason));
+    const integrityFailure=/V9[34]_EXPERIENCE_CONTRACT_REQUIRED|V9[34]_(?:AURORA_CONTRACT_BLOCK|PHYSICAL_CONTRACT_SEAL_BLOCK)|V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|V3_INCOMPLETE_AFTER_STAY_MERGE|V3_PHYSICAL_UNIT_CONSTRUCTION_BLOCK|ROUTE_RESOLVER_SEMANTIC_INVALID|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW/i.test(String(recoveryReason));
     if($preferencesGenerateV2){
       // Once paid generation started, Recovery owns the next action. Never expose
       // the old create CTA behind/after an integrity failure.
@@ -14703,6 +14729,56 @@ function _v86AutoExperienceCap_(profile='',days=1,explicitCount=0){
   const ratio=['REGIONAL_GATEWAY','NATURE_BASE'].includes(kind)?.60:(kind==='MIXED_BASE'?.48:(kind==='URBAN_CORE'?.28:.35));
   return Math.max(0,Math.min(10,total-Math.max(0,Number(explicitCount)||0),Math.round(total*ratio)-Math.max(0,Number(explicitCount)||0)));
 }
+function _v94AutomaticExperienceBudget_(profile='',days=1,explicitTrips=[],inventory=[]){
+  const total=Math.max(1,Number(days)||1),kind=String(profile||'').toUpperCase();
+  const daytimeExplicit=(explicitTrips||[]).filter(item=>_v88ExperienceSlot_(_v90ExperienceDescriptor_(item).durationClass)!=='EVENING').length;
+  const feasibleDaytime=(inventory||[]).filter(item=>{
+    if(String(item?.scope||'').toUpperCase()==='BASE')return false;
+    if(_v88ExperienceSlot_(_v86DurationClass_(item?.duration_class))==='EVENING')return false;
+    return _v89SeasonalFeasibility_(item?.seasonal_feasibility)!=='UNSUITABLE';
+  });
+  const highValue=feasibleDaytime.filter(item=>_v89PriorityRank_(item?.priority)>=_v89PriorityRank_('HIGH')||Number(item?.signature_level||0)>=4||item?.mandatory||item?.user_requested);
+  const baseLoad=(inventory||[]).filter(item=>String(item?.scope||'').toUpperCase()==='BASE'&&_v89PriorityRank_(item?.priority)>=_v89PriorityRank_('HIGH'))
+    .reduce((sum,item)=>sum+1+Math.min(3,(item?.anchors||[]).length)*.5,0);
+  const baseLoadDays=baseLoad?Math.max(1,Math.ceil(baseLoad/3.5)):1;
+  const excursionRich=highValue.length>=3;
+  let minimumBaseDays;
+  if(total<=2)minimumBaseDays=1;
+  else if(excursionRich)minimumBaseDays=total>=6?2:1;
+  else if(kind==='URBAN_CORE')minimumBaseDays=Math.ceil(total*.55);
+  else if(kind==='MIXED_BASE')minimumBaseDays=Math.ceil(total*.40);
+  else if(['REGIONAL_GATEWAY','NATURE_BASE'].includes(kind))minimumBaseDays=Math.ceil(total*.28);
+  else minimumBaseDays=Math.ceil(total*.50);
+  minimumBaseDays=Math.max(1,Math.min(Math.max(1,total-1),Math.max(minimumBaseDays,baseLoadDays)));
+  // Inventory evidence outranks an inconsistent profile label. A destination
+  // with several distinct, feasible high-value excursions must not collapse to
+  // the two-excursion URBAN_CORE ratio merely because the model labeled its base
+  // city as urban. Conversely, no excursion is invented when inventory is thin.
+  const maximumDaytime=Math.max(0,total-minimumBaseDays);
+  const legacyTotal=Math.min(maximumDaytime,daytimeExplicit+_v86AutoExperienceCap_(kind,total,daytimeExplicit));
+  const inventoryTarget=Math.min(maximumDaytime,highValue.length||feasibleDaytime.length);
+  const targetTotal=Math.max(Math.min(maximumDaytime,daytimeExplicit),legacyTotal,inventoryTarget);
+  return {
+    automatic_cap:Math.max(0,targetTotal-daytimeExplicit),target_total:targetTotal,
+    explicit_daytime:daytimeExplicit,minimum_base_days:minimumBaseDays,
+    feasible_daytime:feasibleDaytime.length,high_value_daytime:highValue.length,
+    profile:kind||'MIXED_BASE'
+  };
+}
+function _v94NormalizeAuroraInventory_(inventory=[],base='',language='es'){
+  let normalized=0;
+  (inventory||[]).forEach(item=>{
+    if(_v86DurationClass_(item?.duration_class)!=='AURORA_PRIMARY')return;
+    item.scope='EXCURSION';
+    if(!String(item.physical_destination||'').trim()||_canonicalText_(item.physical_destination)===_canonicalText_(base)){
+      item.physical_destination=String(language||'es').toLowerCase().startsWith('es')
+        ? `Zona de observación de auroras desde ${base}`
+        : `Aurora observation area from ${base}`;
+    }
+    item.estimated_total_minutes=360;item.weather_sensitive=true;normalized++;
+  });
+  return normalized;
+}
 function _v89Priority_(value=''){
   const key=String(value||'').trim().toUpperCase();
   return ['DEFINING','ESSENTIAL','HIGH','STANDARD'].includes(key)?key:'STANDARD';
@@ -14983,6 +15059,15 @@ function _v93StoryCanBypassStrategicPlan_(story={}){
   const trips=(story.stays||[]).flatMap(st=>st.dayTrips||[]);
   return trips.length>0&&trips.every(dt=>String(dt?._itbmo_origin||'USER_EXPLICIT').toUpperCase()==='USER_EXPLICIT');
 }
+function _v94PreserveUserPhysicalStructure_(story={}){
+  const stays=(story.stays||[]).filter(st=>st?.place);
+  const trips=stays.flatMap(st=>st.dayTrips||[]);
+  const explicit=trips.filter(dt=>String(dt?._itbmo_origin||'USER_EXPLICIT').toUpperCase()==='USER_EXPLICIT');
+  // Five or more traveler-authored physical units across multiple bases are a
+  // deliberate complex route, not an underspecified long stay. Preserve that
+  // topology byte-for-byte through the proven USER_ROUTE generation path.
+  return stays.length>=2 && stays.length+explicit.length>=5 && trips.length===explicit.length;
+}
 function _v93RemoveAutomaticExperienceState_(story={}){
   let removed=0;
   (story.stays||[]).forEach(st=>{
@@ -15037,7 +15122,7 @@ function _v86ExperiencePlanFingerprint_(story={}){
     dayTrips:_v93GenuineExplicitDayTrips_(st).map(dt=>({id:dt.id,day:dt.day,place:dt.place}))
   }));
   return _v86StableHash_(JSON.stringify({
-    allocation_schema:'V93_COMPACT_KNOWLEDGE_SEALED_OWNERSHIP',
+    allocation_schema:'V94_GLOBAL_INVENTORY_BALANCED_UNITS',
     explicit,
     preferences:plannerState?.preferencesV2||null,
     special:plannerState?.specialConditions||'',
@@ -15046,7 +15131,7 @@ function _v86ExperiencePlanFingerprint_(story={}){
   }));
 }
 function _v89ExperiencePlanResponseValid_(data={},payload={}){
-  if(String(data?.version||'')!=='V93'||!Array.isArray(data?.stays))return false;
+  if(String(data?.version||'')!=='V94'||!Array.isArray(data?.stays))return false;
   const byId=new Map(data.stays.map(stay=>[String(stay?.stay_id||''),stay]));
   return (payload.stays||[]).every(input=>{
     const plan=byId.get(String(input?.stay_id||''));
@@ -15054,8 +15139,9 @@ function _v89ExperiencePlanResponseValid_(data={},payload={}){
     if(!_v92NormalizeLightProfile_(plan.light_profile||{}))return false;
     const ids=new Set();
     for(const item of plan.must_see_inventory){
-      if(!String(item?.identity||'').trim()||!['BASE','EXCURSION'].includes(String(item?.scope||'').toUpperCase()))return false;
+      if(!String(item?.identity||'').trim()||!String(item?.physical_destination||'').trim()||!['BASE','EXCURSION'].includes(String(item?.scope||'').toUpperCase()))return false;
       const id=String(item?.inventory_id||'').trim();if(!id||ids.has(id))return false;ids.add(id);
+      if(_v86DurationClass_(item?.duration_class)==='AURORA_PRIMARY'&&String(item?.scope||'').toUpperCase()!=='EXCURSION')return false;
       if(String(item?.scope||'').toUpperCase()==='EXCURSION'&&_v86DurationClass_(item?.duration_class)!=='AURORA_PRIMARY'&&!item?.route_manifest?.microstops?.length)return false;
     }
     return (input.user_day_trips||[]).every(request=>plan.must_see_inventory.some(item=>String(item?.scope||'').toUpperCase()==='EXCURSION'&&(_arePoiAliases_(item?.identity,request?.identity)||_arePoiAliases_(item?.physical_destination,request?.identity))));
@@ -15071,7 +15157,7 @@ async function _v86FetchExperiencePlan_(payload={}){
         _captureExactUsage_(data);
         return data;
       }
-      const error=new Error(data?.code||(response.ok?'V93_EXPERIENCE_KNOWLEDGE_INVALID':`EXPERIENCE_PLAN_HTTP_${response.status||0}`));error.status=response.status||502;throw error;
+      const error=new Error(data?.code||(response.ok?'V94_EXPERIENCE_KNOWLEDGE_INVALID':`EXPERIENCE_PLAN_HTTP_${response.status||0}`));error.status=response.status||502;throw error;
     }catch(error){
       lastError=error;
       if(attempt<2)await new Promise(resolve=>setTimeout(resolve,900));
@@ -15087,14 +15173,14 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
     if(dt._itbmo_origin==='USER_EXPLICIT')dt._itbmo_mandatory=true;
   }));
   const fingerprint=_v86ExperiencePlanFingerprint_(story);
-  const reusable=story._itbmo_experience_plan_v86?.version==='V93'&&story._itbmo_experience_plan_v86?.contract_state==='SEALED'&&story._itbmo_experience_plan_v86?.fingerprint===fingerprint&&
+  const reusable=story._itbmo_experience_plan_v86?.version==='V94'&&story._itbmo_experience_plan_v86?.contract_state==='SEALED'&&story._itbmo_experience_plan_v86?.fingerprint===fingerprint&&
     (story.stays||[]).every(st=>{
       const plan=st?._itbmo_experience_plan_v86,claims=Array.isArray(plan?.poi_ownership)?plan.poi_ownership:[];
       if(plan?.contract_state!=='SEALED'||!claims.length)return false;
       return claims.filter(claim=>String(claim?.owner_scope||'').toUpperCase()==='EXCURSION').every(claim=>(st.dayTrips||[]).some(dt=>String(dt?._itbmo_inventory_id||'')===String(claim?.owner_inventory_id||'')));
     });
   if(reusable){
-    console.info('[ITBMO V93 EXPERIENCE CONTRACT] sealed plan reused',story._itbmo_experience_plan_v86);
+    console.info('[ITBMO V94 EXPERIENCE CONTRACT] sealed plan reused',story._itbmo_experience_plan_v86);
     return {ok:true,planned:Number(story._itbmo_experience_plan_v86.planned||0),reused:true};
   }
   const pendingAutomaticRequirement=Boolean(story._itbmo_experience_plan_v86?.requires_automatic_discovery);
@@ -15103,11 +15189,19 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
   engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
   applyTripStoryToCompatibility(story);renderTripStorySummary();
   if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
+  if(_v94PreserveUserPhysicalStructure_(story)){
+    story._itbmo_experience_plan_v86={version:'V94',fingerprint,contract_state:'USER_ROUTE',planned:0,preserved_user_units:(story.stays||[]).length+(story.stays||[]).flatMap(st=>st.dayTrips||[]).length,created_at:new Date().toISOString()};
+    engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
+    applyTripStoryToCompatibility(story);renderTripStorySummary();
+    if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
+    console.info('[ITBMO V94 USER ROUTE] dense traveler-authored physical structure preserved; automatic discovery bypassed',story._itbmo_experience_plan_v86);
+    return {ok:true,planned:0,reused:false,bypassed_for_user_route:true};
+  }
   const transitionDates=_v71MainTransitionDates_(story);
   const firstCity=savedDestinations?.[0]?.city||story.stays[0]?.place||'';
   const defaultTransport=cityMeta?.[firstCity]?.transport||'recommend me';
   const payload={
-    version:'ITBMO_EXPERIENCE_KNOWLEDGE_V93',
+    version:'ITBMO_EXPERIENCE_KNOWLEDGE_V94',
     itinerary_language:String(plannerState?.itineraryLang||getLang()||'es'),
     global_preferences:plannerState?.preferencesV2?.global||null,
     special_conditions:String(plannerState?.preferencesV2?.global?.notes||plannerState?.specialConditions||'').trim()||null,
@@ -15121,20 +15215,20 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
       user_day_trips:_v93GenuineExplicitDayTrips_(st).map(dt=>({id:dt.id,day:Number(dt.day||1),identity:dt.place,mandatory:true,transport_mode:dt.outbound?.transportMode||null}))
     }))
   };
-  console.info('[ITBMO V93 EXPERIENCE KNOWLEDGE] requesting compact inventory, route manifests and polar-light profile',payload.stays.map(st=>({base:st.base,days:st.days,user_day_trips:st.user_day_trips.length,budget:st.inventory_budget})));
+  console.info('[ITBMO V94 EXPERIENCE KNOWLEDGE] requesting compact inventory, route manifests and polar-light profile',payload.stays.map(st=>({base:st.base,days:st.days,user_day_trips:st.user_day_trips.length,budget:st.inventory_budget})));
   let response;
   try{response=await _v86FetchExperiencePlan_(payload);}
   catch(error){
     if(explicitOnlyFallback&&!removedAutomatic){
-      console.warn('[ITBMO V93 EXPERIENCE CONTRACT] strategic knowledge unavailable; continuing only because the route is genuinely traveler-explicit',error);
+      console.warn('[ITBMO V94 EXPERIENCE CONTRACT] strategic knowledge unavailable; continuing only because the route is genuinely traveler-explicit',error);
       return {ok:false,planned:0,reused:false,bypassed_for_explicit_route:true,error};
     }
-    story._itbmo_experience_plan_v86={version:'V93',fingerprint,contract_state:'PENDING_RETRY',requires_automatic_discovery:true,planned:0,error_code:String(error?.message||'EXPERIENCE_KNOWLEDGE_FAILED'),updated_at:new Date().toISOString()};
+    story._itbmo_experience_plan_v86={version:'V94',fingerprint,contract_state:'PENDING_RETRY',requires_automatic_discovery:true,planned:0,error_code:String(error?.message||'EXPERIENCE_KNOWLEDGE_FAILED'),updated_at:new Date().toISOString()};
     engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
     if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
-    const blocked=new Error('V93_EXPERIENCE_CONTRACT_REQUIRED');
-    blocked.code='V93_EXPERIENCE_CONTRACT_REQUIRED';blocked.recoveryStage='experience_plan';blocked.retryable=true;blocked.cause=error;
-    console.warn('[ITBMO V93 EXPERIENCE CONTRACT] fail-closed before Route Resolver/V3; retry resumes this stage',error);
+    const blocked=new Error('V94_EXPERIENCE_CONTRACT_REQUIRED');
+    blocked.code='V94_EXPERIENCE_CONTRACT_REQUIRED';blocked.recoveryStage='experience_plan';blocked.retryable=true;blocked.cause=error;
+    console.warn('[ITBMO V94 EXPERIENCE CONTRACT] fail-closed before Route Resolver/V3; retry resumes this stage',error);
     throw blocked;
   }
   const byId=new Map((response.stays||[]).map(plan=>[String(plan?.stay_id||''),plan]));
@@ -15148,12 +15242,17 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
     const stayHasAuroraDarkness=_v92StayHasAuroraDarkness_(st,lightProfile);
     const plannedBaseDays=[];
     const inventory=_v89BuildMustSeeInventory_(plan);
+    // V94 semantic defense in depth. Even if upstream knowledge labels an aurora
+    // concept as BASE or uses the overnight city as its physical destination,
+    // its explicit duration class makes it an independent night excursion.
+    _v94NormalizeAuroraInventory_(inventory,st.place,payload.itinerary_language);
     inventory.forEach(item=>{
       if(explicit.some(dt=>_arePoiAliases_(dt?.place,item.physical_destination)||_arePoiAliases_(dt?.place,item.identity))){item.mandatory=true;item.user_requested=true;}
     });
     const aurora=plan.aurora&&typeof plan.aurora==='object'?plan.aurora:{plausible:false,primary_day:null,backup_days:[],minimum_recovery_hours:8,next_day_earliest_start:'10:00',message:''};
     if(!stayHasAuroraDarkness){aurora.plausible=false;aurora.primary_day=null;aurora.backup_days=[];}
     const inventoryHasAurora=inventory.some(item=>_v86DurationClass_(item?.duration_class)==='AURORA_PRIMARY');
+    if(stayHasAuroraDarkness&&inventoryHasAurora)aurora.plausible=true;
     if(aurora.plausible&&!inventoryHasAurora){
       const es=String(payload.itinerary_language).toLowerCase().startsWith('es');
       inventory.push({
@@ -15197,7 +15296,8 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
     for(let index=explicit.length-1;index>=0;index--)if(explicit[index]?._itbmo_light_incompatible)explicit.splice(index,1);
     st.dayTrips=(st.dayTrips||[]).filter(dt=>!dt?._itbmo_light_incompatible);
     occupancy=_v88ExperienceOccupancy_(st.dayTrips);
-    const cap=_v86AutoExperienceCap_(profile,st.days,explicit.length);
+    const allocationBudget=_v94AutomaticExperienceBudget_(profile,st.days,explicit,inventory);
+    const cap=allocationBudget.automatic_cap;
     const eveningCap=Math.max(1,Math.round(Number(st.days||1)*.25));
     let automaticDaytimeAdded=0,automaticEveningAdded=0;
     const excursionQueue=inventory.filter(candidate=>candidate.scope!=='BASE').sort((a,b)=>{
@@ -15260,7 +15360,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
         return:{transportMode:'',departureTime:'',arrivalTime:'',timeStatus:'estimated'}
       });
       Object.assign(dt,{
-        _itbmo_origin:requested?'USER_REQUESTED_V93':'AUTO_V93',_itbmo_mandatory:requested,_itbmo_duration_class:durationClass,
+        _itbmo_origin:requested?'USER_REQUESTED_V94':'AUTO_V94',_itbmo_mandatory:requested,_itbmo_duration_class:durationClass,
         _itbmo_experience_identity:String(item.identity||physicalDestination).trim(),_itbmo_inventory_id:item.inventory_id,
         _itbmo_priority:_v89Priority_(item.priority),_itbmo_anchors:_v89NormalizeAnchors_(item.anchors),
         _itbmo_seasonal_feasibility:_v89SeasonalFeasibility_(item.seasonal_feasibility),
@@ -15349,17 +15449,18 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
       base_days:plannedBaseDays,
       unscheduled_recommendations:recommendations,
       inventory_coverage:{total:inventory.length,scheduled:[...inventoryStatus.values()].filter(value=>String(value).startsWith('SCHEDULED')).length,recommended:[...inventoryStatus.values()].filter(value=>value==='RECOMMENDED').length,unaccounted:inventory.filter(item=>!inventoryStatus.has(String(item.inventory_id))).map(item=>item.inventory_id)},
+      allocation_budget:{...allocationBudget,automatic_daytime_scheduled:automaticDaytimeAdded,automatic_evening_scheduled:automaticEveningAdded},
       aurora,
       contract_state:'SEALED',
-      contract_source:'ITBMO_COMPILED_V93',
+      contract_source:'ITBMO_COMPILED_V94',
       poi_ownership:_v93BuildPoiOwnership_(st,inventory,plannedBaseDays)
     };
   }
-  story._itbmo_experience_plan_v86={version:'V93',fingerprint,contract_state:'SEALED',planned,created_at:new Date().toISOString()};
+  story._itbmo_experience_plan_v86={version:'V94',fingerprint,contract_state:'SEALED',planned,created_at:new Date().toISOString()};
   engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
   applyTripStoryToCompatibility(story);renderTripStorySummary();
   if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
-  console.info('[ITBMO V93 EXPERIENCE CONTRACT] deterministic sealed route manifests, POI ownership and polar-light profiles ready',{planned,stays:story.stays.map(st=>({base:st.place,profile:st._itbmo_experience_plan_v86?.profile,light:st._itbmo_experience_plan_v86?.light_profile,coverage:st._itbmo_experience_plan_v86?.inventory_coverage,ownership:st._itbmo_experience_plan_v86?.poi_ownership?.length||0,day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place,origin:dt._itbmo_origin,duration:dt._itbmo_duration_class,effort:dt._itbmo_effort_class,priority:dt._itbmo_priority,inventory_id:dt._itbmo_inventory_id||null,microstops:dt._itbmo_route_manifest?.microstops?.length||0,topology:dt._itbmo_route_manifest?.topology||null}))}))});
+  console.info('[ITBMO V94 EXPERIENCE CONTRACT] deterministic balanced units, sealed POI ownership and polar-light profiles ready',{planned,stays:story.stays.map(st=>({base:st.place,profile:st._itbmo_experience_plan_v86?.profile,light:st._itbmo_experience_plan_v86?.light_profile,coverage:st._itbmo_experience_plan_v86?.inventory_coverage,budget:st._itbmo_experience_plan_v86?.allocation_budget,ownership:st._itbmo_experience_plan_v86?.poi_ownership?.length||0,day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place,origin:dt._itbmo_origin,duration:dt._itbmo_duration_class,effort:dt._itbmo_effort_class,priority:dt._itbmo_priority,inventory_id:dt._itbmo_inventory_id||null,microstops:dt._itbmo_route_manifest?.microstops?.length||0,topology:dt._itbmo_route_manifest?.topology||null}))}))});
   return {ok:true,planned,reused:false};
 }
 function _v71DayTripHasTravelerClockAuthority_(dt={}){
@@ -15673,7 +15774,7 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
     const id=String(movement.movement_id||''),candidate=byId.get(id),issue=candidate?._itbmo_semantic_issue;
     if(!issue)continue;
     const ref=dayTripRefs.get(id);
-    const optionalAuto=['AUTO_V86','AUTO_V89','AUTO_V90','AUTO_V91','AUTO_V92','AUTO_V93'].includes(ref?.dt?._itbmo_origin)&&!ref?.dt?._itbmo_mandatory&&!_v90ExperienceDescriptor_(ref?.dt).aurora;
+    const optionalAuto=/^AUTO_V(?:86|89|90|91|92|93|94)$/i.test(String(ref?.dt?._itbmo_origin||''))&&!ref?.dt?._itbmo_mandatory&&!_v90ExperienceDescriptor_(ref?.dt).aurora;
     if(optionalAuto){
       ref.st.dayTrips=(ref.st.dayTrips||[]).filter(item=>item!==ref.dt);
       const recommendations=ref.st?._itbmo_experience_plan_v86?.unscheduled_recommendations;
