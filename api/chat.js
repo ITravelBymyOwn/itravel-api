@@ -502,7 +502,7 @@ function cleanToJSON(raw = "") {
   return null;
 }
 
-// V93 strategic-stage parser. Model replies occasionally contain a harmless
+// V94 strategic-stage parser. Model replies occasionally contain a harmless
 // prefix/suffix even when JSON-only was requested. Extract the first complete
 // balanced object without trying to repair a genuinely truncated payload.
 // The itinerary engine keeps using cleanToJSON unchanged.
@@ -2441,7 +2441,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ok:true,routes:resolved});
     }
 
-    /* EXPERIENCE KNOWLEDGE V93 · one compact strategic pass before Route Resolver.
+    /* EXPERIENCE KNOWLEDGE V94 · one compact strategic pass before Route Resolver.
        The model supplies destination knowledge only. Browser-side deterministic
        code owns selection, dates, capacity, fatigue, polar light, POI ownership
        and the sealed Physical Unit contract. */
@@ -2449,9 +2449,9 @@ export default async function handler(req, res) {
       const input = body?.experience_plan && typeof body.experience_plan === "object"
         ? body.experience_plan : null;
       const stays = Array.isArray(input?.stays) ? input.stays.slice(0, 30) : [];
-      if (!stays.length) return res.status(200).json({ok:true,version:"V93",stays:[]});
+      if (!stays.length) return res.status(200).json({ok:true,version:"V94",stays:[]});
       const outputLanguage = String(input?.itinerary_language || lang || "en").toLowerCase().startsWith("es") ? "Spanish" : "English";
-      const promptV93 = `
+      const promptV94 = `
 You are ITBMO's strategic destination-knowledge architect. Return a compact, complete tourism inventory, not an itinerary, not a day allocation and not prose.
 
 AUTHORITATIVE INPUT:
@@ -2459,9 +2459,11 @@ ${JSON.stringify(input)}
 
 PURPOSE:
 - Classify each overnight destination as URBAN_CORE, REGIONAL_GATEWAY, MIXED_BASE, NATURE_BASE or REST_BASE.
+- Classify from the destination's defining tourism structure, not from the size, fame or urban character of the overnight base. When several of the strongest reasons to stay there are independent regional excursions, REGIONAL_GATEWAY, MIXED_BASE or NATURE_BASE is normally more coherent than URBAN_CORE.
 - Build one bounded, non-redundant must_see_inventory containing the defining, essential and high-value BASE and EXCURSION experiences appropriate to the supplied dates and trip length.
 - Protect every structured or free-text user-requested excursion by including it once with mandatory=true and user_requested=true. Never delete, rename or replace it.
 - Discover destination-defining full-day, half-day and evening experiences the traveler may not know to request. In gateways and nature bases, signature excursions may outrank secondary city filler.
+- For stays of five or more days, include every distinct, feasible DEFINING/ESSENTIAL/HIGH excursion that materially explains the destination, within the supplied inventory budget. Do not pre-trim that knowledge to an assumed itinerary: deterministic client logic owns the final capacity, dates, fatigue and base-time balance.
 - Recommend each experience independently of purchase. List viable modes among rental_car, public_transport, organized_tour and private_transfer; never require a purchase.
 
 GLOBAL RULES:
@@ -2477,7 +2479,7 @@ GLOBAL RULES:
 - FULL_DAY consumes the useful daytime window. HALF_DAY_AM, HALF_DAY_PM and EVENING preserve other usable fragments.
 - Classify effort as LIGHT, MODERATE or HEAVY from total door-to-door time, driving, early/late timing, walking, exposure, season and whether the traveler drives. HEAVY requires genuinely high combined burden.
 - EXCURSION physical_destination is the real region/route/destination away from the overnight base. Experiences inside the base are BASE items.
-- AURORA_PRIMARY is an independent conditional night experience with estimated_total_minutes=360 and a 4-8 hour operational range. Include it only when latitude, hemisphere, season and darkness make it plausible. Visibility is never guaranteed. Include safe transport choices, especially when winter night driving may be unsuitable.
+- AURORA_PRIMARY is always an independent EXCURSION, never a BASE item. Its physical_destination must be a distinct observation-area/route label and must not equal the overnight base. Use estimated_total_minutes=360 and a 4-8 hour operational range. Include it only when latitude, hemisphere, season and darkness make it plausible. Visibility is never guaranteed. Include safe transport choices, especially when winter night driving may be unsuitable.
 - Return light_profile for every stay with signed approx_latitude and conservative solar_noon_local. ITBMO calculates date-specific light deterministically; do not return a daily sunrise timetable.
 - Apply polar-light reasoning globally in both hemispheres. POLAR_NIGHT may have civil twilight; DEEP_POLAR_NIGHT makes sunlight-dependent stops conditional; MIDNIGHT_SUN never authorizes 24-hour tourism and is incompatible with aurora viewing when astronomical darkness is absent.
 - Set daylight_dependent=true only when natural visual light materially affects a stop.
@@ -2486,32 +2488,61 @@ GLOBAL RULES:
 - Keep traveler-facing labels in ${outputLanguage}. Reasons are optional and brief. Keep JSON keys/enums exactly as specified.
 
 RETURN JSON ONLY:
-{"version":"V93","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","profile_confidence":"high|medium|low","inventory_complete":true,"coverage_rationale":"brief","light_profile":{"approx_latitude":0,"solar_noon_local":"12:00","confidence":"high|medium|low","basis":"brief estimate","verification_note":"brief verification"},"must_see_inventory":[{"inventory_id":"stable short id unique inside this stay","identity":"canonical experience or route name","scope":"BASE|EXCURSION","physical_destination":"overnight base for BASE; real route/region for EXCURSION","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","priority":"DEFINING|ESSENTIAL|HIGH|STANDARD","signature_level":1,"mandatory":false,"user_requested":false,"seasonal_feasibility":"STRONG|CONDITIONAL|UNSUITABLE","weather_sensitive":false,"recommended_day":1,"recommended_modes":["organized_tour"],"effort_class":"LIGHT|MODERATE|HEAVY","estimated_total_minutes":0,"estimated_driving_minutes":0,"early_departure_likely":false,"late_return_likely":false,"anchors":[{"identity":"BASE anchor only","priority":"DEFINING|ESSENTIAL|HIGH","conditional":false}],"reason":"brief","route_manifest":{"topology":"CIRCUIT|OUT_AND_BACK|CORRIDOR|RADIAL|MIXED","terminal_anchor":"canonical culmination","confidence":"high|medium|low","microstops":[{"stop_id":"stable id","identity":"canonical place/experience","priority":"DEFINING|ESSENTIAL|HIGH|OPTIONAL","category":"SCENIC|NATURE|CULTURE|WILDLIFE|THERMAL|FOOD|LOGISTICS|OTHER","sequence":1,"estimated_dwell_minutes":30,"conditional":false,"daylight_dependent":true,"placement":"START|MIDDLE|END|FLEXIBLE"}],"thermal_alternatives":[{"identity":"alternative","reason":"brief"}],"verification_note":"brief"}}],"aurora":{"plausible":false,"phenomenon":"AURORA_BOREALIS|AURORA_AUSTRALIS|null","minimum_recovery_hours":8,"next_day_earliest_start":"10:00","message":"brief"}}]}
+{"version":"V94","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","profile_confidence":"high|medium|low","inventory_complete":true,"coverage_rationale":"brief","light_profile":{"approx_latitude":0,"solar_noon_local":"12:00","confidence":"high|medium|low","basis":"brief estimate","verification_note":"brief verification"},"must_see_inventory":[{"inventory_id":"stable short id unique inside this stay","identity":"canonical experience or route name","scope":"BASE|EXCURSION","physical_destination":"overnight base for BASE; real route/region for EXCURSION","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","priority":"DEFINING|ESSENTIAL|HIGH|STANDARD","signature_level":1,"mandatory":false,"user_requested":false,"seasonal_feasibility":"STRONG|CONDITIONAL|UNSUITABLE","weather_sensitive":false,"recommended_day":1,"recommended_modes":["organized_tour"],"effort_class":"LIGHT|MODERATE|HEAVY","estimated_total_minutes":0,"estimated_driving_minutes":0,"early_departure_likely":false,"late_return_likely":false,"anchors":[{"identity":"BASE anchor only","priority":"DEFINING|ESSENTIAL|HIGH","conditional":false}],"reason":"brief","route_manifest":{"topology":"CIRCUIT|OUT_AND_BACK|CORRIDOR|RADIAL|MIXED","terminal_anchor":"canonical culmination","confidence":"high|medium|low","microstops":[{"stop_id":"stable id","identity":"canonical place/experience","priority":"DEFINING|ESSENTIAL|HIGH|OPTIONAL","category":"SCENIC|NATURE|CULTURE|WILDLIFE|THERMAL|FOOD|LOGISTICS|OTHER","sequence":1,"estimated_dwell_minutes":30,"conditional":false,"daylight_dependent":true,"placement":"START|MIDDLE|END|FLEXIBLE"}],"thermal_alternatives":[{"identity":"alternative","reason":"brief"}],"verification_note":"brief"}}],"aurora":{"plausible":false,"phenomenon":"AURORA_BOREALIS|AURORA_AUSTRALIS|null","minimum_recovery_hours":8,"next_day_earliest_start":"10:00","message":"brief"}}]}
 `.trim();
       let parsed = null;
       let raw = "";
       for (let attempt = 1; attempt <= 2 && !parsed; attempt += 1) {
         raw = await callStructured(
-          [{role:"system",content:promptV93}],
+          [{role:"system",content:promptV94}],
           attempt === 1 ? 0.12 : 0.05,
           9000,
           120000,
           plannerUsage,
           PLANNER_MODEL,
-          "low"
+          "medium"
         );
         const candidate = _v93ExperiencePlanJSON_(raw);
         if (candidate && Array.isArray(candidate.stays)) parsed = candidate;
-        else console.warn("[ITBMO V93 EXPERIENCE KNOWLEDGE] internal structured retry", {attempt,raw_length:String(raw || "").length});
+        else console.warn("[ITBMO V94 EXPERIENCE KNOWLEDGE] internal structured retry", {attempt,raw_length:String(raw || "").length});
       }
       if (!parsed || !Array.isArray(parsed.stays)) {
-        console.warn("[ITBMO V93 EXPERIENCE KNOWLEDGE] invalid response", {raw_length:String(raw || "").length});
+        console.warn("[ITBMO V94 EXPERIENCE KNOWLEDGE] invalid response", {raw_length:String(raw || "").length});
         return res.status(502).json({ok:false,code:"EXPERIENCE_KNOWLEDGE_INVALID_RESPONSE",retryable:true});
       }
-      return res.status(200).json({...parsed,version:"V93",ok:true,usage:_usagePayload_(plannerUsage)});
+      // V94 deterministic contract normalization. A model occasionally returned
+      // a valid aurora concept as a BASE POI located exactly at the overnight
+      // city. That produced an impossible contract: BASE QA required the row,
+      // while physical ownership correctly removed aurora outside its own unit.
+      // Normalize the semantic type before the browser allocates any day.
+      const canonical = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const inputById = new Map(stays.map(stay => [String(stay?.stay_id || ""), stay]));
+      const normalizedStays = parsed.stays.map(stay => {
+        const inputStay = inputById.get(String(stay?.stay_id || "")) || {};
+        const base = String(inputStay?.base || "").trim();
+        let hasAurora = false;
+        const inventory = (Array.isArray(stay?.must_see_inventory) ? stay.must_see_inventory : []).map(item => {
+          const next = {...item};
+          if (String(next?.duration_class || "").toUpperCase() !== "AURORA_PRIMARY") return next;
+          hasAurora = true;
+          next.scope = "EXCURSION";
+          if (!String(next.physical_destination || "").trim() || canonical(next.physical_destination) === canonical(base)) {
+            next.physical_destination = outputLanguage === "Spanish"
+              ? `Zona de observación de auroras desde ${base}`
+              : `Aurora observation area from ${base}`;
+          }
+          next.estimated_total_minutes = 360;
+          next.weather_sensitive = true;
+          return next;
+        });
+        const aurora = stay?.aurora && typeof stay.aurora === "object" ? {...stay.aurora} : {plausible:false,phenomenon:null,minimum_recovery_hours:8,next_day_earliest_start:"10:00",message:""};
+        if (hasAurora) aurora.plausible = true;
+        return {...stay,must_see_inventory:inventory,aurora};
+      });
+      return res.status(200).json({...parsed,stays:normalizedStays,version:"V94",ok:true,usage:_usagePayload_(plannerUsage)});
     }
 
-    /* V92 legacy contract retained as an inert reference during the V93 branch.
+    /* V92 legacy contract retained as an inert reference during the V94 branch.
        It is not reachable from the public experience_plan mode. */
     /* EXPERIENCE PLAN V89 · one lightweight strategic pass before Route Resolver.
        It discovers a bounded but complete destination inventory, classifies the
