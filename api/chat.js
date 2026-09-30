@@ -502,6 +502,44 @@ function cleanToJSON(raw = "") {
   return null;
 }
 
+// V93 strategic-stage parser. Model replies occasionally contain a harmless
+// prefix/suffix even when JSON-only was requested. Extract the first complete
+// balanced object without trying to repair a genuinely truncated payload.
+// The itinerary engine keeps using cleanToJSON unchanged.
+function _v93ExperiencePlanJSON_(raw = "") {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
+  const text = String(raw).trim();
+  try { return JSON.parse(text); } catch {}
+
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (start < 0) {
+      if (char === "{") { start = index; depth = 1; }
+      continue;
+    }
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') { inString = true; continue; }
+    if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try { return JSON.parse(text.slice(start, index + 1)); } catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
 function fallbackJSON(lang = "en") {
   // Fallback is always English (surgical: avoid partial translations here)
   return {
@@ -2403,12 +2441,84 @@ export default async function handler(req, res) {
       return res.status(200).json({ok:true,routes:resolved});
     }
 
+    /* EXPERIENCE KNOWLEDGE V93 · one compact strategic pass before Route Resolver.
+       The model supplies destination knowledge only. Browser-side deterministic
+       code owns selection, dates, capacity, fatigue, polar light, POI ownership
+       and the sealed Physical Unit contract. */
+    if (mode === "experience_plan") {
+      const input = body?.experience_plan && typeof body.experience_plan === "object"
+        ? body.experience_plan : null;
+      const stays = Array.isArray(input?.stays) ? input.stays.slice(0, 30) : [];
+      if (!stays.length) return res.status(200).json({ok:true,version:"V93",stays:[]});
+      const outputLanguage = String(input?.itinerary_language || lang || "en").toLowerCase().startsWith("es") ? "Spanish" : "English";
+      const promptV93 = `
+You are ITBMO's strategic destination-knowledge architect. Return a compact, complete tourism inventory, not an itinerary, not a day allocation and not prose.
+
+AUTHORITATIVE INPUT:
+${JSON.stringify(input)}
+
+PURPOSE:
+- Classify each overnight destination as URBAN_CORE, REGIONAL_GATEWAY, MIXED_BASE, NATURE_BASE or REST_BASE.
+- Build one bounded, non-redundant must_see_inventory containing the defining, essential and high-value BASE and EXCURSION experiences appropriate to the supplied dates and trip length.
+- Protect every structured or free-text user-requested excursion by including it once with mandatory=true and user_requested=true. Never delete, rename or replace it.
+- Discover destination-defining full-day, half-day and evening experiences the traveler may not know to request. In gateways and nature bases, signature excursions may outrank secondary city filler.
+- Recommend each experience independently of purchase. List viable modes among rental_car, public_transport, organized_tour and private_transfer; never require a purchase.
+
+GLOBAL RULES:
+- Use no destination or attraction list supplied by the client. Reason globally from travel knowledge.
+- Respect dates, season, trip length, travelers, preferences, restrictions and supplied transport.
+- Classify priority as DEFINING, ESSENTIAL, HIGH or STANDARD. Use DEFINING sparingly.
+- BASE items may include up to four concise anchors. EXCURSION items use route_manifest.microstops as their internal anchors; do not repeat the same list under anchors.
+- Every EXCURSION has one route_manifest in this same response. Its microstops are internal waypoints, never separate day-trip units. Include feasible DEFINING/ESSENTIAL stops and the strongest distinct HIGH-value microstops that fit without overload.
+- route_manifest.topology is CIRCUIT, OUT_AND_BACK, CORRIDOR, RADIAL or MIXED. Order microstops geographically from the lodging/base area, preserve a coherent outward/return direction and never repeat a stop on the return.
+- Across EXCURSION items in one stay, never allocate the same canonical microstop twice. Generic concepts such as viewpoint, coast, meal or rest are not identities.
+- A thermal experience is one THERMAL microstop placed at START or END. Put other thermal choices in thermal_alternatives, not in the timed route.
+- seasonal_feasibility is STRONG, CONDITIONAL or UNSUITABLE. Without live data, prefer CONDITIONAL plus a concise verification note over an invented closure.
+- FULL_DAY consumes the useful daytime window. HALF_DAY_AM, HALF_DAY_PM and EVENING preserve other usable fragments.
+- Classify effort as LIGHT, MODERATE or HEAVY from total door-to-door time, driving, early/late timing, walking, exposure, season and whether the traveler drives. HEAVY requires genuinely high combined burden.
+- EXCURSION physical_destination is the real region/route/destination away from the overnight base. Experiences inside the base are BASE items.
+- AURORA_PRIMARY is an independent conditional night experience with estimated_total_minutes=360 and a 4-8 hour operational range. Include it only when latitude, hemisphere, season and darkness make it plausible. Visibility is never guaranteed. Include safe transport choices, especially when winter night driving may be unsuitable.
+- Return light_profile for every stay with signed approx_latitude and conservative solar_noon_local. ITBMO calculates date-specific light deterministically; do not return a daily sunrise timetable.
+- Apply polar-light reasoning globally in both hemispheres. POLAR_NIGHT may have civil twilight; DEEP_POLAR_NIGHT makes sunlight-dependent stops conditional; MIDNIGHT_SUN never authorizes 24-hour tourism and is incompatible with aurora viewing when astronomical darkness is absent.
+- Set daylight_dependent=true only when natural visual light materially affects a stop.
+- Keep each stay within its supplied inventory budgets. Prefer a smaller complete set over verbose variants or near-duplicates.
+- Do not claim live schedules, roads, weather, openings, availability, operators or guaranteed wildlife/auroras.
+- Keep traveler-facing labels in ${outputLanguage}. Reasons are optional and brief. Keep JSON keys/enums exactly as specified.
+
+RETURN JSON ONLY:
+{"version":"V93","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","profile_confidence":"high|medium|low","inventory_complete":true,"coverage_rationale":"brief","light_profile":{"approx_latitude":0,"solar_noon_local":"12:00","confidence":"high|medium|low","basis":"brief estimate","verification_note":"brief verification"},"must_see_inventory":[{"inventory_id":"stable short id unique inside this stay","identity":"canonical experience or route name","scope":"BASE|EXCURSION","physical_destination":"overnight base for BASE; real route/region for EXCURSION","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING|AURORA_PRIMARY","priority":"DEFINING|ESSENTIAL|HIGH|STANDARD","signature_level":1,"mandatory":false,"user_requested":false,"seasonal_feasibility":"STRONG|CONDITIONAL|UNSUITABLE","weather_sensitive":false,"recommended_day":1,"recommended_modes":["organized_tour"],"effort_class":"LIGHT|MODERATE|HEAVY","estimated_total_minutes":0,"estimated_driving_minutes":0,"early_departure_likely":false,"late_return_likely":false,"anchors":[{"identity":"BASE anchor only","priority":"DEFINING|ESSENTIAL|HIGH","conditional":false}],"reason":"brief","route_manifest":{"topology":"CIRCUIT|OUT_AND_BACK|CORRIDOR|RADIAL|MIXED","terminal_anchor":"canonical culmination","confidence":"high|medium|low","microstops":[{"stop_id":"stable id","identity":"canonical place/experience","priority":"DEFINING|ESSENTIAL|HIGH|OPTIONAL","category":"SCENIC|NATURE|CULTURE|WILDLIFE|THERMAL|FOOD|LOGISTICS|OTHER","sequence":1,"estimated_dwell_minutes":30,"conditional":false,"daylight_dependent":true,"placement":"START|MIDDLE|END|FLEXIBLE"}],"thermal_alternatives":[{"identity":"alternative","reason":"brief"}],"verification_note":"brief"}}],"aurora":{"plausible":false,"phenomenon":"AURORA_BOREALIS|AURORA_AUSTRALIS|null","minimum_recovery_hours":8,"next_day_earliest_start":"10:00","message":"brief"}}]}
+`.trim();
+      let parsed = null;
+      let raw = "";
+      for (let attempt = 1; attempt <= 2 && !parsed; attempt += 1) {
+        raw = await callStructured(
+          [{role:"system",content:promptV93}],
+          attempt === 1 ? 0.12 : 0.05,
+          9000,
+          120000,
+          plannerUsage,
+          PLANNER_MODEL,
+          "low"
+        );
+        const candidate = _v93ExperiencePlanJSON_(raw);
+        if (candidate && Array.isArray(candidate.stays)) parsed = candidate;
+        else console.warn("[ITBMO V93 EXPERIENCE KNOWLEDGE] internal structured retry", {attempt,raw_length:String(raw || "").length});
+      }
+      if (!parsed || !Array.isArray(parsed.stays)) {
+        console.warn("[ITBMO V93 EXPERIENCE KNOWLEDGE] invalid response", {raw_length:String(raw || "").length});
+        return res.status(502).json({ok:false,code:"EXPERIENCE_KNOWLEDGE_INVALID_RESPONSE",retryable:true});
+      }
+      return res.status(200).json({...parsed,version:"V93",ok:true,usage:_usagePayload_(plannerUsage)});
+    }
+
+    /* V92 legacy contract retained as an inert reference during the V93 branch.
+       It is not reachable from the public experience_plan mode. */
     /* EXPERIENCE PLAN V89 · one lightweight strategic pass before Route Resolver.
        It discovers a bounded but complete destination inventory, classifies the
        overnight base and proposes an allocation. Browser-side deterministic code
        remains authoritative for priorities, dates, capacity, conservation,
        conflicts and physical units. */
-    if (mode === "experience_plan") {
+    if (mode === "experience_plan_v92_legacy") {
       const input = body?.experience_plan && typeof body.experience_plan === "object"
         ? body.experience_plan : null;
       const stays = Array.isArray(input?.stays) ? input.stays.slice(0, 30) : [];
