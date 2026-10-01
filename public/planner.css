@@ -9204,3 +9204,9 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .gj-story-node--managed .gj-story-node-actions button{min-width:28px;min-height:28px;padding:4px 7px;border-radius:8px;font-size:.68rem;line-height:1.05;box-shadow:none}
 .gj-story-node--managed .gj-story-main{width:100%}
 @media(max-width:760px){.gj-story-node--managed .gj-story-node-actions{justify-content:flex-end}}
+
+/* V85.1 · Auth-gated journey entry + clearer guided-route microcopy */
+.guided-journey-entry__button:disabled,.guided-journey-entry__button[aria-disabled="true"]{cursor:not-allowed;filter:saturate(.2);opacity:.48;box-shadow:none;transform:none;pointer-events:none}
+.gj-choice--featured{border-color:#35bde8!important;box-shadow:0 10px 28px rgba(20,157,211,.12)}
+.gj-choice--featured b{color:#087cae}
+.gj-field-help{display:block;margin:.25rem 0 .4rem;color:rgba(11,31,59,.64);font-weight:500;line-height:1.35}
