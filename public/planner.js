@@ -483,6 +483,11 @@ const $save     = qs('#save-destinations');
 const $start    = qs('#start-planning');
 
 const $chatBox  = qs('#chat-container');
+if($chatBox){
+  $chatBox.style.display='none';
+  $chatBox.hidden=true;
+  $chatBox.setAttribute('aria-hidden','true');
+}
 const $chatM    = qs('#chat-messages');
 const $chatI    = qs('#chat-input');
 const $send     = qs('#send-btn');
@@ -9858,13 +9863,12 @@ async function restorePaidGenerationIfNeeded(){
     const plannerMode=String(params.get('mode')||'').trim().toLowerCase();
     const requestedTripId=String(params.get('trip_id') || '').trim();
 
-    // V85.4 UX invariant: an explicit NEW itinerary is always a clean construction.
-    // Never hydrate/recover a prior trip merely because it is still the active/recoverable trip.
-    if(plannerMode==='new' && !requestedTripId){
-      // V85.5: NEW means pristine V85 entry UI. Do not leave any recovered
-      // planning-chat/post-payment surface visible behind the route launcher.
+    // V85.11: Planner without an explicit trip_id is ALWAYS a pristine entry.
+    // Never resurrect an active trip, legacy chat, preferences or post-generation UI.
+    // The only unfinished-route recovery allowed is the in-memory X-close recovery
+    // used by openTripStoryBuilder() during this same page lifetime.
+    if(!requestedTripId){
       storeActiveTripId(null);
-      try{ _tripStoryClearDraft_(); }catch(_){}
       try{ _travelV2()?.setTripStory?.(null); }catch(_){}
 
       planningStarted=false;
@@ -9874,9 +9878,13 @@ async function restorePaidGenerationIfNeeded(){
       agentConversationLang=null;
       preferencesStageTripId=null;
       preferencesConfirmedTripId=null;
+      currentTripId=null;
+      paymentGateSatisfiedTripId=null;
 
       if($chatBox){
         $chatBox.style.display='none';
+        $chatBox.hidden=true;
+        $chatBox.setAttribute('aria-hidden','true');
         $chatBox.classList.remove('is-planning-complete');
       }
       if($chatM) $chatM.innerHTML='';
@@ -9887,13 +9895,12 @@ async function restorePaidGenerationIfNeeded(){
         prefStage.classList.remove('is-stage-active','is-confirmed');
         prefStage.classList.add('is-stage-hidden');
         prefStage.setAttribute('aria-hidden','true');
+        prefStage.hidden=true;
       }
 
       const summary=qs('#trip-story-summary');
       if(summary) summary.hidden=true;
 
-      // Reset stays available as the secondary utility, but never exposes
-      // the legacy Planner Chat simply by entering mode=new.
       return;
     }
 
