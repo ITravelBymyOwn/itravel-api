@@ -2973,8 +2973,21 @@ function setPostPaymentTripConfigurationLocked(locked=true){
   qs('#trip-story-summary')?.classList.toggle('is-payment-locked',isLocked);
 }
 
+function _handoffGuidedRouteToPersonalization_(){
+  // V85.14 · One modal journey, one active surface.
+  // Once Route is saved and Personalization starts, the Route overlay must not
+  // remain above/below the next step. This is a UI handoff only; it does not
+  // alter the saved trip, payment entitlement or generation recovery state.
+  const routeOverlay=document.querySelector('#guided-trip-story-overlay');
+  if(routeOverlay) routeOverlay.remove();
+  document.body.classList.remove('trip-story-open');
+  document.body.classList.add('guided-preferences-open');
+  _tripStoryClearDraft_();
+}
+
 function showPreferencesStage(){
   if(!$preferencesStage || !currentTripId) return;
+  _handoffGuidedRouteToPersonalization_();
 
   // Do not lock here: this screen can be reached before payment in non-commerce/test flows.
   // Locking is applied only after a positive server payment/admin-bypass entitlement.
@@ -3166,7 +3179,7 @@ function openGuidedPersonalizationJourney(){
   let step='global', index=0;
   const overlay=document.createElement('div'); overlay.id='guided-personalization-overlay'; overlay.className='trip-story-overlay guided-journey-overlay guided-personalization-overlay';
   overlay.innerHTML=`<div class="guided-journey" role="dialog" aria-modal="true"><header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'Tu recorrido ya está listo. Ahora hagámoslo realmente tuyo.':'Your route is ready. Now let’s make it truly yours.'}</p></div><button type="button" data-gp-close>×</button></header><nav class="guided-journey__progress"><button class="is-done">${es?'Viajeros':'Travelers'}</button><i>›</i><button class="is-done">${es?'Ruta':'Route'}</button><i>›</i><button class="is-active">${es?'Personalización':'Personalization'}</button><i>›</i><button disabled>${es?'Itinerario':'Itinerary'}</button></nav><div class="guided-journey__layout"><main class="guided-journey__active" data-gp-active></main><aside class="guided-journey__story"><div class="guided-journey__story-head"><div><small>${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><b>${es?'Tu viaje sigue tomando forma':'Your trip keeps taking shape'}</b></div><button type="button" id="guided-info-chat-open">Info Chat · <span data-gp-chat-left>${Number(document.querySelector('#info-chat-remaining')?.textContent?.match(/\d+/)?.[0]||0)}</span></button></div><div data-gp-story></div></aside></div><button class="guided-journey__mobile-story" type="button" data-gp-mobile>${es?'Ver mi recorrido':'View my journey'}</button></div>`;
-  document.body.appendChild(overlay); document.body.classList.add('guided-preferences-open');
+  document.body.classList.remove('trip-story-open'); document.body.classList.add('guided-preferences-open'); document.body.appendChild(overlay);
   const active=overlay.querySelector('[data-gp-active]'), storyHost=overlay.querySelector('[data-gp-story]');
   const shell=(eyebrow,title,copy,content,actions='')=>`<section class="gj-focus"><small class="gj-focus__eyebrow">${eyebrow}</small><h3>${title}</h3>${copy?`<p>${copy}</p>`:''}<div class="gj-focus__content">${content}</div><div class="gj-focus__actions">${step!=='global'?`<button type="button" class="gj-back" data-gp-back><span aria-hidden="true">←</span><span>${es?'Atrás':'Back'}</span></button>`:''}${actions}</div></section>`;
   const next=(label)=>`<button type="button" class="gj-primary" data-gp-next>${label}<span>→</span></button>`;
