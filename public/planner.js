@@ -29,8 +29,8 @@ const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 /* ---------- Deployment contract ----------
    Generation is allowed only when HTML, planner JS and the Vercel API belong
    to the same build. This is intentionally outside the tourism engine. */
-const ITBMO_PLANNER_BUILD='V98';
-const ITBMO_GENERATION_PROTOCOL='physical-units-v18';
+const ITBMO_PLANNER_BUILD='V99';
+const ITBMO_GENERATION_PROTOCOL='physical-units-v19';
 window.__ITBMO_PLANNER_BUILD__=ITBMO_PLANNER_BUILD;
 console.info('[ITBMO BUILD]',{planner:ITBMO_PLANNER_BUILD,protocol:ITBMO_GENERATION_PROTOCOL,expected:window.__ITBMO_EXPECTED_PLANNER_BUILD__||null});
 
@@ -77,7 +77,7 @@ function _v95ShowDeploymentUpdate_(error={}){
   </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('#itbmo-build-refresh')?.addEventListener('click',_v95FreshPlannerReload_);
-  console.warn('[ITBMO V98 BUILD ALIGNMENT] generation blocked before paid model calls',{
+  console.warn('[ITBMO V99 BUILD ALIGNMENT] generation blocked before paid model calls',{
     code:error?.code||'ITBMO_BUILD_ALIGNMENT_REQUIRED',
     expected:error?.expected||ITBMO_PLANNER_BUILD,
     received:error?.received||null
@@ -111,7 +111,7 @@ async function _v95AssertDeploymentAlignment_(){
         mismatch.received=serverBuild||`HTTP_${response.status||0}`;
         throw mismatch;
       }
-      console.info('[ITBMO V98 BUILD ALIGNMENT] verified before generation',{html:htmlBuild,planner:ITBMO_PLANNER_BUILD,server:serverBuild,protocol});
+      console.info('[ITBMO V99 BUILD ALIGNMENT] verified before generation',{html:htmlBuild,planner:ITBMO_PLANNER_BUILD,server:serverBuild,protocol});
       return true;
     }catch(error){
       lastError=error;
@@ -8464,7 +8464,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     });
     planningUnits.forEach((u,i)=>u.sequence=i+1);
     const sealedUnits=_v93SealPhysicalPlanningUnits_(planningUnits);
-    console.info('[ITBMO V98 PHYSICAL UNITS]',sealedUnits.map(u=>({type:u.unit_type,id:u.id,base:u.base_destination,destination:u.physical_destination,days:u.days,windows:u.windows.length,source:u.contract_source,owned_pois:u.owned_pois?.length||0,excluded_pois:u.excluded_pois?.length||0,seal:u.contract_seal_id||null})));
+    console.info('[ITBMO V99 PHYSICAL UNITS]',sealedUnits.map(u=>({type:u.unit_type,id:u.id,base:u.base_destination,destination:u.physical_destination,days:u.days,windows:u.windows.length,source:u.contract_source,owned_pois:u.owned_pois?.length||0,excluded_pois:u.excluded_pois?.length||0,seal:u.contract_seal_id||null})));
     return sealedUnits.filter(u=>u.windows.length||u.days.length);
   }
 
@@ -8942,7 +8942,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     const allowOverlay=Boolean(aurora?.plausible)&&String(unit?.unit_type||'')==='BASE_STAY'&&(unit?.days||[]).some(day=>Number(day)===primary);
     if(allowOverlay)return input;
     const kept=input.filter(row=>!_isAuroraActivityRow_(row));
-    if(kept.length!==input.length)console.info(`[ITBMO V98 AURORA OVERLAY] ${unitCity} · ${unit.id}: removed ${input.length-kept.length} aurora row(s) outside the primary base-day overlay`);
+    if(kept.length!==input.length)console.info(`[ITBMO V99 AURORA OVERLAY] ${unitCity} · ${unit.id}: removed ${input.length-kept.length} aurora row(s) outside the primary base-day overlay`);
     return kept;
   };
   let rows=_v3StampStayRows_(_dedupeRows_(removeUnownedAurora(initialRows||[])),unit);
@@ -9895,7 +9895,7 @@ function _hydrateGenerationTrip_(trip){
     ? checkpoint.city_meta
     : {};
   if(incompatibleInterruptedCheckpoint){
-    console.warn('[ITBMO V98 RECOVERY MIGRATION] incompatible interrupted generation discarded; traveler input and payment preserved',{
+    console.warn('[ITBMO V99 RECOVERY MIGRATION] incompatible interrupted generation discarded; traveler input and payment preserved',{
       previous_build:checkpoint.planner_build||'legacy',
       current_build:ITBMO_PLANNER_BUILD,
       trip_id:trip.id
@@ -10214,7 +10214,7 @@ async function runPaidGeneration({manualRetry=false}={}){
           generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
         };
     if(!serverCheckpointCompatible){
-      console.warn('[ITBMO V98 RECOVERY MIGRATION] stale server checkpoint ignored after generation_begin',{
+      console.warn('[ITBMO V99 RECOVERY MIGRATION] stale server checkpoint ignored after generation_begin',{
         previous_build:serverCheckpoint.planner_build||'legacy',
         current_build:ITBMO_PLANNER_BUILD
       });
@@ -15284,7 +15284,7 @@ function _v86ExperiencePlanFingerprint_(story={}){
     dayTrips:_v93GenuineExplicitDayTrips_(st).map(dt=>({id:dt.id,day:dt.day,place:dt.place}))
   }));
   return _v86StableHash_(JSON.stringify({
-    allocation_schema:'V98_SELECTED_PHYSICAL_UNITS_STRICT_OWNERSHIP',
+    allocation_schema:'V99_SELECTED_UNITS_LOCAL_ROUTE_REPAIR',
     explicit,
     preferences:plannerState?.preferencesV2||null,
     special:plannerState?.specialConditions||'',
@@ -15344,7 +15344,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
       return claims.filter(claim=>String(claim?.owner_scope||'').toUpperCase()==='EXCURSION').every(claim=>(st.dayTrips||[]).some(dt=>String(dt?._itbmo_inventory_id||'')===String(claim?.owner_inventory_id||'')));
     });
   if(reusable){
-    console.info('[ITBMO V98 EXPERIENCE CONTRACT] sealed plan reused',story._itbmo_experience_plan_v86);
+    console.info('[ITBMO V99 EXPERIENCE CONTRACT] sealed plan reused',story._itbmo_experience_plan_v86);
     return {ok:true,planned:Number(story._itbmo_experience_plan_v86.planned||0),reused:true};
   }
   const pendingAutomaticRequirement=Boolean(story._itbmo_experience_plan_v86?.requires_automatic_discovery);
@@ -15358,7 +15358,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
     engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
     applyTripStoryToCompatibility(story);renderTripStorySummary();
     if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
-    console.info('[ITBMO V98 USER ROUTE] dense traveler-authored physical structure preserved; automatic discovery bypassed',story._itbmo_experience_plan_v86);
+    console.info('[ITBMO V99 USER ROUTE] dense traveler-authored physical structure preserved; automatic discovery bypassed',story._itbmo_experience_plan_v86);
     return {ok:true,planned:0,reused:false,bypassed_for_user_route:true};
   }
   const transitionDates=_v71MainTransitionDates_(story);
@@ -15379,12 +15379,12 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
       user_day_trips:_v93GenuineExplicitDayTrips_(st).map(dt=>({id:dt.id,day:Number(dt.day||1),identity:dt.place,mandatory:true,transport_mode:dt.outbound?.transportMode||null}))
     }))
   };
-  console.info('[ITBMO V98 EXPERIENCE KNOWLEDGE] requesting compact inventory, route manifests and polar-light profile',payload.stays.map(st=>({base:st.base,days:st.days,user_day_trips:st.user_day_trips.length,budget:st.inventory_budget})));
+  console.info('[ITBMO V99 EXPERIENCE KNOWLEDGE] requesting compact inventory, route manifests and polar-light profile',payload.stays.map(st=>({base:st.base,days:st.days,user_day_trips:st.user_day_trips.length,budget:st.inventory_budget})));
   let response;
   try{response=await _v86FetchExperiencePlan_(payload);}
   catch(error){
     if(explicitOnlyFallback&&!removedAutomatic){
-      console.warn('[ITBMO V98 EXPERIENCE CONTRACT] strategic knowledge unavailable; continuing only because the route is genuinely traveler-explicit',error);
+      console.warn('[ITBMO V99 EXPERIENCE CONTRACT] strategic knowledge unavailable; continuing only because the route is genuinely traveler-explicit',error);
       return {ok:false,planned:0,reused:false,bypassed_for_explicit_route:true,error};
     }
     story._itbmo_experience_plan_v86={version:'V94',fingerprint,contract_state:'PENDING_RETRY',requires_automatic_discovery:true,planned:0,error_code:String(error?.message||'EXPERIENCE_KNOWLEDGE_FAILED'),updated_at:new Date().toISOString()};
@@ -15392,7 +15392,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
     if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
     const blocked=new Error('V94_EXPERIENCE_CONTRACT_REQUIRED');
     blocked.code='V94_EXPERIENCE_CONTRACT_REQUIRED';blocked.recoveryStage='experience_plan';blocked.retryable=true;blocked.cause=error;
-    console.warn('[ITBMO V98 EXPERIENCE CONTRACT] fail-closed before Route Resolver/V3; retry resumes this stage',error);
+    console.warn('[ITBMO V99 EXPERIENCE CONTRACT] fail-closed before Route Resolver/V3; retry resumes this stage',error);
     throw blocked;
   }
   const byId=new Map((response.stays||[]).map(plan=>[String(plan?.stay_id||''),plan]));
@@ -15627,7 +15627,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
           if(existing==null||existing<minimum)next.start=_minutesToHHMM_(minimum);
         }
       }
-      console.info('[ITBMO V98 AURORA OVERLAY]',{base:st.place,primary_day:aurora.primary_day,backup_days:aurora.backup_days,daytime_excursions:(st.dayTrips||[]).length});
+      console.info('[ITBMO V99 AURORA OVERLAY]',{base:st.place,primary_day:aurora.primary_day,backup_days:aurora.backup_days,daytime_excursions:(st.dayTrips||[]).length});
     }else{aurora.primary_day=null;aurora.backup_days=[];}
     st._itbmo_experience_plan_v86={
       profile,profile_confidence:plan.profile_confidence||'medium',
@@ -15648,7 +15648,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
   engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
   applyTripStoryToCompatibility(story);renderTripStorySummary();
   if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
-  console.info('[ITBMO V98 EXPERIENCE CONTRACT] deterministic balanced units, sealed POI ownership and polar-light profiles ready',{planned,stays:story.stays.map(st=>({base:st.place,profile:st._itbmo_experience_plan_v86?.profile,light:st._itbmo_experience_plan_v86?.light_profile,coverage:st._itbmo_experience_plan_v86?.inventory_coverage,budget:st._itbmo_experience_plan_v86?.allocation_budget,ownership:st._itbmo_experience_plan_v86?.poi_ownership?.length||0,day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place,origin:dt._itbmo_origin,duration:dt._itbmo_duration_class,effort:dt._itbmo_effort_class,priority:dt._itbmo_priority,inventory_id:dt._itbmo_inventory_id||null,microstops:dt._itbmo_route_manifest?.microstops?.length||0,topology:dt._itbmo_route_manifest?.topology||null}))}))});
+  console.info('[ITBMO V99 EXPERIENCE CONTRACT] deterministic balanced units, sealed POI ownership and polar-light profiles ready',{planned,stays:story.stays.map(st=>({base:st.place,profile:st._itbmo_experience_plan_v86?.profile,light:st._itbmo_experience_plan_v86?.light_profile,coverage:st._itbmo_experience_plan_v86?.inventory_coverage,budget:st._itbmo_experience_plan_v86?.allocation_budget,ownership:st._itbmo_experience_plan_v86?.poi_ownership?.length||0,day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place,origin:dt._itbmo_origin,duration:dt._itbmo_duration_class,effort:dt._itbmo_effort_class,priority:dt._itbmo_priority,inventory_id:dt._itbmo_inventory_id||null,microstops:dt._itbmo_route_manifest?.microstops?.length||0,topology:dt._itbmo_route_manifest?.topology||null}))}))});
   return {ok:true,planned,reused:false};
 }
 function _v71DayTripHasTravelerClockAuthority_(dt={}){
@@ -15855,11 +15855,11 @@ function _v87RouteSemanticIssue_(movement={},route=null){
   if(outArrival<=outDeparture||retDeparture<=outArrival||retArrival<=retDeparture)return {code:'DAYTRIP_CHRONOLOGY_INVALID',detail:aurora?'Require departure < outbound arrival < return departure < final arrival across the supplied night dates.':'Require departure < outbound arrival < return departure < final arrival on the same calendar date.'};
   const totalMinutes=retArrival-outDeparture;
   if(durationClass==='AURORA_PRIMARY'&&totalMinutes<240)return {code:'AURORA_WINDOW_TOO_SHORT',detail:`Aurora logistics provide only ${totalMinutes} minutes door to door; reserve at least 240 minutes for travel, observation uncertainty and return.`};
-  const minimumUseful={FULL_DAY:120,HALF_DAY_AM:60,HALF_DAY_PM:60,EVENING:45,AURORA_PRIMARY:60}[durationClass]||60;
-  const outboundMode=outLast.mode||outFirst.mode||route.primary_mode||'other';
-  const returnMode=retFirst.mode||route.primary_mode||outboundMode||'other';
-  const usefulMinutes=retDeparture-outArrival-_v87RouteBufferMinutes_(outboundMode,'arrival')-_v87RouteBufferMinutes_(returnMode,'prep');
-  if(usefulMinutes<minimumUseful)return {code:'DAYTRIP_WINDOW_TOO_THIN',detail:`The route leaves only ${Math.max(0,usefulMinutes)} useful minutes; ${minimumUseful} are required for ${durationClass}.`};
+  // V99 cumulative correction: FULL_DAY / HALF_DAY classes describe allocation
+  // shape, not a minimum dwell requirement. 120/60 must never be interpreted
+  // as minutes that have to remain between arrival and the return movement.
+  // Physical feasibility here is chronology/topology only; activity dwell is
+  // planned inside the selected unit by the deterministic unit scheduler.
   return null;
 }
 
@@ -15873,9 +15873,50 @@ function _v87EstimatedDayTripClockIssue_(dt={}){
   if(durationClass==='AURORA_PRIMARY'&&Number(dt?._itbmo_return_day_offset||0)>0){retDeparture+=1440;retArrival+=1440;}
   if(outArrival<=outDeparture||retDeparture<=outArrival||retArrival<=retDeparture)return 'DAYTRIP_CHRONOLOGY_INVALID';
   if(durationClass==='AURORA_PRIMARY'&&retArrival-outDeparture<240)return 'AURORA_WINDOW_TOO_SHORT';
-  const minimumUseful={FULL_DAY:120,HALF_DAY_AM:60,HALF_DAY_PM:60,EVENING:45,AURORA_PRIMARY:60}[durationClass]||60;
-  const usefulMinutes=retDeparture-outArrival-_v87RouteBufferMinutes_(dt?.outbound?.transportMode,'arrival')-_v87RouteBufferMinutes_(dt?.return?.transportMode||dt?.outbound?.transportMode,'prep');
-  return usefulMinutes<minimumUseful?'DAYTRIP_WINDOW_TOO_THIN':null;
+  // Do not invalidate estimated day-trip clocks from a fabricated minimum
+  // useful-time threshold. FULL_DAY/HALF_DAY are scheduling envelopes only.
+  return null;
+}
+
+
+function _v99RepairSelectedDayTripRoute_(movement={},route=null,issue=null){
+  if(!route||String(movement.kind||'')!=='daytrip')return null;
+  const durationClass=_v86DurationClass_(movement.duration_class||'FULL_DAY');
+  if(durationClass==='AURORA_PRIMARY')return null;
+  const legs=Array.isArray(route.legs)?route.legs:[];
+  const outbound=legs.filter(leg=>String(leg?.direction||'').toLowerCase()==='outbound');
+  const returning=legs.filter(leg=>String(leg?.direction||'').toLowerCase()==='return');
+  // Repair only a route whose physical topology exists. We never invent a
+  // missing outbound/return chain; this layer only normalizes bad clocks.
+  if(!outbound.length||!returning.length)return null;
+  const legMinutes=leg=>Math.max(1,Math.min(720,Number(leg?.estimated_minutes||0)||0));
+  const outMinutes=Math.max(15,outbound.reduce((sum,leg)=>sum+legMinutes(leg),0)||60);
+  const retMinutes=Math.max(15,returning.reduce((sum,leg)=>sum+legMinutes(leg),0)||outMinutes);
+  const start=_hhmmToMinutes_(movement.earliest_departure);
+  const end=_hhmmToMinutes_(movement.user_return_by);
+  if(start==null||end==null||end<=start)return null;
+  const outMode=outbound.at(-1)?.mode||outbound[0]?.mode||route.primary_mode||movement.user_mode||movement.recommended_modes?.[0]||'other';
+  const retMode=returning[0]?.mode||route.primary_mode||outMode;
+  const buffers=_v87RouteBufferMinutes_(outMode,'arrival')+_v87RouteBufferMinutes_(retMode,'prep');
+  // The repair only needs a chronologically possible positive activity window.
+  // No 120/60-minute minimum is imposed on FULL_DAY/HALF_DAY units.
+  if(end-start-outMinutes-retMinutes-buffers<=0)return null;
+  const usefulStart=start+outMinutes;
+  const returnDeparture=end-retMinutes;
+  let cursor=start;
+  const repairedOutbound=outbound.map((leg,index)=>{
+    const minutes=legMinutes(leg)||Math.max(1,Math.round(outMinutes/outbound.length));
+    const departure=cursor;cursor+=minutes;
+    return {...leg,direction:'outbound',departure_date:movement.departure_date,arrival_date:movement.departure_date,departure_time:_minutesToHHMM_(departure),arrival_time:_minutesToHHMM_(cursor),estimated_minutes:minutes};
+  });
+  cursor=returnDeparture;
+  const repairedReturn=returning.map((leg,index)=>{
+    const minutes=legMinutes(leg)||Math.max(1,Math.round(retMinutes/returning.length));
+    const departure=cursor;cursor+=minutes;
+    return {...leg,direction:'return',departure_date:movement.departure_date,arrival_date:movement.departure_date,departure_time:_minutesToHHMM_(departure),arrival_time:_minutesToHHMM_(cursor),estimated_minutes:minutes};
+  });
+  const repaired={...route,movement_id:movement.movement_id,departure_date:movement.departure_date,departure_time:_minutesToHHMM_(start),arrival_date:movement.departure_date,arrival_time:_minutesToHHMM_(usefulStart),return_departure_date:movement.departure_date,return_departure_time:_minutesToHHMM_(returnDeparture),return_arrival_date:movement.departure_date,return_arrival_time:_minutesToHHMM_(cursor),legs:[...repairedOutbound,...repairedReturn],confidence:'planning_estimate',_itbmo_deterministic_clock_repair:true,_itbmo_repaired_from:issue?.code||null};
+  return _v87RouteSemanticIssue_(movement,repaired)?null:repaired;
 }
 
 async function _v87ResolveSemanticRoutes_(movements=[],initialRoutes=[]){
@@ -15900,6 +15941,14 @@ async function _v87ResolveSemanticRoutes_(movements=[],initialRoutes=[]){
       route=(retried.routes||[]).find(candidate=>String(candidate?.movement_id||'')===id)||null;
       issue=_v87RouteSemanticIssue_(movement,route);
       if(!issue&&route)byId.set(id,route);
+    }
+    if(issue){
+      const repaired=_v99RepairSelectedDayTripRoute_(movement,route,issue);
+      if(repaired){
+        byId.set(id,repaired);
+        console.warn('[ITBMO V99 ROUTE DETERMINISTIC REPAIR]',{movement_id:id,rejected_code:issue.code,departure:repaired.departure_time,return_arrival:repaired.return_arrival_time});
+        issue=null;
+      }
     }
     if(issue)byId.set(id,{_itbmo_semantic_issue:issue});
   }
