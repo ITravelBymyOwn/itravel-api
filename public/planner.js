@@ -483,6 +483,11 @@ const $save     = qs('#save-destinations');
 const $start    = qs('#start-planning');
 
 const $chatBox  = qs('#chat-container');
+if($chatBox){
+  $chatBox.style.display='none';
+  $chatBox.hidden=true;
+  $chatBox.setAttribute('aria-hidden','true');
+}
 const $chatM    = qs('#chat-messages');
 const $chatI    = qs('#chat-input');
 const $send     = qs('#send-btn');
@@ -1008,6 +1013,13 @@ function renderAuthState(){
   const registered = Boolean(logged && currentUser?.is_registered);
   const pending = Boolean(logged && currentUser?.registration_pending);
   const guest = Boolean(logged && !registered && !pending);
+  const guidedJourneyButton=qs('#build-guided-journey');
+  const guidedJourneyEnabled=Boolean(logged && !pending && !guestUpgradeFormOpen);
+  if(guidedJourneyButton){
+    guidedJourneyButton.disabled=!guidedJourneyEnabled;
+    guidedJourneyButton.setAttribute('aria-disabled',String(!guidedJourneyEnabled));
+    guidedJourneyButton.title=guidedJourneyEnabled?'':(getLang()==='es'?'Inicia sesión o continúa como invitado para crear tu viaje.':'Sign in or continue as a guest to build your trip.');
+  }
 
   if($accountGuest) $accountGuest.style.display = (!logged || (guest && guestUpgradeFormOpen)) ? 'block' : 'none';
   if($accountAuthenticated) $accountAuthenticated.style.display = logged ? 'flex' : 'none';
@@ -1127,6 +1139,93 @@ async function registerITBMOUser(){
   finally{ setAuthBusy(false); }
 }
 
+function resetFreshPrePaymentPlanningUI(){
+  /* V85.13 AUTH BOUNDARY
+     A successful sign-in/guest entry starts a pristine pre-payment Planner.
+     The ONLY cross-entry recovery authority is the server-side paid-generation
+     checkpoint handled by restorePaidGenerationIfNeeded(). The X-close draft is
+     intentionally page-memory only and is discarded at an auth boundary. */
+  try{ _tripStoryClearDraft_(); }catch(_){ }
+  try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
+
+  savedDestinations=[];
+  itineraries={};
+  cityMeta={};
+  session=[];
+  hasSavedOnce=false;
+  pendingChange=null;
+  saveLockWarningAccepted=false;
+  paymentWarningAcceptedTripId=null;
+  paymentGateSatisfiedTripId=null;
+  generationRecoveryState=null;
+  planningStarted=false;
+  metaProgressIndex=0;
+  collectingHotels=false;
+  isItineraryLocked=false;
+  activeCity=null;
+  agentConversationLang=null;
+  preferencesStageTripId=null;
+  preferencesConfirmedTripId=null;
+  currentTripId=null;
+  storeActiveTripId(null);
+
+  if($cityList){ $cityList.innerHTML=''; addCityRow(); }
+  if($tabs) $tabs.innerHTML='';
+  if($itWrap) $itWrap.innerHTML='';
+  closeImmersiveItinerary();
+  syncImmersiveItineraryLauncher();
+
+  if($chatBox){
+    $chatBox.style.display='none';
+    $chatBox.hidden=true;
+    $chatBox.setAttribute('aria-hidden','true');
+    $chatBox.classList.remove('is-planning-complete');
+  }
+  if($chatM) $chatM.innerHTML='';
+  setPlanningChatLocked(true);
+
+  hidePreferencesStage({reset:true});
+  if($preferencesField){
+    $preferencesField.value='';
+    $preferencesField.style.height='';
+    $preferencesField.style.overflowY='hidden';
+  }
+
+  resetTravelersUI();
+  if(typeof plannerState!=='undefined' && plannerState){
+    plannerState.destinations=[];
+    plannerState.specialConditions='';
+    plannerState.travelers={adults:1,young:0,children:0,infants:0,seniors:0};
+    plannerState.travelerProfiles=null;
+    plannerState.budget='';
+    plannerState.currency='USD';
+    plannerState.travelModelV2=null;
+    plannerState.preferencesV2=null;
+    plannerState.collectingItineraryLang=false;
+    plannerState.itineraryLang='';
+    plannerState.forceReplan={};
+  }
+  if(_travelV2()?.state){
+    _travelV2().state.routes={};
+    _travelV2().state.preferences={global:{},places:{}};
+    _travelV2().state.itineraryLanguage='';
+  }
+
+  if($start){
+    delete $start.dataset.itbmoConsumed;
+    $start.disabled=true;
+    $start.setAttribute('aria-disabled','true');
+  }
+  setExportToolbarVisibility(false);
+  qsa('.date-tooltip').forEach(node=>node.remove());
+  if($sidebar) $sidebar.classList.remove('disabled');
+  setSavedSetupLocked(false);
+
+  const summary=qs('#trip-story-summary');
+  if(summary) summary.hidden=true;
+  updateAddCityButtonState();
+}
+
 async function loginITBMOUser(){
   const email=String($accountLoginEmail?.value || '').trim().toLowerCase();
   const password=String($accountLoginPassword?.value || '');
@@ -1136,7 +1235,7 @@ async function loginITBMOUser(){
   try{
     const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); resetFreshPrePaymentPlanningUI(); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
     setAccountMessage(authCopy('loginFail'),'error');
   }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1153,7 +1252,7 @@ async function continueAsGuest(){
   try{
     const {response,data}=await postUserAction({action:'guest',name,email,...authTrackingPayload(),...legalPayload('guest')});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); resetFreshPrePaymentPlanningUI(); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
     if(response.status===409 && data?.account_exists) setAccountMessage(authCopy('guestHasAccount'),'error');
     else if(response.status===403 && data?.guest_mismatch) setAccountMessage(authCopy('guestMismatch'),'error');
@@ -3062,7 +3161,7 @@ function openGuidedPersonalizationJourney(){
   if(!engine.state.itineraryLanguage) engine.state.itineraryLanguage=es?'Español':'English';
   engine.state.preferences=engine.state.preferences||{global:{notes:''},places:{}};
   engine.state.preferences.global=engine.state.preferences.global||{notes:''};
-  const defaults=()=>({saved:false,lodgingChoice:'recommend',lodgingText:'',arrivalTransport:'recommend',localTransport:'recommend',pace:'balanced',interests:[],mustDo:'',avoid:'',reservations:'',notes:''});
+  const defaults=()=>({saved:false,lodgingChoice:'',lodgingText:'',arrivalTransport:'',localTransport:'recommend',pace:'balanced',interests:[],mustDo:'',avoid:'',reservations:'',notes:''});
   places.forEach(p=>{engine.state.preferences.places[p.key]=Object.assign(defaults(),engine.state.preferences.places[p.key]||{});});
   let step='global', index=0;
   const overlay=document.createElement('div'); overlay.id='guided-personalization-overlay'; overlay.className='trip-story-overlay guided-journey-overlay guided-personalization-overlay';
@@ -3075,12 +3174,17 @@ function openGuidedPersonalizationJourney(){
   const renderStory=()=>{const story=engine.state.tripStory||model?.trip_story;const bits=[];(story?.stays||[]).forEach((st,i)=>{const key=String(st.place||'').trim().toLowerCase(),pref=engine.state.preferences.places[key],done=Boolean(pref?.saved);bits.push(`${i?'<div class="gj-story-line">↓</div>':''}<button type="button" class="gj-story-node gj-story-node--editable" data-gp-place="${i}"><span>${done?'✓':String(i+1).padStart(2,'0')}</span><div><b>${_tripStoryEsc_(st.place)}</b><small>${_tripStoryDMY_(st.startDate)} · ${st.days} ${es?'día(s)':'day(s)'}</small>${done?`<em>✦ ${es?'Personalizado':'Personalized'}</em>`:`<em>${es?'Pendiente de personalizar':'Personalization pending'}</em>`}</div></button>`);});storyHost.innerHTML=bits.join('');storyHost.querySelectorAll('[data-gp-place]').forEach(b=>b.onclick=()=>{index=Number(b.dataset.gpPlace);step='place';render();});};
   const render=()=>{renderStory();
     if(step==='global'){
-      active.innerHTML=shell(es?'PERSONALIZACIÓN DE TU VIAJE':'PERSONALIZE YOUR TRIP',es?'¿Hay algo que debamos tener en cuenta durante todo tu viaje?':'Anything we should keep in mind throughout your trip?',es?'Es opcional. Puedes contarnos restricciones, necesidades, estilo de viaje o cualquier preferencia general.':'Optional. Tell us about restrictions, needs, travel style or any general preference.',`<textarea class="gj-premium-textarea" data-gp-global placeholder="${es?'Ej.: ritmo tranquilo, viajamos con niños, priorizar experiencias locales…':'E.g. relaxed pace, traveling with children, prioritize local experiences…'}">${_tripStoryEsc_(engine.state.preferences.global.notes||'')}</textarea>`,next(es?'Continuar':'Continue'));active.querySelector('[data-gp-next]').onclick=()=>{engine.state.preferences.global.notes=active.querySelector('[data-gp-global]').value;persist();step='place';index=0;render();};return;
+      active.innerHTML=shell(es?'PERSONALIZACIÓN DE TU VIAJE':'PERSONALIZE YOUR TRIP',es?'¿Hay algo que debamos tener en cuenta durante todo tu viaje?':'Anything we should keep in mind throughout your trip?',es?'Lo que indiques aquí se aplicará a todo tu recorrido. Después podrás añadir información específica para cada destino sin repetir lo general. Es opcional.':'What you enter here will apply to your entire journey. Afterwards you can add specific information for each destination without repeating the general preferences. This is optional.',`<textarea class="gj-premium-textarea" data-gp-global placeholder="${es?'Ej.: ritmo tranquilo, viajamos con niños, priorizar experiencias locales…':'E.g. relaxed pace, traveling with children, prioritize local experiences…'}">${_tripStoryEsc_(engine.state.preferences.global.notes||'')}</textarea>`,next(es?'Continuar':'Continue'));active.querySelector('[data-gp-next]').onclick=()=>{engine.state.preferences.global.notes=active.querySelector('[data-gp-global]').value;persist();step='place';index=0;render();};return;
     }
     if(step==='place'){
       const place=places[index]; if(!place){step='language';render();return;} const pref=engine.state.preferences.places[place.key];
-      active.innerHTML=shell(es?'UNA PARADA A LA VEZ':'ONE STOP AT A TIME',es?`Personalicemos ${_tripStoryEsc_(place.name)}`:`Let’s personalize ${_tripStoryEsc_(place.name)}`,es?'Indica sólo lo que sepas. “Recomiéndame” es una respuesta válida: ITBMO resolverá el resto.':'Tell us only what you know. “Recommend” is a valid answer: ITBMO will resolve the rest.',`<div class="gj-form"><label>${es?'Hospedaje':'Lodging'}<select data-gpp="lodgingChoice"><option value="recommend">${es?'Aún no lo tengo · usa una zona base conveniente':'Not set yet · use a convenient base area'}</option><option value="hotel">${es?'Tengo hotel/alojamiento':'I have lodging'}</option><option value="area">${es?'Sé la zona aproximada':'I know the approximate area'}</option><option value="address">${es?'Tengo dirección / ubicación':'I have an address/location'}</option></select></label><label>${es?'Nombre, zona o dirección (opcional)':'Name, area or address (optional)'}<input data-gpp="lodgingText" value="${_tripStoryEsc_(pref.lodgingText||'')}"></label><label>${es?'Cómo llegarás':'How you will arrive'}<select data-gpp="arrivalTransport"><option value="recommend">${es?'Recomiéndame':'Recommend'}</option><option value="train">${es?'Tren':'Train'}</option><option value="bus">Bus</option><option value="plane">${es?'Avión':'Plane'}</option><option value="car">${es?'Automóvil':'Car'}</option><option value="transfer">Transfer</option><option value="ferry">Ferry</option><option value="other">${es?'Otro':'Other'}</option></select></label><label>${es?`Cómo te moverás en ${_tripStoryEsc_(place.name)}`:`How you will get around ${_tripStoryEsc_(place.name)}`}<select data-gpp="localTransport"><option value="recommend">${es?'Recomiéndame':'Recommend'}</option><option value="walk">${es?'A pie':'Walking'}</option><option value="public">${es?'Transporte público':'Public transport'}</option><option value="car">${es?'Automóvil':'Car'}</option><option value="taxi">Taxi / Uber</option><option value="mixed">${es?'Mixto':'Mixed'}</option></select></label><label>${es?'Ritmo':'Pace'}<select data-gpp="pace"><option value="relaxed">${es?'Relajado':'Relaxed'}</option><option value="balanced">${es?'Equilibrado':'Balanced'}</option><option value="intense">${es?'Intenso':'Intense'}</option></select></label></div><div class="gj-pref-optional"><b>${es?'Afinar esta parada · opcional':'Fine-tune this stop · optional'}</b><label>${es?'Imprescindibles':'Must-do'}<textarea data-gpp="mustDo">${_tripStoryEsc_(pref.mustDo||'')}</textarea></label><label>${es?'Reservas confirmadas':'Confirmed reservations'}<textarea data-gpp="reservations">${_tripStoryEsc_(pref.reservations||'')}</textarea></label><label>${es?'Quiero evitar':'I want to avoid'}<textarea data-gpp="avoid">${_tripStoryEsc_(pref.avoid||'')}</textarea></label><label>${es?'Algo más':'Anything else'}<textarea data-gpp="notes">${_tripStoryEsc_(pref.notes||'')}</textarea></label></div>`,next(index===places.length-1?(es?'Guardar y continuar':'Save and continue'):(es?'Guardar y siguiente destino':'Save and next stop')));
-      active.querySelectorAll('[data-gpp]').forEach(el=>{if(el.tagName==='SELECT')el.value=pref[el.dataset.gpp]||'recommend';});active.querySelector('[data-gp-next]').onclick=()=>{active.querySelectorAll('[data-gpp]').forEach(el=>pref[el.dataset.gpp]=el.value);pref.saved=true;engine.state.preferences.places[place.key]=pref;persist();index+=1;step=index>=places.length?'language':'place';render();requestAnimationFrame(()=>active.scrollTo({top:0,behavior:'smooth'}));};return;
+      active.innerHTML=shell(es?'UNA PARADA A LA VEZ':'ONE STOP AT A TIME',es?`Personalicemos ${_tripStoryEsc_(place.name)}`:`Let’s personalize ${_tripStoryEsc_(place.name)}`,es?'Indica sólo lo que sepas. Si prefieres que ITBMO decida, elige “Recomiéndame”.':'Tell us only what you know. If you prefer ITBMO to decide, choose “Recommend”.',`<div class="gj-form gj-form--personalize"><label>${es?'Hospedaje':'Lodging'}<small class="gj-field-help">${es?'Selecciona la opción que mejor describe lo que ya sabes sobre tu hospedaje.':'Choose the option that best describes what you already know about your lodging.'}</small><select data-gpp="lodgingChoice"><option value="">${es?'Selecciona una opción':'Select an option'}</option><option value="recommend">${es?'Aún no lo tengo · recomiéndame una zona base':'Not set yet · recommend a base area'}</option><option value="hotel">${es?'Ya tengo hotel o alojamiento':'I already have lodging'}</option><option value="area">${es?'Sé la zona aproximada':'I know the approximate area'}</option><option value="address">${es?'Tengo dirección o ubicación':'I have an address/location'}</option></select></label><label>${es?'Nombre, zona o dirección (opcional)':'Name, area or address (optional)'}<small class="gj-field-help">${es?'Complétalo sólo si ya tienes una referencia concreta.':'Complete this only if you already have a specific reference.'}</small><input data-gpp="lodgingText" value="${_tripStoryEsc_(pref.lodgingText||'')}"></label><label>${es?`Cómo te moverás en ${_tripStoryEsc_(place.name)}`:`How you will get around ${_tripStoryEsc_(place.name)}`}<small class="gj-field-help">${es?'Indica tu forma principal de desplazarte dentro del destino; ITBMO combinará opciones cuando tenga sentido.':'Choose your main way of getting around the destination; ITBMO can combine options when useful.'}</small><select data-gpp="localTransport"><option value="recommend">${es?'Recomiéndame':'Recommend'}</option><option value="walk">${es?'A pie':'Walking'}</option><option value="public">${es?'Transporte público':'Public transport'}</option><option value="car">${es?'Automóvil':'Car'}</option><option value="taxi">Taxi / Uber</option><option value="mixed">${es?'Mixto':'Mixed'}</option></select></label><label>${es?'Ritmo':'Pace'}<small class="gj-field-help">${es?'Define cuánto quieres hacer en un día normal.':'Set how much you want to do on a typical day.'}</small><select data-gpp="pace"><option value="relaxed">${es?'Relajado':'Relaxed'}</option><option value="balanced">${es?'Equilibrado':'Balanced'}</option><option value="intense">${es?'Intenso':'Intense'}</option></select></label></div><div class="gj-pref-optional"><div class="gj-pref-optional__head"><b>${es?'Afinar esta parada · opcional':'Fine-tune this stop · optional'}</b><small>${es?`Cuéntanos sólo lo que sea importante para ${_tripStoryEsc_(place.name)}. Si dejas algo vacío, ITBMO decidirá por ti.`:`Tell us only what matters for ${_tripStoryEsc_(place.name)}. If you leave something blank, ITBMO will decide for you.`}</small></div><label>${es?'Imprescindibles':'Must-do'}<small class="gj-field-help">${es?'Indica los lugares o experiencias que sí o sí quieres incluir. Si lo dejas vacío, ITBMO seleccionará los imperdibles más relevantes.':'Enter places or experiences you definitely want included. If blank, ITBMO will select the most relevant highlights.'}</small><textarea data-gpp="mustDo" placeholder="${es?'Ej.: Museo del Prado, Sagrada Familia, paseo en barco…':'E.g. Prado Museum, Sagrada Família, boat ride…'}">${_tripStoryEsc_(pref.mustDo||'')}</textarea></label><label>${es?'Reservas confirmadas':'Confirmed reservations'}<small class="gj-field-help">${es?'Agrega actividades, entradas, restaurantes o tours que ya tengas reservados, idealmente con fecha y hora. ITBMO organizará el recorrido alrededor de ellos.':'Add activities, tickets, restaurants or tours already booked, ideally with date and time. ITBMO will plan around them.'}</small><textarea data-gpp="reservations" placeholder="${es?'Ej.: Louvre · 03/01 · 10:00':'E.g. Louvre · Jan 3 · 10:00'}">${_tripStoryEsc_(pref.reservations||'')}</textarea></label><label>${es?'Quiero evitar':'I want to avoid'}<small class="gj-field-help">${es?'Indica lugares, actividades o situaciones que prefieres excluir de esta parada.':'Enter places, activities or situations you prefer to exclude from this stop.'}</small><textarea data-gpp="avoid" placeholder="${es?'Ej.: demasiados museos, caminatas largas, vida nocturna…':'E.g. too many museums, long walks, nightlife…'}">${_tripStoryEsc_(pref.avoid||'')}</textarea></label><label>${es?'Algo más':'Anything else'}<small class="gj-field-help">${es?'Añade cualquier detalle específico de este destino que no encaje en los campos anteriores.':'Add any destination-specific detail that does not fit the fields above.'}</small><textarea data-gpp="notes" placeholder="${es?'Cualquier detalle adicional para esta parada…':'Any additional detail for this stop…'}">${_tripStoryEsc_(pref.notes||'')}</textarea></label></div>`,next(index===places.length-1?(es?'Guardar y continuar':'Save and continue'):(es?'Guardar y siguiente destino':'Save and next stop')));
+      active.querySelectorAll('[data-gpp]').forEach(el=>{
+        if(el.tagName!=='SELECT')return;
+        const key=el.dataset.gpp;
+        if(key==='lodgingChoice') el.value=String(pref.lodgingChoice||'');
+        else el.value=pref[key]??'recommend';
+      });active.querySelector('[data-gp-next]').onclick=()=>{active.querySelectorAll('[data-gpp]').forEach(el=>pref[el.dataset.gpp]=el.value);pref.saved=true;engine.state.preferences.places[place.key]=pref;persist();index+=1;step=index>=places.length?'language':'place';render();requestAnimationFrame(()=>active.scrollTo({top:0,behavior:'smooth'}));};return;
     }
     if(step==='language'){
       const langs=['Español','English','Français','Italiano','Deutsch','Português','Nederlands','Català','日本語','한국어','中文','Русский','العربية'];
@@ -9812,7 +9916,10 @@ function bindJourneyHome(){
         if(trip) journeyHomeLatestTrip=trip;
       }
 
-      if(!trip) return;
+      if(!trip){
+        await showPlannerDecision({title:getLang()==='es'?'Aún no tienes viajes':'No trips yet',message:getLang()==='es'?'Cuando guardes tu primer viaje aparecerá aquí para que puedas volver a consultarlo.':'Once you save your first trip, it will appear here so you can return to it.',confirmLabel:getLang()==='es'?'Entendido':'Got it',cancelLabel:getLang()==='es'?'Cerrar':'Close'});
+        return;
+      }
 
       await showJourneyReturnGate(trip);
 
@@ -9839,8 +9946,54 @@ async function restorePaidGenerationIfNeeded(){
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   const restoreEpoch=generationRunEpoch;
   try{
+    const params=new URLSearchParams(window.location.search);
+    const plannerMode=String(params.get('mode')||'').trim().toLowerCase();
+    const requestedTripId=String(params.get('trip_id') || '').trim();
+
+    // V85.11: Planner without an explicit trip_id is ALWAYS a pristine entry.
+    // Never resurrect an active trip, legacy chat, preferences or post-generation UI.
+    // The only unfinished-route recovery allowed is the in-memory X-close recovery
+    // used by openTripStoryBuilder() during this same page lifetime.
+    if(!requestedTripId){
+      resetFreshPrePaymentPlanningUI();
+
+      // No trip_id means normal Planner entry. We still allow ONE exception:
+      // a server-side paid generation that is actually interrupted/failed.
+      // Saved pre-payment drafts, personalization and old route input are never
+      // recovered here.
+      const token=getStoredSessionToken();
+      let paidRecovery=null;
+      try{
+        const data=await tripApi({action:'recoverable',session_token:token});
+        const candidate=data?.trip || null;
+        if(candidate && ['generating','failed'].includes(candidate.status)){
+          const entitlement=await paymentApi({action:'status',session_token:token,trip_id:candidate.id});
+          if(entitlement?.paid || entitlement?.admin_bypass || entitlement?.info_chat_authorized){
+            paidRecovery={trip:candidate,entitlement};
+          }
+        }
+      }catch(err){
+        console.warn('[PAID GENERATION RECOVERY CHECK]',err);
+      }
+      if(!paidRecovery) return;
+
+      const trip=paidRecovery.trip;
+      if(!_hydrateGenerationTrip_(trip)) return;
+      applyInfoChatStatus(paidRecovery.entitlement);
+      paymentGateSatisfiedTripId=currentTripId;
+      setPostPaymentTripConfigurationLocked(true);
+      if(trip.status==='generating'){
+        chatMsg(getLang()==='es'
+          ? 'ITBMO detectó una generación interrumpida y continuará desde el último punto guardado.'
+          : 'ITBMO detected an interrupted generation and will continue from the last saved point.','ai');
+        setTimeout(()=>runPaidGeneration(),180);
+      }else{
+        _showGenerationRetry_();
+      }
+      return;
+    }
+
     const token=getStoredSessionToken();
-    const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
     let tripId=requestedTripId || getStoredActiveTripId();
     let trip=null;
 
@@ -9861,9 +10014,8 @@ async function restorePaidGenerationIfNeeded(){
       trip=data?.trip || null;
     }
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
-    if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
+    if(!trip || !['generating','failed','generated'].includes(trip.status)) return;
 
-    const plannerMode=new URLSearchParams(window.location.search).get('mode');
     if(trip.status==='generated'){
       if(plannerMode==='new'){
         storeActiveTripId(null);
@@ -9904,9 +10056,7 @@ async function restorePaidGenerationIfNeeded(){
       return;
     }
 
-    if(trip.status==='saved'){
-      if(!_restorePostPaymentProgress_(trip)) showPreferencesStage();
-    }else if(trip.status==='generating'){
+    if(trip.status==='generating'){
       chatMsg(getLang()==='es'
         ? 'ITBMO detectó una generación interrumpida y continuará desde la última ciudad guardada.'
         : 'ITBMO detected an interrupted generation and will continue from the last saved city.','ai');
@@ -13788,10 +13938,13 @@ function _tripStoryRequiredTimeOptions_(selected=''){const es=getLang()==='es';r
 function _tripStoryTimeStatusOptions_(selected='estimated'){const es=getLang()==='es';return [['confirmed',es?'Confirmado · ya tengo el horario':'Confirmed · I have the schedule'],['estimated',es?'Estimado · podré ajustarlo después':'Estimated · I can update it later']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
 function _tripStoryDaysOptions_(selected=1){return Array.from({length:30},(_,i)=>`<option value="${i+1}" ${Number(selected)===i+1?'selected':''}>${i+1}</option>`).join('');}
 function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};}
-function _tripStoryDraftKey_(){const who=String(currentUser?.id||currentUser?.email||'guest').replace(/[^a-z0-9_.@-]/gi,'_');return `itbmo_trip_story_draft_v1_${who}`;}
-function _tripStoryLoadDraft_(){try{const raw=sessionStorage.getItem(_tripStoryDraftKey_());return raw?JSON.parse(raw):null;}catch(_){return null;}}
-function _tripStorySaveDraft_(story){try{sessionStorage.setItem(_tripStoryDraftKey_(),JSON.stringify(story));}catch(_){}}
-function _tripStoryClearDraft_(){try{sessionStorage.removeItem(_tripStoryDraftKey_());}catch(_){}}
+// V85.1 · Draft recovery is intentionally page-memory only. It exists solely so an
+// accidental X-close can reopen the same unfinished route during this page lifetime.
+// Reloading, opening a new Planner session or starting elsewhere never resurrects it.
+let _tripStoryClosedDraftMemory_=null;
+function _tripStoryLoadDraft_(){return _tripStoryClosedDraftMemory_?JSON.parse(JSON.stringify(_tripStoryClosedDraftMemory_)):null;}
+function _tripStorySaveDraft_(story){_tripStoryClosedDraftMemory_=JSON.parse(JSON.stringify(story));}
+function _tripStoryClearDraft_(){_tripStoryClosedDraftMemory_=null;}
 function _tripStoryClampDepartureEnd_(prev,departureTime){if(!prev?.perDay?.length||!departureTime)return;const last=prev.perDay[prev.perDay.length-1],dep=_tripStoryTimeMinutes_(departureTime),cur=_tripStoryTimeMinutes_(last.end);if(dep!=null&&(cur==null||cur>dep))last.end=departureTime;}
 function _tripStoryApplyBoundaryHours_(story){const stays=story?.stays||[];if(!stays.length)return story;const first=stays[0],last=stays.at(-1);if(story.start?.arrivalTime&&(!story.start.arrivalDate||story.start.arrivalDate===first.startDate)){_tripStoryClampArrivalStart_(Object.assign(first,{arrivalTime:story.start.arrivalTime}));}for(let i=1;i<stays.length;i++){const st=stays[i],prev=stays[i-1],prevEnd=_tripStoryStayEnd_(prev);if(st.arrivalTime&&(!st.arrivalDate||st.arrivalDate===st.startDate))_tripStoryClampArrivalStart_(st);if(st.departureTime&&st.departureDate===prevEnd)_tripStoryClampDepartureEnd_(prev,st.departureTime);}if(story.returnTrip?.enabled&&story.returnTrip?.departureTime&&(!story.returnTrip.departureDate||story.returnTrip.departureDate===_tripStoryStayEnd_(last)))_tripStoryClampDepartureEnd_(last,story.returnTrip.departureTime);return story;}
 function _tripStoryDefaultHours_(dayIndex,st){return {day:dayIndex+1,start:(st?.perDay?.[dayIndex]?.start||DEFAULT_START||''),end:(st?.perDay?.[dayIndex]?.end||DEFAULT_END||'')};}
@@ -13804,7 +13957,7 @@ function _tripStoryCountrySuggestions_(q=''){const n=_normalizeSearch_(q);if(n.l
 function _tripStoryStayEnd_(st){return st?.startDate?_tripStoryAddDays_(st.startDate,Math.max(0,Number(st.days||1)-1)):'';}
 function _tripStoryRecalculateFrom_(story,index=0,{preserveAnchor=true}={}){story.stays=(story.stays||[]).map(_tripStoryEnsureStay_);for(let i=Math.max(0,index);i<story.stays.length;i++){const st=story.stays[i],prev=story.stays[i-1];if(i>0){const suggested=prev?.startDate?_tripStoryAddDays_(prev.startDate,Number(prev.days||1)):'';if(!preserveAnchor||i>index||!st.startDate)st.startDate=suggested;if(!st.arrivalDate&&st.arrivalTime)st.arrivalDate=st.startDate||'';if(!st.departureDate&&prev?.startDate)st.departureDate=st.startDate||_tripStoryStayEnd_(prev);}st.sequence=i+1;st.dayTrips.forEach(dt=>{dt.day=Math.min(st.days,Math.max(1,Number(dt.day||1)));});}return story;}
 function _tripStoryCopyText_(story){const es=getLang()==='es',lines=[es?'Mi recorrido ITBMO':'My ITBMO journey'];if(story.start?.origin?.label||story.start?.arrival?.label){lines.push('',`${story.start.origin?.label||'—'} → ${story.start.arrival?.label||'—'}${story.start.date?` · ${_tripStoryDMY_(story.start.date)}`:''}`);}story.stays.forEach((st,i)=>{if(i>0)lines.push(`${story.stays[i-1].place} → ${st.place}${st.departureDate?` · ${_tripStoryDMY_(st.departureDate)}`:''}${st.departureTime?` · ${st.departureTime}`:''}${st.arrivalTime?`–${st.arrivalTime}`:''}`);lines.push(`${st.place} · ${_tripStoryDMY_(st.startDate)}${_tripStoryStayEnd_(st)!==st.startDate?`–${_tripStoryDMY_(_tripStoryStayEnd_(st))}`:''} · ${st.days} ${st.days===1?(es?'día':'day'):(es?'días':'days')}`);st.dayTrips.forEach(dt=>lines.push(`  ↳ ${dt.place} · ${es?'excursión Día':'day trip Day'} ${dt.day}${dt.outbound.departureTime?` · ${dt.outbound.departureTime}`:''}${dt.return.arrivalTime?`–${dt.return.arrivalTime}`:''}`));});if(story.returnTrip?.enabled)lines.push('',`${es?'Regreso':'Return'}: ${story.returnTrip.origin?.label||story.stays.at(-1)?.place||'—'} → ${story.returnTrip.arrival?.label||'—'}${story.returnTrip.departureDate?` · ${_tripStoryDMY_(story.returnTrip.departureDate)}`:''}`);return lines.join('\n');}
-function renderTripStorySummary(){const host=qs('#trip-story-summary');if(!host)return;const story=_tripStoryCurrent_(),stays=story.stays||[];if(!stays.length){host.hidden=true;return;}host.hidden=false;const es=getLang()==='es',nodes=stays.map((x,i)=>`<div class="trip-story-summary-stop"><span>${String(i+1).padStart(2,'0')}</span><div><b>${_tripStoryEsc_(x.place)}</b><small>${_tripStoryDMY_(x.startDate)}${_tripStoryStayEnd_(x)!==x.startDate?` → ${_tripStoryDMY_(_tripStoryStayEnd_(x))}`:''} · ${x.days} ${x.days===1?(es?'día':'day'):(es?'días':'days')}</small>${x.dayTrips?.length?`<em>✦ ${x.dayTrips.map(d=>_tripStoryEsc_(d.place)).join(' · ')}</em>`:''}</div></div>`).join('<div class="trip-story-summary-arrow">→</div>');host.innerHTML=`<div class="trip-story-summary__head"><div><small>✦ ${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><strong>${es?'Tu historia está guardada y puedes cambiarla cuando quieras':'Your story is saved and can be changed anytime'}</strong></div><div class="trip-story-summary-actions"><button type="button" id="copy-trip-story">${es?'Copiar recorrido':'Copy journey'}</button><button type="button" id="edit-trip-story" class="is-primary">${es?'Editar mi viaje':'Edit my trip'}</button></div></div><div class="trip-story-summary-flow">${nodes}</div>`;const postPaymentLocked=Boolean(currentTripId&&paymentGateSatisfiedTripId===currentTripId);const editBtn=qs('#edit-trip-story');if(editBtn){editBtn.disabled=postPaymentLocked;editBtn.setAttribute('aria-disabled',String(postPaymentLocked));if(!postPaymentLocked)editBtn.addEventListener('click',openTripStoryBuilder);}host.classList.toggle('is-payment-locked',postPaymentLocked);qs('#copy-trip-story')?.addEventListener('click',async()=>{const txt=_tripStoryCopyText_(story);try{await navigator.clipboard.writeText(txt);const b=qs('#copy-trip-story');if(b){const old=b.textContent;b.textContent=es?'✓ Copiado':'✓ Copied';setTimeout(()=>b.textContent=old,1600);}}catch(_){prompt(es?'Copia tu recorrido:':'Copy your journey:',txt);}});}
+function renderTripStorySummary(){const host=qs('#trip-story-summary');if(!host)return;const story=_tripStoryCurrent_(),stays=story.stays||[];if(!stays.length){host.hidden=true;return;}host.hidden=false;const es=getLang()==='es',nodes=stays.map((x,i)=>`<div class="trip-story-summary-stop"><span>${String(i+1).padStart(2,'0')}</span><div><b>${_tripStoryEsc_(x.place)}</b><small>${_tripStoryDMY_(x.startDate)}${_tripStoryStayEnd_(x)!==x.startDate?` → ${_tripStoryDMY_(_tripStoryStayEnd_(x))}`:''} · ${x.days} ${x.days===1?(es?'día':'day'):(es?'días':'days')}</small>${x.dayTrips?.length?`<em>✦ ${x.dayTrips.map(d=>_tripStoryEsc_(d.place)).join(' · ')}</em>`:''}</div></div>`).join('<div class="trip-story-summary-arrow">→</div>');host.innerHTML=`<div class="trip-story-summary__head"><div><small>✦ ${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><strong>${es?'Tu historia está guardada y puedes cambiarla cuando quieras':'Your story is saved and can be changed anytime'}</strong></div><div class="trip-story-summary-actions"><button type="button" id="copy-trip-story">${es?'Copiar recorrido':'Copy journey'}</button><button type="button" id="edit-trip-story" class="is-primary">${es?'Editar mi viaje':'Edit my trip'}</button></div></div><div class="trip-story-summary-flow">${nodes}</div>`;const postPaymentLocked=Boolean(currentTripId&&paymentGateSatisfiedTripId===currentTripId);const editBtn=qs('#edit-trip-story');if(editBtn){editBtn.disabled=postPaymentLocked;editBtn.setAttribute('aria-disabled',String(postPaymentLocked));if(!postPaymentLocked)editBtn.addEventListener('click',()=>openTripStoryBuilder({reuseExisting:true}));}host.classList.toggle('is-payment-locked',postPaymentLocked);qs('#copy-trip-story')?.addEventListener('click',async()=>{const txt=_tripStoryCopyText_(story);try{await navigator.clipboard.writeText(txt);const b=qs('#copy-trip-story');if(b){const old=b.textContent;b.textContent=es?'✓ Copiado':'✓ Copied';setTimeout(()=>b.textContent=old,1600);}}catch(_){prompt(es?'Copia tu recorrido:':'Copy your journey:',txt);}});}
 async function _tripStorySuggestions_(countryCode,query,{global=false}={}){const match=_tripStoryCountryFromCode_(countryCode),q=String(query||'').trim();if(q.length<3||(!global&&!match))return[];const key=global?`story|global|${getLang()}|${_normalizeSearch_(q)}`:`story|${match.code}|${_normalizeSearch_(q)}`;if(destinationSuggestionCache.has(key))return destinationSuggestionCache.get(key);try{const url=global?`${ITBMO_DESTINATION_SUGGESTIONS_URL}?global=1&lang=${encodeURIComponent(getLang())}&q=${encodeURIComponent(q)}`:`${ITBMO_DESTINATION_SUGGESTIONS_URL}?country=${encodeURIComponent(match.apiName)}&countryCode=${encodeURIComponent(match.code)}&lang=${encodeURIComponent(getLang())}&q=${encodeURIComponent(q)}`;const r=await fetch(url,{headers:{Accept:'application/json'}}),d=await r.json().catch(()=>({}));const raw=global?(Array.isArray(d?.results)?d.results:[]):(Array.isArray(d?.suggestions)?d.suggestions:[]);const a=global?raw.map(x=>({label:x?.city||'',countryCode:x?.countryCode||'',country:x?.country||''})).filter(x=>x.label):raw;destinationSuggestionCache.set(key,a);return a;}catch(_){return[];}}
 function _tripStoryValidate_(story){const es=getLang()==='es',issues=[],add=(code,title,message,stayIndex=null)=>issues.push({code,title,message,stayIndex});if(!story.stays.length){add('NO_STAYS',es?'Falta tu primer destino':'Your first destination is missing',es?'Agrega al menos una estancia para construir el recorrido.':'Add at least one stay.');return issues;}story.stays.forEach((st,i)=>{if(!st.countryCode)add('COUNTRY',st.place||`${es?'Destino':'Destination'} ${i+1}`,es?'Selecciona un país válido de la lista.':'Select a valid country from the list.',i);if(!String(st.place||'').trim())add('PLACE',`${es?'Destino':'Destination'} ${i+1}`,es?'Escribe el destino de esta estancia.':'Enter this stay destination.',i);if(!st.startDate)add('DATE',st.place||`${es?'Destino':'Destination'} ${i+1}`,es?'Selecciona el primer día que quieres planificar.':'Select the first day to plan.',i);st.perDay.forEach((d,j)=>{if(d.start&&d.end&&d.start>=d.end)add('DAY_HOURS',`${st.place} · ${es?'Día':'Day'} ${j+1}`,es?`La hora de inicio (${d.start}) debe ser anterior a la hora final (${d.end}).`:`Start time (${d.start}) must be before end time (${d.end}).`,i);});st.dayTrips.forEach(dt=>{if(!String(dt.place||'').trim())add('DAYTRIP_PLACE',`${st.place} · ${es?'Día':'Day'} ${dt.day}`,es?'Completa el destino de la excursión.':'Complete the day-trip destination.',i);const o=dt.outbound,r=dt.return;if(o.departureTime&&o.arrivalTime&&o.departureTime>=o.arrivalTime)add('DAYTRIP_OUT',dt.place,es?'En la ida, la llegada debe ser posterior a la salida.':'Outbound arrival must be after departure.',i);if(r.departureTime&&r.arrivalTime&&r.departureTime>=r.arrivalTime)add('DAYTRIP_RETURN',dt.place,es?'En el regreso, la llegada debe ser posterior a la salida.':'Return arrival must be after departure.',i);if(o.arrivalTime&&r.departureTime&&o.arrivalTime>=r.departureTime)add('DAYTRIP_WINDOW',dt.place,es?'La hora de regreso debe ser posterior a la llegada de ida.':'Return departure must be after outbound arrival.',i);});if(i>0){const prev=story.stays[i-1],prevEnd=_tripStoryStayEnd_(prev),dep=st.departureDate||st.startDate,arr=st.arrivalDate||st.startDate;if(st.startDate&&prevEnd&&st.startDate<prevEnd)add('STAY_CHRONOLOGY',`${prev.place} → ${st.place}`,es?`${st.place} no puede comenzar el ${_tripStoryDMY_(st.startDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}.`:`${st.place} cannot start on ${_tripStoryDMY_(st.startDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}.`,i);if(!st.departureDate)add('MOVE_DATE_REQUIRED',`${prev.place} → ${st.place}`,es?'Indica la fecha de salida hacia el siguiente destino.':'Enter the departure date for the next destination.',i);if(!st.departureTime)add('MOVE_TIME_REQUIRED',`${prev.place} → ${st.place}`,es?'Indica la hora de salida hacia el siguiente destino.':'Enter the departure time for the next destination.',i);if(dep&&prevEnd&&dep<prevEnd)add('MOVE_CUTS_STAY',`${prev.place} → ${st.place}`,es?`El traslado sale el ${_tripStoryDMY_(dep)}, pero ${prev.place} todavía tiene días declarados hasta ${_tripStoryDMY_(prevEnd)}. Reduce la estancia o mueve el traslado al último día.`:`The transfer leaves on ${_tripStoryDMY_(dep)}, but ${prev.place} is declared through ${_tripStoryDMY_(prevEnd)}. Shorten the stay or move the transfer to its last day.`,i);const sameDayTrips=(prev.dayTrips||[]).filter(dt=>_tripStoryAddDays_(prev.startDate,dt.day-1)===dep);sameDayTrips.forEach(dt=>{if(st.departureTime&&dt.return?.arrivalTime&&dt.return.arrivalTime>st.departureTime)add('DAYTRIP_TRANSFER_OVERLAP',`${dt.place} / ${prev.place} → ${st.place}`,es?`La excursión regresa a las ${dt.return.arrivalTime}, pero el traslado al siguiente destino sale a las ${st.departureTime}.`:`The day trip returns at ${dt.return.arrivalTime}, but the next transfer leaves at ${st.departureTime}.`,i-1);});if(dep&&prev.startDate&&dep<prev.startDate)add('MOVE_BEFORE',`${prev.place} → ${st.place}`,es?'El traslado sale antes de que comience la estancia anterior.':'The transfer leaves before the previous stay begins.',i);if(arr&&dep&&arr<dep)add('MOVE_DATE',`${prev.place} → ${st.place}`,es?'La fecha de llegada es anterior a la fecha de salida.':'Arrival date is before departure date.',i);if(dep===arr&&st.departureTime&&st.arrivalTime&&st.departureTime>=st.arrivalTime)add('MOVE_TIME',`${prev.place} → ${st.place}`,es?'La hora de llegada debe ser posterior a la hora de salida.':'Arrival time must be after departure time.',i);if(st.startDate&&arr&&st.startDate<arr)add('STAY_BEFORE_ARRIVAL',st.place,es?'La estancia comienza antes de que llegues físicamente al destino.':'The stay starts before you physically arrive.',i);if(prevEnd&&dep&&dep>_tripStoryAddDays_(prevEnd,1))add('GAP',`${prev.place} → ${st.place}`,es?'Hay días sin ubicación definida entre ambas estancias. Ajusta las fechas o agrega el destino intermedio.':'There are undefined days between these stays. Adjust dates or add the intermediate destination.',i);}});if(!story.ended)add('NOT_ENDED',es?'Confirma el final de tu recorrido':'Confirm where your journey ends',es?'Marca “Sí, aquí termina mi recorrido” o agrega el siguiente destino.':'Choose “Yes, my journey ends here” or add the next destination.');return issues;}
 function _tripStoryRequiredTimeIssues_(story){
@@ -13813,7 +13966,7 @@ function _tripStoryRequiredTimeIssues_(story){
   (story?.stays||[]).forEach((st,i)=>{
     if(i>0){
       if(!st.departureDate) add(`${story.stays[i-1]?.place||''} → ${st.place||''}`,es?'Indica qué día iniciarás este traslado. Puede ser el último día del destino anterior, el primer día del siguiente o una fecha posterior si el recorrido lo requiere.':'Choose the date when this transfer starts. It may be the previous destination’s last day, the next destination’s first day, or later when the route requires it.',i);
-      if(!st.departureTime) add(`${story.stays[i-1]?.place||''} → ${st.place||''}`,es?'Indica a partir de qué hora puedes salir. El medio de transporte y la llegada pueden quedar en blanco para que ITBMO los resuelva.':'Tell us from what time you can leave. Transport and arrival may stay blank so ITBMO can resolve them.',i);
+      if(!st.departureTime) add(`${story.stays[i-1]?.place||''} → ${st.place||''}`,es?'Indica la hora a la que saldrás físicamente hacia el siguiente destino: la hora de tu vuelo, tren, bus, ferry o del medio de transporte que utilizarás. El transporte y la llegada pueden quedar en blanco si quieres que ITBMO los resuelva.':'Tell us from what time you can leave. Transport and arrival may stay blank so ITBMO can resolve them.',i);
     }
     (st.dayTrips||[]).forEach(dt=>{if(!String(dt.place||'').trim())return; /* destination + day are essential; times may be resolved */});
   });
@@ -13917,17 +14070,43 @@ function _tripStoryResetRoute_(story){
   story.ended=false;
   return story;
 }
-function openTripStoryBuilder(){
+
+function _tripStoryOpenInstruction_(title,body){
+  const host=document.querySelector('#guided-trip-story-overlay') || document.body;
+  host.querySelector('.gj-instruction-overlay')?.remove();
+  const modal=document.createElement('div');
+  modal.className='gj-instruction-overlay';
+  modal.innerHTML=`<div class="gj-instruction-card" role="dialog" aria-modal="true" aria-labelledby="gj-instruction-title">
+    <button type="button" class="gj-instruction-close" aria-label="${getLang()==='es'?'Cerrar':'Close'}">×</button>
+    <div class="gj-instruction-kicker">ITBMO · ${getLang()==='es'?'AYUDA':'HELP'}</div>
+    <h3 id="gj-instruction-title">${_tripStoryEsc_(title||'')}</h3>
+    <p>${_tripStoryEsc_(body||'')}</p>
+  </div>`;
+  host.appendChild(modal);
+  const close=()=>modal.remove();
+  modal.querySelector('.gj-instruction-close').onclick=close;
+  modal.addEventListener('click',e=>{if(e.target===modal)close();});
+  setTimeout(()=>modal.querySelector('.gj-instruction-close')?.focus(),0);
+}
+function _tripStoryHelpButton_(key,label){
+  return `<button type="button" class="gj-help-link" data-gj-help="${_tripStoryEsc_(key)}"><span aria-hidden="true">i</span>${_tripStoryEsc_(label||(getLang()==='es'?'Ver instrucciones':'View instructions'))}</button>`;
+}
+
+function openTripStoryBuilder({reuseExisting=false}={}){
   if(currentTripId && paymentGateSatisfiedTripId===currentTripId) return;
   const es=getLang()==='es';
   const engine=_travelV2();
-  let story=JSON.parse(JSON.stringify(_tripStoryLoadDraft_() || _tripStoryCurrent_()));
+  const closedDraft=_tripStoryLoadDraft_();
+  const emptyStory={schema_version:6,start:{enabled:false,date:'',transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};
+  let story=JSON.parse(JSON.stringify(closedDraft || (reuseExisting?_tripStoryCurrent_():emptyStory)));
+  if(!closedDraft && !reuseExisting){try{engine?.setTripStory?.(JSON.parse(JSON.stringify(emptyStory)));}catch(_){}}
+  if(closedDraft)_tripStoryClearDraft_();
   story.start=story.start||{date:'',transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:''};
   story.returnTrip=story.returnTrip||{enabled:false,transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:''};
   story.stays=(story.stays||[]).map(_tripStoryEnsureStay_);
   if(!story.stays.length) story.stays=[_tripStoryEnsureStay_({days:1})];
   let phase='travelers', activeStay=0, pendingNextStay=null, editReturnPhase=null, editReturnStay=null, dayTripDraft=null, dayTripEditIndex=null;
-  const overlay=document.createElement('div'); overlay.className='trip-story-overlay guided-journey-overlay';
+  const overlay=document.createElement('div'); overlay.id='guided-trip-story-overlay'; overlay.className='trip-story-overlay guided-journey-overlay';
   overlay.innerHTML=`<div class="guided-journey" role="dialog" aria-modal="true" aria-label="${es?'Crea tu viaje':'Build your trip'}">
     <header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'No estás llenando un formulario. Estás viendo cómo tu viaje toma forma.':'You are not filling out a form. You are watching your trip take shape.'}</p></div><button type="button" data-gj-close aria-label="${es?'Cerrar':'Close'}">×</button></header>
     <nav class="guided-journey__progress" aria-label="${es?'Progreso':'Progress'}"><button type="button" data-stage="travelers">${es?'Viajeros':'Travelers'}</button><i>›</i><button type="button" data-stage="route">${es?'Ruta':'Route'}</button><i>›</i><button type="button" data-stage="personalize" disabled>${es?'Personalización':'Personalization'}</button><i>›</i><button type="button" data-stage="itinerary" disabled>${es?'Itinerario':'Itinerary'}</button></nav>
@@ -13936,8 +14115,20 @@ function openTripStoryBuilder(){
   </div>`;
   document.body.appendChild(overlay); document.body.classList.add('trip-story-open');
   const active=overlay.querySelector('[data-gj-active]'), storyHost=overlay.querySelector('[data-gj-story]');
-  const persist=()=>_tripStorySaveDraft_(story);
-  const close=()=>{persist();overlay.remove();document.body.classList.remove('trip-story-open');};
+  const persist=()=>{}; // V85.1: no persistent/autosaved route draft.
+  const close=()=>{
+    _tripStorySaveDraft_(story);
+    overlay.remove();
+    document.body.classList.remove('trip-story-open');
+    const prefStage=qs('#preferences-stage');
+    if(prefStage){
+      prefStage.classList.remove('is-stage-active','is-confirmed');
+      prefStage.classList.add('is-stage-hidden');
+      prefStage.setAttribute('aria-hidden','true');
+    }
+    const summary=qs('#trip-story-summary');
+    if(summary) summary.hidden=true;
+  };
   overlay.querySelector('[data-gj-close]').onclick=close;
   const countryField=(value,code,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" data-country-code="${_tripStoryEsc_(code||'')}" placeholder="${es?'Escribe el país…':'Type country…'}"><div class="trip-story-suggestions" hidden></div></div>`;
   const destinationField=(value,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" placeholder="${es?'Escribe el destino…':'Type destination…'}"><div class="trip-story-suggestions" hidden></div></div>`;
@@ -13996,18 +14187,27 @@ function openTripStoryBuilder(){
     }
     if(phase==='decision'){
       const st=story.stays[activeStay];
-      active.innerHTML=shell(es?'TU VIAJE SIGUE TOMANDO FORMA':'YOUR TRIP KEEPS TAKING SHAPE',_tripStoryEsc_(st.place),editReturnPhase?(es?'Edita esta parada. Al guardar volverás exactamente donde estabas.':'Edit this stop. When saved, you will return exactly where you were.'):(es?'¿Qué quieres hacer ahora?':'What would you like to do now?'),`<div class="gj-choice-stack"><button type="button" data-add-daytrip class="gj-choice"><span>↗</span><div><b>${es?'Agregar excursión':'Add a day trip'}</b><small>${es?'Sales y regresas a este destino el mismo día.':'Leave and return to this destination the same day.'}</small></div></button>${editReturnPhase&&activeStay>0?`<button type="button" data-edit-inbound class="gj-choice"><span>⇢</span><div><b>${es?'Editar traslado de llegada':'Edit arrival transfer'}</b><small>${es?'Revisa fecha, hora y transporte desde el destino anterior.':'Review date, time and transport from the previous destination.'}</small></div></button>`:''}${!editReturnPhase?`<button type="button" data-add-next class="gj-choice"><span>＋</span><div><b>${es?'Agregar siguiente destino':'Add next destination'}</b><small>${es?'Continuaremos construyendo tu recorrido.':'Keep building your route.'}</small></div></button><button type="button" data-finish class="gj-choice"><span>✓</span><div><b>${es?'Mi recorrido termina aquí':'My journey ends here'}</b><small>${es?'Después podrás agregar el regreso, si lo conoces.':'You can add your return afterward if you know it.'}</small></div></button>`:''}</div>${(st.dayTrips||[]).length?`<div class="gj-existing"><b>${es?'Excursiones':'Day trips'}</b>${st.dayTrips.map((d,i)=>`<div><span>↗ ${_tripStoryEsc_(d.place||'—')} · ${es?'Día':'Day'} </span><select data-move-daytrip="${i}">${Array.from({length:st.days},(_,n)=>`<option value="${n+1}" ${d.day===n+1?'selected':''}>${n+1}</option>`).join('')}</select><button data-edit-daytrip="${i}">${es?'Editar':'Edit'}</button><button class="gj-danger-inline" data-remove-daytrip="${i}">${es?'Eliminar':'Delete'}</button></div>`).join('')}</div>`:''}${editReturnPhase?`<button type="button" class="gj-primary gj-primary--warm" data-finish-edit>${es?'Guardar cambios y volver':'Save changes and return'}<span>→</span></button>`:''}`);
+      active.innerHTML=shell(es?'TU VIAJE SIGUE TOMANDO FORMA':'YOUR TRIP KEEPS TAKING SHAPE',_tripStoryEsc_(st.place),editReturnPhase?(es?'Edita esta parada. Al guardar volverás exactamente donde estabas.':'Edit this stop. When saved, you will return exactly where you were.'):(es?'¿Qué quieres hacer ahora?':'What would you like to do now?'),`<div class="gj-choice-stack"><button type="button" data-add-daytrip class="gj-choice gj-choice--featured"><span>↗</span><div><b>${es?'Agregar excursión de un día':'Add a day trip'}</b><small>${es?`Elige esta opción si sales desde ${_tripStoryEsc_(st.place)} y regresas a ${_tripStoryEsc_(st.place)} el mismo día. Si no regresarás al mismo lugar, usa “Agregar siguiente destino”.`:`Choose this when you leave ${_tripStoryEsc_(st.place)} and return to ${_tripStoryEsc_(st.place)} the same day. If you will not return to the same place, use “Add next destination”.`}</small></div></button>${editReturnPhase&&activeStay>0?`<button type="button" data-edit-inbound class="gj-choice"><span>⇢</span><div><b>${es?'Editar traslado de llegada':'Edit arrival transfer'}</b><small>${es?'Revisa fecha, hora y transporte desde el destino anterior.':'Review date, time and transport from the previous destination.'}</small></div></button>`:''}${!editReturnPhase?`<button type="button" data-add-next class="gj-choice"><span>＋</span><div><b>${es?'Agregar siguiente destino':'Add next destination'}</b><small>${es?'Agrega el nuevo destino al que te dirigirás después de esta parada. ITBMO conservará el orden real de tu recorrido.':'Add the new destination you will travel to after this stop. ITBMO will preserve the real order of your journey.'}</small></div></button><button type="button" data-finish class="gj-choice"><span>✓</span><div><b>${es?'Mi recorrido termina aquí':'My journey ends here'}</b><small>${es?'Si ya ingresaste todos los destinos y excursiones que visitarás, haz clic aquí para guardar tu recorrido completo. Después podrás agregar el regreso si lo conoces.':'If you have entered every destination and day trip you will visit, click here to save your complete journey. You can add your return afterward if you know it.'}</small></div></button>`:''}</div>${(st.dayTrips||[]).length?`<div class="gj-existing"><b>${es?'Excursiones':'Day trips'}</b>${st.dayTrips.map((d,i)=>`<div><span>↗ ${_tripStoryEsc_(d.place||'—')} · ${es?'Día':'Day'} </span><select data-move-daytrip="${i}">${Array.from({length:st.days},(_,n)=>`<option value="${n+1}" ${d.day===n+1?'selected':''}>${n+1}</option>`).join('')}</select><button data-edit-daytrip="${i}">${es?'Editar':'Edit'}</button><button class="gj-danger-inline" data-remove-daytrip="${i}">${es?'Eliminar':'Delete'}</button></div>`).join('')}</div>`:''}${editReturnPhase?`<button type="button" class="gj-primary gj-primary--warm" data-finish-edit>${es?'Guardar cambios y volver':'Save changes and return'}<span>→</span></button>`:''}`);
       active.querySelector('[data-add-daytrip]').onclick=()=>{dayTripEditIndex=null;dayTripDraft=_tripStoryEnsureDayTrip_({day:1,countryCode:st.countryCode,country:st.country,place:'',outbound:{},return:{}});phase='daytrip';render();};active.querySelectorAll('[data-edit-daytrip]').forEach(b=>b.onclick=()=>{dayTripEditIndex=Number(b.dataset.editDaytrip);dayTripDraft=_tripStoryEnsureDayTrip_(JSON.parse(JSON.stringify(st.dayTrips[dayTripEditIndex]||{})));phase='daytrip';render();});active.querySelectorAll('[data-remove-daytrip]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.removeDaytrip),name=st.dayTrips[i]?.place||'';if(!confirm(es?`¿Eliminar la excursión${name?` a ${name}`:''}?`:`Delete the day trip${name?` to ${name}`:''}?`))return;st.dayTrips.splice(i,1);persist();render();});active.querySelectorAll('[data-move-daytrip]').forEach(x=>x.onchange=()=>{st.dayTrips[Number(x.dataset.moveDaytrip)].day=Number(x.value);persist();renderStory();});active.querySelector('[data-edit-inbound]')?.addEventListener('click',()=>{phase='movement';render();});active.querySelector('[data-add-next]')?.addEventListener('click',()=>{pendingNextStay=_tripStoryEnsureStay_({days:1});story.stays.push(pendingNextStay);activeStay=story.stays.length-1;phase='stay';render();});active.querySelector('[data-finish]')?.addEventListener('click',()=>{story.ended=true;phase='return';render();});active.querySelector('[data-finish-edit]')?.addEventListener('click',()=>{const back=editReturnPhase||'review',backStay=editReturnStay;editReturnPhase=null;editReturnStay=null;persist();if(Number.isInteger(backStay))activeStay=backStay;phase=back;render();});return;
     }
     if(phase==='daytrip'){
       const st=story.stays[activeStay];
       const dt=dayTripDraft||_tripStoryEnsureDayTrip_({day:1,countryCode:st.countryCode,country:st.country,place:'',outbound:{},return:{}});
       dayTripDraft=dt;
-      active.innerHTML=shell(es?'EXCURSIÓN DE UN DÍA':'DAY TRIP',es?`Una excursión desde ${_tripStoryEsc_(st.place)}`:`A day trip from ${_tripStoryEsc_(st.place)}`,es?'Dinos dónde y qué día. Los horarios y el transporte sólo son necesarios si ya los conoces.':'Tell us where and which day. Times and transport are only needed if you already know them.',`<div class="gj-form"><label>${es?'Destino':'Destination'}${destinationField(dt.place,'data-dt-place')}</label><label>${es?'¿Qué día?':'Which day?'}<select data-dt-day>${Array.from({length:st.days},(_,n)=>`<option value="${n+1}" ${dt.day===n+1?'selected':''}>${es?'Día':'Day'} ${n+1} · ${_tripStoryDMY_(_tripStoryDayDate_(st,n))}</option>`).join('')}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya conoces el transporte o los horarios de esta excursión?':'Do you already know the transport or times for this day trip?'}</b><div class="gj-segmented"><button type="button" data-dt-knowledge="resolve" class="${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-dt-knowledge="known" class="${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'is-selected':''}">${es?'Sí, ya los conozco':'Yes, I already know them'}</button></div></div><div data-dt-details class="gj-form gj-full" ${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'':'hidden'}><label>${es?'Transporte':'Transport'}<select data-dt-out-mode>${_tripStoryTransportOptions_(dt.outbound.transportMode)}</select></label><label>${es?'Hora de salida':'Departure time'}<select data-dt-out-time>${_tripStoryTimeOptions_(dt.outbound.departureTime)}</select></label><label>${es?'Hora de regreso':'Return time'}<select data-dt-return-time>${_tripStoryTimeOptions_(dt.return.departureTime)}</select></label></div></div>`,nextButton(es?'Guardar excursión':'Save day trip'));
+      const dtKnown=Boolean(dt._itbmo_user_clock_authority||dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime);
+      active.innerHTML=shell(es?'EXCURSIÓN DE UN DÍA':'DAY TRIP',es?`Una excursión desde ${_tripStoryEsc_(st.place)}`:`A day trip from ${_tripStoryEsc_(st.place)}`,es?`Esta excursión sale de ${_tripStoryEsc_(st.place)} y regresa a ${_tripStoryEsc_(st.place)} el mismo día. Indica sólo lo que ya conozcas; ITBMO puede resolver el transporte y los horarios.`:`This day trip leaves ${_tripStoryEsc_(st.place)} and returns to ${_tripStoryEsc_(st.place)} the same day. Enter only what you already know; ITBMO can resolve transport and timing.`,`<div class="gj-form gj-form--transfer"><label>${es?'Destino de la excursión':'Day-trip destination'}${destinationField(dt.place,'data-dt-place')}</label><label>${es?'¿Qué día?':'Which day?'}<select data-dt-day>${Array.from({length:st.days},(_,n)=>`<option value="${n+1}" ${dt.day===n+1?'selected':''}>${es?'Día':'Day'} ${n+1} · ${_tripStoryDMY_(_tripStoryDayDate_(st,n))}</option>`).join('')}</select></label><div class="gj-full gj-disclosure gj-disclosure--card"><b>${es?`¿Ya tienes definido el transporte para ir de ${_tripStoryEsc_(st.place)} a ${_tripStoryEsc_(dt.place||'la excursión')} y regresar a ${_tripStoryEsc_(st.place)}?`:`Do you already have transport defined from ${_tripStoryEsc_(st.place)} to ${_tripStoryEsc_(dt.place||'the day trip')} and back to ${_tripStoryEsc_(st.place)}?`}</b>${_tripStoryHelpButton_('daytrip-transport',es?'¿Qué opción elijo?':'Which option should I choose?')}<div class="gj-segmented"><button type="button" data-dt-knowledge="resolve" class="${dtKnown?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-dt-knowledge="known" class="${dtKnown?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div data-dt-details class="gj-form gj-full gj-subpanel gj-progressive ${dtKnown?'is-revealed':'is-collapsed'}" aria-hidden="${dtKnown?'false':'true'}"><label class="${dtKnown?'':'gj-field-disabled'}">${es?'Medio de transporte':'Transport'}<select data-dt-out-mode ${dtKnown?'':'disabled'}>${_tripStoryTransportOptions_(dt.outbound.transportMode)}</select></label><label class="${dtKnown?'':'gj-field-disabled'}">${es?`Hora de salida desde ${_tripStoryEsc_(st.place)}`:`Departure time from ${_tripStoryEsc_(st.place)}`}${_tripStoryHelpButton_('daytrip-departure',es?'Ver instrucciones':'View instructions')}<select data-dt-out-time ${dtKnown?'':'disabled'}>${_tripStoryTimeOptions_(dt.outbound.departureTime)}</select></label><label class="${dtKnown?'':'gj-field-disabled'}">${es?`Hora de regreso desde ${_tripStoryEsc_(dt.place||'la excursión')}`:`Return departure time from ${_tripStoryEsc_(dt.place||'the day trip')}`}${_tripStoryHelpButton_('daytrip-return',es?'Ver instrucciones':'View instructions')}<select data-dt-return-time ${dtKnown?'':'disabled'}>${_tripStoryTimeOptions_(dt.return.departureTime)}</select></label></div></div>`,nextButton(es?'Guardar excursión':'Save day trip'));
       bindLocation(active.querySelector('[data-dt-place]'),x=>{const changed=dt.place!==x.label;dt.place=x.label;if(x.countryCode){dt.countryCode=x.countryCode;dt.country=x.country||dt.country;}if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;}},'city',()=>dt.countryCode||st.countryCode,{global:true});
       active.querySelector('[data-dt-day]').onchange=e=>{const next=Number(e.target.value),changed=dt.day!==next;dt.day=next;if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;dt.scheduleAdjustment=null;}};
-      active.querySelectorAll('[data-dt-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.dtKnowledge==='known';dt._itbmo_user_clock_authority=known;active.querySelectorAll('[data-dt-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelector('[data-dt-details]').hidden=!known;if(!known){dt.outbound.transportMode='';dt.outbound.departureTime='';dt.return.departureTime='';dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.scheduleAdjustment=null;}});
-      active.querySelector('[data-dt-out-mode]').onchange=e=>dt.outbound.transportMode=e.target.value;
+      active.querySelectorAll('[data-gj-help]').forEach(b=>b.onclick=()=>{
+        const key=b.dataset.gjHelp,base=st.place||(es?'la ciudad base':'the base city'),excursion=dt.place||(es?'la excursión':'the day trip');
+        const copy={
+          'daytrip-transport':es?[`Transporte de la excursión`,`Elige “Sí, ya tengo mi transporte” sólo si ya sabes cómo irás desde ${base} hasta ${excursion} y regresarás a ${base} el mismo día. Si no lo has decidido, deja que ITBMO resuelva el transporte y los horarios.`]:[`Day-trip transport`,`Choose “Yes, I already have my transport” only if you already know how you will travel from ${base} to ${excursion} and return the same day. Otherwise let ITBMO resolve the transport and times.`],
+          'daytrip-departure':es?[`Salida hacia la excursión`,`Indica la hora programada de salida del avión, tren, bus, ferry o del medio que utilizarás para salir de ${base} e iniciar la excursión.`]:[`Departure for the day trip`,`Enter the scheduled departure time of the transport you will use to leave ${base} and begin the day trip.`],
+          'daytrip-return':es?[`Regreso a ${base}`,`Indica la hora a la que saldrá tu transporte desde ${excursion} para regresar a ${base} el mismo día.`]:[`Return to ${base}`,`Enter the time your transport will leave ${excursion} to return to ${base} the same day.`]
+        }[key]; if(copy)_tripStoryOpenInstruction_(copy[0],copy[1]);
+      });
+      active.querySelectorAll('[data-dt-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.dtKnowledge==='known';dt._itbmo_user_clock_authority=known;active.querySelectorAll('[data-dt-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));const details=active.querySelector('[data-dt-details]');details?.classList.toggle('is-revealed',known);details?.classList.toggle('is-collapsed',!known);details?.setAttribute('aria-hidden',String(!known));details?.querySelectorAll('select').forEach(x=>x.disabled=!known);if(!known){dt.outbound.transportMode='';dt.outbound.departureTime='';dt.return.departureTime='';dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.scheduleAdjustment=null;details?.querySelectorAll('select').forEach(x=>x.value='');}});
+      active.querySelector('[data-dt-out-mode]').onchange=e=>{dt.outbound.transportMode=e.target.value;dt.return.transportMode=e.target.value;};
       active.querySelector('[data-dt-out-time]').onchange=e=>dt.outbound.departureTime=e.target.value;
       active.querySelector('[data-dt-return-time]').onchange=e=>dt.return.departureTime=e.target.value;
 
@@ -14015,8 +14215,16 @@ function openTripStoryBuilder(){
     }
     if(phase==='movement'){
       const st=story.stays[activeStay],prev=story.stays[activeStay-1];
-      active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?'Sólo dinos cuándo puedes comenzar. Si ya tienes el transporte, agrégalo; si no, ITBMO resolverá la logística.':'Just tell us when you can start. Add transport if you already have it; otherwise ITBMO will resolve the logistics.',`<div class="gj-form"><label>${es?'Fecha del traslado':'Transfer date'}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?'¿A partir de qué hora puedes salir?':'From what time can you leave?'}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya tienes este traslado definido?':'Do you already have this transfer defined?'}</b><div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full" data-move-details ${st.transportStatus==='user_defined'?'':'hidden'}><label>${es?'Medio de transporte':'Transport'}<select data-move="transportMode">${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?'Fecha de llegada (opcional)':'Arrival date (optional)'}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label><label>${es?'Hora de llegada (opcional)':'Arrival time (optional)'}<select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label></div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
-      active.querySelectorAll('[data-move-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.moveKnowledge==='known';st.transportStatus=known?'user_defined':'route_to_resolve';active.querySelectorAll('[data-move-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelector('[data-move-details]').hidden=!known;if(!known){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}persist();});active.querySelectorAll('[data-move]').forEach(x=>x.onchange=()=>{st[x.dataset.move]=x.value;persist();});active.querySelector('[data-save-movement]').onclick=()=>{const depDate=active.querySelector('[data-move="departureDate"]')?.value||'';const depTime=active.querySelector('[data-move="departureTime"]')?.value||'';st.departureDate=depDate;st.departureTime=depTime;if(!depDate||!depTime){active.querySelector('[data-move="departureDate"]')?.classList.toggle('is-invalid',!depDate);active.querySelector('[data-move="departureTime"]')?.classList.toggle('is-invalid',!depTime);return;}const prevEnd=_tripStoryStayEnd_(prev);if(prevEnd&&depDate<prevEnd){alert(es?`La salida de ${prev.place} hacia ${st.place} no puede ser el ${_tripStoryDMY_(depDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}. Usa ${_tripStoryDMY_(prevEnd)} o una fecha posterior.`:`The departure from ${prev.place} to ${st.place} cannot be ${_tripStoryDMY_(depDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}. Use ${_tripStoryDMY_(prevEnd)} or a later date.`);active.querySelector('[data-move="departureDate"]')?.classList.add('is-invalid');return;}if(st.transportStatus!=='user_defined'){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}else{active.querySelectorAll('[data-move]').forEach(x=>st[x.dataset.move]=x.value);}persist();phase='decision';render();};return;
+      active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?`Indica cuándo saldrás físicamente de ${_tripStoryEsc_(prev?.place||'este destino')} hacia ${_tripStoryEsc_(st.place||'el siguiente destino')}. Tú marcas el momento de salida. Si aún no has elegido cómo viajar, ITBMO resolverá el transporte por ti.`:`Tell us when you will physically leave ${_tripStoryEsc_(prev?.place||'this destination')} for ${_tripStoryEsc_(st.place||'the next destination')}. You choose when you want to leave. If you have not chosen how to travel yet, ITBMO will resolve the transport for you.`,`<div class="gj-form"><label>${es?'Fecha del traslado':'Transfer date'}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?`¿A qué hora saldrás de ${_tripStoryEsc_(prev?.place||'origen')} hacia ${_tripStoryEsc_(st.place||'destino')}?`:`What time will you leave ${_tripStoryEsc_(prev?.place||'origin')} for ${_tripStoryEsc_(st.place||'destination')}?`}${_tripStoryHelpButton_('movement-departure',es?'Ver instrucciones':'View instructions')}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?`¿Ya tienes definido el transporte de ${_tripStoryEsc_(prev?.place||'origen')} a ${_tripStoryEsc_(st.place||'destino')}?`:`Do you already have transport defined from ${_tripStoryEsc_(prev?.place||'origin')} to ${_tripStoryEsc_(st.place||'destination')}?`}</b>${_tripStoryHelpButton_('movement-transport',es?'¿Qué opción elijo?':'Which option should I choose?')}<div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full" data-move-details><label data-move-transport-field class="gj-progressive-field ${st.transportStatus==='user_defined'?'is-revealed':'is-collapsed'}" aria-hidden="${st.transportStatus==='user_defined'?'false':'true'}">${es?'Medio de transporte':'Transport'}<select data-move="transportMode" ${st.transportStatus==='user_defined'?'':'disabled'}>${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?'Fecha de llegada (opcional)':'Arrival date (optional)'}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label><label>${es?'Hora en que estarás listo para iniciar el itinerario (opcional)':'Time when you will be ready to start the itinerary (optional)'}${_tripStoryHelpButton_('movement-ready',es?'Ver instrucciones':'View instructions')}<select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label></div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
+      active.querySelectorAll('[data-gj-help]').forEach(b=>b.onclick=()=>{
+        const key=b.dataset.gjHelp,from=prev?.place||(es?'origen':'origin'),to=st.place||(es?'destino':'destination');
+        const copy={
+          'movement-departure':es?[`Hora de salida`,`Indica la hora a la que sale el avión, tren, bus, ferry o el medio de transporte de ${from} hacia ${to}. Si todavía no has decidido el medio de transporte, ITBMO lo resolverá; en ese caso indica la hora aproximada a la que estimas salir hacia ${to}.`]:[`Departure time`,`Enter the time your plane, train, bus, ferry or other transport leaves ${from} for ${to}. If you have not decided the transport yet, ITBMO will resolve it; in that case enter the approximate time you expect to leave for ${to}.`],
+          'movement-transport':es?[`Transporte entre destinos`,`Elige “Sí, ya tengo mi transporte” sólo si ya sabes qué medio utilizarás de ${from} a ${to}. Si aún no lo has decidido, selecciona “No, que ITBMO lo resuelva”; ITBMO propondrá la logística y no tendrás que seleccionar un medio ahora.`]:[`Transport between destinations`,`Choose “Yes, I already have my transport” only if you already know how you will travel from ${from} to ${to}. Otherwise choose “No, let ITBMO resolve it”; ITBMO will propose the logistics.`],
+          'movement-ready':es?[`Listo para comenzar en ${to}`,`Indica la hora a la que ya habrás llegado al hospedaje o dejado el equipaje resguardado y estarás listo para comenzar a desplazarte en ${to}.`]:[`Ready to start in ${to}`,`Enter the time when you will have reached your lodging or stored your luggage and will be ready to start moving around ${to}.`]
+        }[key]; if(copy)_tripStoryOpenInstruction_(copy[0],copy[1]);
+      });
+      active.querySelectorAll('[data-move-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.moveKnowledge==='known';st.transportStatus=known?'user_defined':'route_to_resolve';active.querySelectorAll('[data-move-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));const transportSelect=active.querySelector('[data-move="transportMode"]');const transportField=active.querySelector('[data-move-transport-field]');if(transportSelect)transportSelect.disabled=!known;transportField?.classList.toggle('is-revealed',known);transportField?.classList.toggle('is-collapsed',!known);transportField?.setAttribute('aria-hidden',String(!known));if(!known){st.transportMode='';if(transportSelect)transportSelect.value='';st.routeResolution=null;}persist();});active.querySelectorAll('[data-move]').forEach(x=>x.onchange=()=>{st[x.dataset.move]=x.value;persist();});active.querySelector('[data-save-movement]').onclick=()=>{const depDate=active.querySelector('[data-move="departureDate"]')?.value||'';const depTime=active.querySelector('[data-move="departureTime"]')?.value||'';st.departureDate=depDate;st.departureTime=depTime;if(!depDate||!depTime){active.querySelector('[data-move="departureDate"]')?.classList.toggle('is-invalid',!depDate);active.querySelector('[data-move="departureTime"]')?.classList.toggle('is-invalid',!depTime);return;}const prevEnd=_tripStoryStayEnd_(prev);if(prevEnd&&depDate<prevEnd){alert(es?`La salida de ${prev.place} hacia ${st.place} no puede ser el ${_tripStoryDMY_(depDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}. Usa ${_tripStoryDMY_(prevEnd)} o una fecha posterior.`:`The departure from ${prev.place} to ${st.place} cannot be ${_tripStoryDMY_(depDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}. Use ${_tripStoryDMY_(prevEnd)} or a later date.`);active.querySelector('[data-move="departureDate"]')?.classList.add('is-invalid');return;}if(st.transportStatus!=='user_defined'){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}else{active.querySelectorAll('[data-move]').forEach(x=>st[x.dataset.move]=x.value);}persist();phase='decision';render();};return;
     }
     if(phase==='return'){
       const last=story.stays.at(-1);
@@ -14026,7 +14234,7 @@ function openTripStoryBuilder(){
     if(phase==='review'){
       const effectiveDates=new Set();story.stays.forEach(st=>{for(let d=0;d<Number(st.days||1);d++){const date=_tripStoryAddDays_(st.startDate,d);if(date)effectiveDates.add(date);}});const tooLong=effectiveDates.size>MAX_TRIP_STORY_DAYS;
       active.innerHTML=shell(es?'REVISA TU RECORRIDO':'REVIEW YOUR JOURNEY',es?'Tu viaje está tomando forma':'Your trip is taking shape',es?'Revisa la historia completa. Puedes volver a editar cualquier estancia antes de continuar al pago.':'Review the complete story. You can edit any stay before continuing to payment.',`<div class="gj-review-stats"><div><b>${story.stays.length}</b><span>${es?'destinos':'destinations'}</span></div><div><b>${effectiveDates.size}</b><span>${es?'días efectivos':'effective days'}</span></div><div><b>${story.stays.reduce((n,s)=>n+(s.dayTrips||[]).length,0)}</b><span>${es?'excursiones':'day trips'}</span></div></div>${tooLong?`<div class="gj-warning">${es?`El recorrido supera el máximo de ${MAX_TRIP_STORY_DAYS} días efectivos.`:`The route exceeds the ${MAX_TRIP_STORY_DAYS}-effective-day maximum.`}</div>`:''}<div class="gj-review-list">${story.stays.map((st,i)=>`<div class="gj-review-row"><div><b>${i+1}. ${_tripStoryEsc_(st.place||'—')}</b><small>${_tripStoryDMY_(st.startDate)} · ${st.days} ${st.days===1?(es?'día':'day'):(es?'días':'days')}</small></div><div>${i?`<button type="button" data-review-move="${i}:-1">↑</button>`:''}${i<story.stays.length-1?`<button type="button" data-review-move="${i}:1">↓</button>`:''}<button type="button" data-review-edit="${i}">${es?'Editar':'Edit'}</button><button type="button" class="gj-review-delete" data-review-delete="${i}">${es?'Eliminar':'Delete'}</button></div></div>`).join('')}</div><div class="gj-review-actions"><button type="button" data-edit-route>${es?'Volver a la última parada':'Back to last stop'}</button></div>`,tooLong?'':nextButton(es?'Guardar recorrido y continuar':'Save journey and continue','data-gj-save'));
-      active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();overlay.remove();document.body.classList.remove('trip-story-open');const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true)_tripStoryClearDraft_();});return;
+      active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true){_tripStoryClearDraft_();}else{return;}});return;
     }
   };
   overlay.querySelector('[data-gj-reset]').onclick=()=>{if(!confirm(es?'¿Quieres reiniciar el recorrido? Se eliminarán los destinos, excursiones y traslados que has configurado. Los viajeros se conservarán.':'Reset the route? Destinations, day trips and transfers will be deleted. Travelers will be kept.'))return;_tripStoryResetRoute_(story);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;dayTripDraft=null;dayTripEditIndex=null;activeStay=0;phase='start';persist();try{engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));}catch(_){};render();};
@@ -14283,6 +14491,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   qs('#build-trip-story')?.addEventListener('click',openTripStoryBuilder);
   qs('#build-guided-journey')?.addEventListener('click',openTripStoryBuilder);
+  const guidedJourneyButton=qs('#build-guided-journey');
+  if(guidedJourneyButton){guidedJourneyButton.disabled=true;guidedJourneyButton.setAttribute('aria-disabled','true');}
   renderTripStorySummary();
 
   // Security/UX default: Planner is locked before any async session restore.
