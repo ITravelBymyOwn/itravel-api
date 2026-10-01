@@ -9370,7 +9370,37 @@ async function _prewarmGeneratedTripContext_(){
   }catch(_){}
 }
 
+// V86 · Clean Planner landing shell.
+// The Planner must never repopulate route/preferences after login or after a
+// completed generation. Only interrupted/failed PAID generations may hydrate.
+function _showCleanPlannerLanding_({clearRouteDraft=false,enableReset=false}={}){
+  document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
+  document.querySelector('#guided-personalization-overlay')?.remove();
+  document.body.classList.remove('guided-preferences-open');
+  hidePreferencesStage({reset:true});
+  if($chatBox) $chatBox.style.display='none';
+  if($chatM) $chatM.innerHTML='';
+  setPlanningChatLocked(true);
+
+  const summary=qs('#trip-story-summary');
+  if(summary){ summary.hidden=true; summary.innerHTML=''; summary.classList.remove('is-payment-locked'); }
+
+  // Compatibility route controls remain technical only; the visible entry point
+  // is the large "Comenzar" CTA. Do not restore an old route into the Planner.
+  if(clearRouteDraft){
+    try{ _tripStoryClearDraft_(); }catch(_){ }
+    try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
+    if(plannerState){ plannerState.travelModelV2=null; plannerState.preferencesV2=null; }
+  }
+
+  if($resetBtn){
+    $resetBtn.disabled=!enableReset;
+    $resetBtn.setAttribute('aria-disabled',String(!enableReset));
+  }
+}
+
 function _applyGeneratedUIState({showModal=false}={}){
+  _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:true});
   document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
   document.querySelector('#guided-personalization-overlay')?.remove();
   document.body.classList.remove('guided-preferences-open');
@@ -9863,18 +9893,22 @@ async function restorePaidGenerationIfNeeded(){
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
     if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
 
-    const plannerMode=new URLSearchParams(window.location.search).get('mode');
+    // V86 RECOVERY CONTRACT:
+    // Login/new Planner = blank. Completed/saved route creation is never restored.
+    // The ONLY automatic hydration allowed here is a paid generation retry.
     if(trip.status==='generated'){
-      if(plannerMode==='new'){
-        storeActiveTripId(null);
-        const myTrips=qs('#planner-my-trips'); if(myTrips) myTrips.hidden=false;
-        _journeyLoadHistory_().then(()=>_journeyRenderHistory_()).catch(()=>{});
-        return;
-      }
-      await showJourneyReturnGate(trip);
+      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:true});
+      return;
+    }
+    if(trip.status==='saved'){
+      storeActiveTripId(null);
+      currentTripId=null;
+      paymentGateSatisfiedTripId=null;
+      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
       return;
     }
 
+    // generating / failed: preserve the paid-generation recovery path.
     if(!_hydrateGenerationTrip_(trip)) return;
 
     let paymentStatus=null;
@@ -9904,9 +9938,7 @@ async function restorePaidGenerationIfNeeded(){
       return;
     }
 
-    if(trip.status==='saved'){
-      if(!_restorePostPaymentProgress_(trip)) showPreferencesStage();
-    }else if(trip.status==='generating'){
+    if(trip.status==='generating'){
       chatMsg(getLang()==='es'
         ? 'ITBMO detectó una generación interrumpida y continuará desde la última ciudad guardada.'
         : 'ITBMO detected an interrupted generation and will continue from the last saved city.','ai');
