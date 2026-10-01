@@ -6,10 +6,6 @@
       "use": "@vercel/node"
     },
     {
-      "src": "api/build.js",
-      "use": "@vercel/node"
-    },
-    {
       "src": "api/info-public.js",
       "use": "@vercel/node"
     },
@@ -68,13 +64,6 @@
     {
       "src": "/api/chat",
       "dest": "/api/chat.js"
-    },
-    {
-      "src": "/api/build",
-      "headers": {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
-      },
-      "dest": "/api/build.js"
     },
     {
       "src": "/api/info-public",
