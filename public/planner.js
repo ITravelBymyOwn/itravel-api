@@ -7396,6 +7396,7 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
     calendar_dates:_calendarDatesForStay_(baseDate,Number(dest?.days||0)),
     // Canonical Trip Story stay cards define generation units. Day Trips belong
     // to their parent stay and must never become independent generation units.
+    experience_architecture:(_travelV2()?.state?.tripStory?.experienceArchitecture)||null,
     trip_story_stays:((_currentTravelModelV2_()?.trip_story?.stays)||[]).map((st,index)=>({
       id:st.id||`story-stay-${index+1}`,
       sequence:index+1,
@@ -7403,9 +7404,11 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
       country:st.country||'',
       startDate:st.startDate||'',
       days:Math.max(1,Number(st.days||1)),
+      experienceArchitecture:st.experienceArchitecture||null,
       dayTrips:(st.dayTrips||[]).map(dt=>({
         id:dt.id||'',day:Math.max(1,Number(dt.day||1)),place:dt.place||'',country:dt.country||st.country||'',
-        outbound:{...(dt.outbound||{})},return:{...(dt.return||{})},scheduleAdjustment:dt.scheduleAdjustment||null
+        outbound:{...(dt.outbound||{})},return:{...(dt.return||{})},scheduleAdjustment:dt.scheduleAdjustment||null,
+        experienceManifest:dt.experienceManifest||null,_itbmo_auto_experience:Boolean(dt._itbmo_auto_experience)
       }))
     })),
     hard_policies:{
@@ -8106,13 +8109,26 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         return ws!=null&&we!=null&&(we-ws)>=180;
       });
       if(baseWindows.length){
-        planningUnits.push({
-          id:parentId,unit_type:'BASE_STAY',parent_stay_id:parentId,sequence:0,
-          physical_destination:st.place,base_destination:st.place,physical_key:_v3PhysicalKey_(st.place),
-          allowed_physical_locations:[...new Set([st.place,...baseWindows.map(w=>w.location)].filter(Boolean))],
-          day_trips:[],windows:baseWindows,days:[...new Set(baseWindows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b),
-          previous_destination:previous?.place||null,next_destination:next?.place||null,
-          inbound_boundary:d.inbound||null,outbound_boundary:d.outbound||null
+        // V85.17: once the strategic experience architecture decomposes a long
+        // stay, each BASE calendar day is independently recoverable too. This
+        // prevents a repair on one urban day from rewriting another healthy day
+        // and gives the global POI ledger a clean physical boundary.
+        const splitBaseDays=Boolean(st.experienceArchitecture);
+        const groups=splitBaseDays
+          ? [...new Set(baseWindows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b).map(day=>baseWindows.filter(w=>Number(w.day)===day))
+          : [baseWindows];
+        groups.forEach((windows,baseIndex)=>{
+          const days=[...new Set(windows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b);
+          planningUnits.push({
+            id:splitBaseDays?`${parentId}-base-d${days[0]}`:parentId,
+            unit_type:splitBaseDays?'BASE_DAY':'BASE_STAY',parent_stay_id:parentId,sequence:0,
+            physical_destination:st.place,base_destination:st.place,physical_key:_v3PhysicalKey_(st.place),
+            allowed_physical_locations:[...new Set([st.place,...windows.map(w=>w.location)].filter(Boolean))],
+            day_trips:[],windows,days,
+            experience_architecture:st.experienceArchitecture||null,
+            previous_destination:previous?.place||null,next_destination:next?.place||null,
+            inbound_boundary:d.inbound||null,outbound_boundary:d.outbound||null
+          });
         });
       }
 
@@ -8191,6 +8207,7 @@ function _v3StayContract_(contract,unit){
     place_preference:placePreference,
     global_preferences:contract.global_preferences,
     special_conditions:contract.special_conditions,
+    experience_architecture:unit.experience_architecture||contract.experience_architecture||null,
     travelers:contract.travelers,
     traveler_profiles:contract.traveler_profiles,
     calendar_dates:(contract.calendar_dates||[]).filter(x=>days.has(Number(x.day))),
@@ -9613,6 +9630,9 @@ async function runPaidGeneration({manualRetry=false}={}){
   try{
     // V72: never erase a terminal-success marker before we know the server has opened a genuinely new run.
     // A transient Route Resolver failure must not resurrect an already completed trip.
+    showWOW(true,getLang()==='es'?'✨ ITBMO está diseñando la arquitectura de tu viaje…':'✨ ITBMO is designing your trip architecture…');
+    await _v8517PrepareExperienceArchitecture_();
+    _assertGenerationRunActive_(runEpoch);
     showWOW(true,getLang()==='es'?'✨ ITBMO está resolviendo la logística de tu recorrido…':'✨ ITBMO is resolving your trip logistics…');
     await _resolveTripStoryRoutesBeforeGeneration_();
     _assertGenerationRunActive_(runEpoch);
@@ -14471,6 +14491,143 @@ async function _v71FetchRouteResolver_(movements=[]){
   throw lastError||new Error('ROUTE_RESOLVER_FAILED');
 }
 
+
+/* =========================================================
+   V85.17 · GLOBAL EXPERIENCE ARCHITECTURE
+   Destination-agnostic pre-planner. Long stays are not handed to the itinerary
+   model as one undifferentiated urban block. Before Route Resolver runs, ITBMO
+   inventories destination-defining regional experiences, assigns true round-trip
+   excursion days, keeps coherent BASE days, and records night experiences as
+   overlays (never as physical Day Trip units).
+========================================================= */
+function _v8517ExperienceFingerprint_(story={}){
+  const payload=(story.stays||[]).map(st=>({
+    id:st.id,place:st.place,country:st.country||'',startDate:st.startDate,days:Number(st.days||1),
+    explicit:(st.dayTrips||[]).filter(dt=>!dt?._itbmo_auto_experience).map(dt=>({day:Number(dt.day||1),place:dt.place||''}))
+  }));
+  return _v3StableHash_(JSON.stringify(payload));
+}
+function _v8517TransitionDaysForStay_(story={},stayIndex=0){
+  const st=story.stays?.[stayIndex]; if(!st)return new Set();
+  const blocked=new Set();
+  // Arrival/departure transition dates are protected when they materially share
+  // a calendar day with another overnight stay. Do not auto-place regional tours.
+  const prev=story.stays?.[stayIndex-1], next=story.stays?.[stayIndex+1];
+  if(prev && st.startDate){ const d=_tripStoryDiffDays_(st.startDate,st.startDate)+1; if(d>=1) blocked.add(d); }
+  if(next?.startDate){ const d=_tripStoryDiffDays_(st.startDate,next.startDate)+1; if(d>=1&&d<=Number(st.days||1)) blocked.add(d); }
+  return blocked;
+}
+function _v8517NormalizeExperiencePlan_(raw={},story={}){
+  const staysById=new Map((story.stays||[]).map(st=>[String(st.id||''),st]));
+  const staysByPlace=new Map((story.stays||[]).map(st=>[_canonicalText_(st.place||''),st]));
+  const out={version:'V85.17',stays:[]};
+  for(const item of (Array.isArray(raw?.stays)?raw.stays:[])){
+    const st=staysById.get(String(item?.stay_id||''))||staysByPlace.get(_canonicalText_(item?.base||''));
+    if(!st)continue;
+    const maxDay=Math.max(1,Number(st.days||1));
+    const used=new Set((st.dayTrips||[]).filter(dt=>!dt?._itbmo_auto_experience).map(dt=>Number(dt.day||0)).filter(Boolean));
+    const regional=[];
+    for(const x of (Array.isArray(item?.regional_day_trips)?item.regional_day_trips:[])){
+      const day=Math.max(1,Math.min(maxDay,Number(x?.day||0)));
+      const place=String(x?.place||'').trim();
+      if(!place||!Number.isFinite(day)||used.has(day)||_arePoiAliases_(place,st.place))continue;
+      used.add(day);
+      regional.push({day,place,country:String(x?.country||st.country||''),load:String(x?.load||'HEAVY').toUpperCase(),route_theme:String(x?.route_theme||''),anchors:Array.isArray(x?.anchors)?x.anchors.slice(0,8):[],microstops:Array.isArray(x?.microstops)?x.microstops.slice(0,8):[],target_minutes:Math.max(240,Math.min(780,Number(x?.target_minutes||540)))});
+    }
+    const nights=(Array.isArray(item?.night_experiences)?item.night_experiences:[]).map(x=>({
+      day:Math.max(1,Math.min(maxDay,Number(x?.day||1))),
+      type:String(x?.type||'NIGHT_EXPERIENCE'),
+      label:String(x?.label||'').trim(),
+      target_minutes:Math.max(120,Math.min(480,Number(x?.target_minutes||360))),
+      flexible:Boolean(x?.flexible!==false),
+      protect_next_morning:Boolean(x?.protect_next_morning!==false)
+    })).filter(x=>x.label);
+    const urban=[...new Set((Array.isArray(item?.base_days)?item.base_days:[]).map(Number).filter(d=>d>=1&&d<=maxDay&&!used.has(d)))].sort((a,b)=>a-b);
+    out.stays.push({stay_id:st.id,base:st.place,regional_day_trips:regional,base_days:urban,night_experiences:nights,inventory:Array.isArray(item?.inventory)?item.inventory.slice(0,24):[]});
+  }
+  return out;
+}
+async function _v8517FetchExperienceArchitecture_(story={}){
+  const payload={
+    mode:'experience_architecture',lang:getLang(),
+    trip:{stays:(story.stays||[]).map((st,index)=>({
+      stay_id:st.id,base:st.place,country:st.country||'',start_date:st.startDate,days:Number(st.days||1),
+      explicit_day_trips:(st.dayTrips||[]).filter(dt=>!dt?._itbmo_auto_experience).map(dt=>({day:Number(dt.day||1),place:dt.place||'',country:dt.country||st.country||''})),
+      traveler_transport:st.transportMode||null
+    }))},
+    preferences:plannerState?.preferencesV2||null,
+    special_conditions:String(plannerState?.specialConditions||qs('#special-conditions')?.value||'').trim()||null,
+    travelers:plannerState?.travelers||null,
+    traveler_profiles:plannerState?.travelerProfiles||null
+  };
+  let last=null;
+  for(let attempt=1;attempt<=3;attempt++){
+    try{
+      const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const data=await response.json().catch(()=>({}));
+      if(response.ok&&data?.ok&&Array.isArray(data?.plan?.stays))return data.plan;
+      last=new Error(data?.code||`EXPERIENCE_ARCHITECTURE_HTTP_${response.status||0}`);
+    }catch(err){last=err;}
+    if(attempt<3)await new Promise(r=>setTimeout(r,attempt*900));
+  }
+  throw last||new Error('EXPERIENCE_ARCHITECTURE_INVALID_RESPONSE');
+}
+function _v8517ApplyExperienceArchitecture_(story={},plan={}){
+  const byId=new Map((plan.stays||[]).map(x=>[String(x.stay_id||''),x]));
+  const applied=[];
+  (story.stays||[]).forEach((st,stayIndex)=>{
+    const p=byId.get(String(st.id||'')); if(!p)return;
+    const explicit=(st.dayTrips||[]).filter(dt=>!dt?._itbmo_auto_experience);
+    const occupied=new Set(explicit.map(dt=>Number(dt.day||1)));
+    const blocked=_v8517TransitionDaysForStay_(story,stayIndex);
+    const autos=[];
+    for(const x of (p.regional_day_trips||[])){
+      const day=Number(x.day||0);
+      if(!day||occupied.has(day)||blocked.has(day))continue;
+      occupied.add(day);
+      autos.push({
+        id:`auto_exp_${st.id}_${day}_${_v3PhysicalKey_(x.place)||'regional'}`,
+        day,place:x.place,country:x.country||st.country||'',_itbmo_auto_experience:true,
+        experienceManifest:{route_theme:x.route_theme||'',anchors:x.anchors||[],microstops:x.microstops||[],load:x.load||'HEAVY',target_minutes:x.target_minutes||540},
+        outbound:{departureTime:'',arrivalTime:'',transportMode:'',timeStatus:'estimated'},
+        return:{departureTime:'',arrivalTime:'',transportMode:'',timeStatus:'estimated'}
+      });
+    }
+    st.dayTrips=[...explicit,...autos].sort((a,b)=>Number(a.day)-Number(b.day));
+    st.experienceArchitecture={base_days:p.base_days||[],night_experiences:p.night_experiences||[],inventory:p.inventory||[]};
+    applied.push({base:st.place,days:Number(st.days||1),regional:autos.map(x=>({day:x.day,place:x.place})),base_days:p.base_days||[],night_overlays:p.night_experiences||[]});
+  });
+  story.experienceArchitecture={version:'V85.17',stays:plan.stays||[]};
+  console.info('[ITBMO V85.17 EXPERIENCE ARCHITECTURE] applied',applied);
+  return applied;
+}
+async function _v8517PrepareExperienceArchitecture_(){
+  const engine=_travelV2(),story=engine?.state?.tripStory;
+  if(!story?.stays?.length)return {ok:true,planned:0};
+  const fingerprint=_v8517ExperienceFingerprint_(story);
+  if(story.experienceArchitecture?.fingerprint===fingerprint){
+    console.info('[ITBMO V85.17 EXPERIENCE ARCHITECTURE] sealed plan reused',story.experienceArchitecture);
+    return {ok:true,reused:true};
+  }
+  // Only stays with enough unconstrained time need strategic decomposition.
+  // Short stays and traveler-explicit excursions retain the proven flow.
+  const candidates=(story.stays||[]).filter(st=>Number(st.days||1)>=4);
+  if(!candidates.length)return {ok:true,planned:0};
+  console.info('[ITBMO V85.17 EXPERIENCE ARCHITECTURE] requesting global inventory and physical allocation',candidates.map(st=>({base:st.place,days:st.days})));
+  const raw=await _v8517FetchExperienceArchitecture_(story);
+  const plan=_v8517NormalizeExperiencePlan_(raw,story);
+  const missing=candidates.filter(st=>!plan.stays.some(x=>String(x.stay_id)===String(st.id)));
+  if(missing.length){
+    const err=new Error('EXPERIENCE_ARCHITECTURE_INCOMPLETE');err.code='EXPERIENCE_ARCHITECTURE_INCOMPLETE';throw err;
+  }
+  _v8517ApplyExperienceArchitecture_(story,plan);
+  story.experienceArchitecture={...story.experienceArchitecture,fingerprint};
+  engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
+  applyTripStoryToCompatibility(story);renderTripStorySummary();
+  if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
+  return {ok:true,planned:plan.stays.length};
+}
+
 async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}={}){
   const engine=_travelV2(),story=engine?.state?.tripStory;
   if(!story?.stays?.length)return {ok:true,resolved:0};
@@ -14486,7 +14643,7 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
     if(!dt.place)continue;
     const date=_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1));
     const needs=![dt.outbound?.departureTime,dt.outbound?.arrivalTime,dt.return?.departureTime,dt.return?.arrivalTime].every(Boolean)||!dt.outbound?.transportMode||!dt.return?.transportMode;
-    if(needs)movements.push({movement_id:`daytrip:${dt.id}`,kind:'daytrip',origin:st.place,destination:dt.place,departure_date:date,earliest_departure:dt.outbound?.departureTime||'08:00',must_return_same_day:true,user_return_by:dt.return?.arrivalTime||null,user_mode:dt.outbound?.transportMode||null});
+    if(needs)movements.push({movement_id:`daytrip:${dt.id}`,kind:'daytrip',origin:st.place,destination:dt.place,departure_date:date,earliest_departure:dt.outbound?.departureTime||'08:00',must_return_same_day:true,user_return_by:dt.return?.arrivalTime||null,user_mode:dt.outbound?.transportMode||null,target_total_minutes:Number(dt?.experienceManifest?.target_minutes||0)||null,route_theme:dt?.experienceManifest?.route_theme||null,anchors:dt?.experienceManifest?.anchors||[],microstops:dt?.experienceManifest?.microstops||[]});
   }
   if(!movements.length)return {ok:true,resolved:0};
   console.info('[ITBMO ROUTE RESOLVER] resolving',movements);
