@@ -26,6 +26,107 @@
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
+/* ---------- Deployment contract ----------
+   Generation is allowed only when HTML, planner JS and the Vercel API belong
+   to the same build. This is intentionally outside the tourism engine. */
+const ITBMO_PLANNER_BUILD='V95';
+const ITBMO_GENERATION_PROTOCOL='physical-units-v15';
+window.__ITBMO_PLANNER_BUILD__=ITBMO_PLANNER_BUILD;
+console.info('[ITBMO BUILD]',{planner:ITBMO_PLANNER_BUILD,protocol:ITBMO_GENERATION_PROTOCOL,expected:window.__ITBMO_EXPECTED_PLANNER_BUILD__||null});
+
+function _v95GenerationHeaders_(headers={}){
+  return {
+    ...headers,
+    'X-ITBMO-Planner-Build':ITBMO_PLANNER_BUILD,
+    'X-ITBMO-Generation-Protocol':ITBMO_GENERATION_PROTOCOL
+  };
+}
+
+async function _v95ThrowIfBuildMismatch_(response){
+  if(Number(response?.status)!==409)return;
+  const data=await response.clone().json().catch(()=>({}));
+  if(data?.code!=='ITBMO_CLIENT_BUILD_MISMATCH')return;
+  const mismatch=new Error('ITBMO_SERVER_CLIENT_BUILD_MISMATCH');
+  mismatch.code='ITBMO_BUILD_ALIGNMENT_REQUIRED';
+  mismatch.expected=String(data?.planner_build||ITBMO_PLANNER_BUILD);
+  mismatch.received=ITBMO_PLANNER_BUILD;
+  throw mismatch;
+}
+
+function _v95FreshPlannerReload_(){
+  const target=new URL(window.location.href);
+  target.searchParams.set('itbmo_build',ITBMO_PLANNER_BUILD);
+  target.searchParams.set('itbmo_refresh',String(Date.now()));
+  window.location.replace(target.toString());
+}
+
+function _v95ShowDeploymentUpdate_(error={}){
+  showWOW(false);
+  document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
+  document.querySelector('.itbmo-build-alignment-overlay')?.remove();
+  const es=getLang()==='es';
+  const overlay=document.createElement('div');
+  overlay.className='itbmo-postpay-overlay itbmo-build-alignment-overlay';
+  overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-build-title">
+    <div class="itbmo-postpay-icon">↻</div>
+    <h3 id="itbmo-build-title">${es?'ITBMO necesita actualizar esta pantalla':'ITBMO needs to refresh this screen'}</h3>
+    <p>${es?'Detectamos que esta pestaña no tiene la misma versión que el motor de generación. Tu viaje y tu pago siguen guardados. Actualiza antes de continuar para evitar mezclar procesos.':'This tab does not match the generation engine version. Your trip and payment remain saved. Refresh before continuing so different processes are never mixed.'}</p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:22px">
+      <button id="itbmo-build-refresh" type="button">${es?'Actualizar y continuar':'Refresh and continue'}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#itbmo-build-refresh')?.addEventListener('click',_v95FreshPlannerReload_);
+  console.warn('[ITBMO V95 BUILD ALIGNMENT] generation blocked before paid model calls',{
+    code:error?.code||'ITBMO_BUILD_ALIGNMENT_REQUIRED',
+    expected:error?.expected||ITBMO_PLANNER_BUILD,
+    received:error?.received||null
+  });
+}
+
+async function _v95AssertDeploymentAlignment_(){
+  const htmlBuild=String(window.__ITBMO_EXPECTED_PLANNER_BUILD__||'').trim();
+  if(htmlBuild!==ITBMO_PLANNER_BUILD){
+    const mismatch=new Error('ITBMO_HTML_JS_BUILD_MISMATCH');
+    mismatch.code='ITBMO_BUILD_ALIGNMENT_REQUIRED';
+    mismatch.expected=htmlBuild||ITBMO_PLANNER_BUILD;
+    mismatch.received=ITBMO_PLANNER_BUILD;
+    throw mismatch;
+  }
+  let lastError=null;
+  for(let attempt=1;attempt<=2;attempt++){
+    try{
+      const response=await fetch(`/api/build?ts=${Date.now()}`,{
+        method:'GET',
+        cache:'no-store',
+        headers:_v95GenerationHeaders_({'Accept':'application/json'})
+      });
+      const data=await response.json().catch(()=>({}));
+      const serverBuild=String(data?.planner_build||response.headers.get('X-ITBMO-Server-Build')||'').trim();
+      const protocol=String(data?.generation_protocol||'').trim();
+      if(!response.ok||!data?.ok||serverBuild!==ITBMO_PLANNER_BUILD||protocol!==ITBMO_GENERATION_PROTOCOL){
+        const mismatch=new Error('ITBMO_SERVER_CLIENT_BUILD_MISMATCH');
+        mismatch.code='ITBMO_BUILD_ALIGNMENT_REQUIRED';
+        mismatch.expected=ITBMO_PLANNER_BUILD;
+        mismatch.received=serverBuild||`HTTP_${response.status||0}`;
+        throw mismatch;
+      }
+      console.info('[ITBMO V95 BUILD ALIGNMENT] verified before generation',{html:htmlBuild,planner:ITBMO_PLANNER_BUILD,server:serverBuild,protocol});
+      return true;
+    }catch(error){
+      lastError=error;
+      if(error?.code==='ITBMO_BUILD_ALIGNMENT_REQUIRED')break;
+      if(attempt<2)await new Promise(resolve=>setTimeout(resolve,650));
+    }
+  }
+  if(lastError?.code==='ITBMO_BUILD_ALIGNMENT_REQUIRED')throw lastError;
+  const unavailable=new Error('ITBMO_BUILD_PROBE_UNAVAILABLE');
+  unavailable.code='ITBMO_BUILD_ALIGNMENT_REQUIRED';
+  unavailable.expected=ITBMO_PLANNER_BUILD;
+  unavailable.cause=lastError;
+  throw unavailable;
+}
+
 /* ---------- Analytics bridge: Planner (Vercel) -> Webflow -> GTM/GA4 ----------
    Sends only allow-listed, non-personal operational data. */
 const ITBMO_ANALYTICS_EVENT_NAMES = new Set([
@@ -5621,10 +5722,11 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='pl
 
     const res = await fetch(API_URL,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:_v95GenerationHeaders_({'Content-Type':'application/json'}),
       signal: controller.signal,
-      body: JSON.stringify({ model: MODEL, messages, mode, ...(extraPayload||{}) })
+      body: JSON.stringify({ model: MODEL, messages, mode, client_build:ITBMO_PLANNER_BUILD, generation_protocol:ITBMO_GENERATION_PROTOCOL, ...(extraPayload||{}) })
     });
+    await _v95ThrowIfBuildMismatch_(res);
 
     if(!res.ok){
       const raw = await res.text().catch(()=> '');
@@ -5655,6 +5757,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='pl
     // repair or a Stay-generation attempt. Non-V3 callers preserve their proven
     // legacy behavior.
     if(mode==='planner_v3'){
+      if(e?.code==='ITBMO_BUILD_ALIGNMENT_REQUIRED')throw e;
       if(e?.code==='V3_TRANSIENT_TRANSPORT_ERROR') throw e;
       if(e?.code==='V3_API_HTTP_ERROR') throw e;
       const transient=new Error(isAbort?'V3_TRANSIENT_TIMEOUT':'V3_TRANSIENT_NETWORK_ERROR');
@@ -7823,7 +7926,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v14-balanced-aurora-window-contract';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v15-build-aligned-contract';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -8360,7 +8463,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     });
     planningUnits.forEach((u,i)=>u.sequence=i+1);
     const sealedUnits=_v93SealPhysicalPlanningUnits_(planningUnits);
-    console.info('[ITBMO V94 PHYSICAL UNITS]',sealedUnits.map(u=>({type:u.unit_type,id:u.id,base:u.base_destination,destination:u.physical_destination,days:u.days,windows:u.windows.length,source:u.contract_source,owned_pois:u.owned_pois?.length||0,excluded_pois:u.excluded_pois?.length||0,seal:u.contract_seal_id||null})));
+    console.info('[ITBMO V95 PHYSICAL UNITS]',sealedUnits.map(u=>({type:u.unit_type,id:u.id,base:u.base_destination,destination:u.physical_destination,days:u.days,windows:u.windows.length,source:u.contract_source,owned_pois:u.owned_pois?.length||0,excluded_pois:u.excluded_pois?.length||0,seal:u.contract_seal_id||null})));
     return sealedUnits.filter(u=>u.windows.length||u.days.length);
   }
 
@@ -8834,7 +8937,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
   const removeUnownedAurora=(input=[])=>{
     if(unit?.contract_source!=='ITBMO_COMPILED_V94'||String(unit?.unit_type||'')==='AURORA_EXPERIENCE')return input;
     const kept=input.filter(row=>!_isAuroraActivityRow_(row));
-    if(kept.length!==input.length)console.info(`[ITBMO V94 AURORA OWNERSHIP] ${unitCity} · ${unit.id}: removed ${input.length-kept.length} unallocated aurora row(s) before model repair`);
+    if(kept.length!==input.length)console.info(`[ITBMO V95 AURORA OWNERSHIP] ${unitCity} · ${unit.id}: removed ${input.length-kept.length} unallocated aurora row(s) before model repair`);
     return kept;
   };
   let rows=_v3StampStayRows_(_dedupeRows_(removeUnownedAurora(initialRows||[])),unit);
@@ -9677,8 +9780,10 @@ function _generationCheckpointSnapshot_(extra={}){
       .filter(city=>_generationCityComplete_(city))
   )];
   return {
-    schema_version:2,
+    schema_version:3,
     generation_engine:'v3',
+    planner_build:ITBMO_PLANNER_BUILD,
+    generation_protocol:ITBMO_GENERATION_PROTOCOL,
     completed_cities:completed,
     pending_cities:savedDestinations.map(x=>x.city).filter(city=>!completed.includes(city)),
     city_attempts:{...(generationRecoveryState?.city_attempts || {})},
@@ -9754,21 +9859,43 @@ function _hydrateGenerationTrip_(trip){
   const checkpoint=(trip.itinerary_data && typeof trip.itinerary_data==='object')
     ? trip.itinerary_data
     : {};
-  generationRecoveryState={
-    ...checkpoint,
-    completed_cities:Array.isArray(checkpoint.completed_cities) ? checkpoint.completed_cities : [],
-    city_attempts:(checkpoint.city_attempts && typeof checkpoint.city_attempts==='object')
-      ? checkpoint.city_attempts
-      : {},
-    generation_count:Number(trip.generation_count || 0)
-  };
+  const incompatibleInterruptedCheckpoint=String(trip.status||'').toLowerCase()!=='generated' &&
+    (String(checkpoint.planner_build||'')!==ITBMO_PLANNER_BUILD || String(checkpoint.generation_protocol||'')!==ITBMO_GENERATION_PROTOCOL);
+  generationRecoveryState=incompatibleInterruptedCheckpoint
+    ? {
+        schema_version:3,
+        generation_engine:'v3',
+        planner_build:ITBMO_PLANNER_BUILD,
+        generation_protocol:ITBMO_GENERATION_PROTOCOL,
+        completed_cities:[],
+        pending_cities:savedDestinations.map(item=>item.city),
+        city_attempts:{},
+        accepted_stays:{},
+        generation_count:Number(trip.generation_count || 0),
+        last_error:null
+      }
+    : {
+        ...checkpoint,
+        completed_cities:Array.isArray(checkpoint.completed_cities) ? checkpoint.completed_cities : [],
+        city_attempts:(checkpoint.city_attempts && typeof checkpoint.city_attempts==='object')
+          ? checkpoint.city_attempts
+          : {},
+        generation_count:Number(trip.generation_count || 0)
+      };
 
-  itineraries=(checkpoint.itineraries && typeof checkpoint.itineraries==='object')
-    ? checkpoint.itineraries
-    : {};
+  itineraries=incompatibleInterruptedCheckpoint
+    ? {}
+    : ((checkpoint.itineraries && typeof checkpoint.itineraries==='object') ? checkpoint.itineraries : {});
   cityMeta=(checkpoint.city_meta && typeof checkpoint.city_meta==='object')
     ? checkpoint.city_meta
     : {};
+  if(incompatibleInterruptedCheckpoint){
+    console.warn('[ITBMO V95 RECOVERY MIGRATION] incompatible interrupted generation discarded; traveler input and payment preserved',{
+      previous_build:checkpoint.planner_build||'legacy',
+      current_build:ITBMO_PLANNER_BUILD,
+      trip_id:trip.id
+    });
+  }
 
   const persistedPlanner=(trip.planner_input && typeof trip.planner_input==='object')
     ? trip.planner_input
@@ -10026,6 +10153,9 @@ async function runPaidGeneration({manualRetry=false}={}){
   _resetAstraGenerationMetrics_();
 
   try{
+    showWOW(true,getLang()==='es'?'Verificando que ITBMO esté completamente actualizado…':'Verifying that ITBMO is fully up to date…');
+    await _v95AssertDeploymentAlignment_();
+    _assertGenerationRunActive_(runEpoch);
     // V72: never erase a terminal-success marker before we know the server has opened a genuinely new run.
     // A transient Route Resolver failure must not resurrect an already completed trip.
     showWOW(true,getLang()==='es'?'✨ ITBMO está diseñando la estructura ideal de tu viaje…':'✨ ITBMO is designing the ideal structure for your trip…');
@@ -10052,16 +10182,38 @@ async function runPaidGeneration({manualRetry=false}={}){
     }
 
     const serverCheckpoint=begin?.trip?.itinerary_data || generationRecoveryState || {};
-    generationRecoveryState={
-      ...serverCheckpoint,
-      completed_cities:Array.isArray(serverCheckpoint.completed_cities) ? serverCheckpoint.completed_cities : [],
-      city_attempts:(serverCheckpoint.city_attempts && typeof serverCheckpoint.city_attempts==='object')
-        ? serverCheckpoint.city_attempts
-        : {},
-      accepted_stays:(serverCheckpoint.accepted_stays && typeof serverCheckpoint.accepted_stays==='object')
-        ? serverCheckpoint.accepted_stays : (generationRecoveryState?.accepted_stays || {}),
-      generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
-    };
+    const serverCheckpointCompatible=String(serverCheckpoint.planner_build||'')===ITBMO_PLANNER_BUILD &&
+      String(serverCheckpoint.generation_protocol||'')===ITBMO_GENERATION_PROTOCOL;
+    generationRecoveryState=serverCheckpointCompatible
+      ? {
+          ...serverCheckpoint,
+          completed_cities:Array.isArray(serverCheckpoint.completed_cities) ? serverCheckpoint.completed_cities : [],
+          city_attempts:(serverCheckpoint.city_attempts && typeof serverCheckpoint.city_attempts==='object')
+            ? serverCheckpoint.city_attempts
+            : {},
+          accepted_stays:(serverCheckpoint.accepted_stays && typeof serverCheckpoint.accepted_stays==='object')
+            ? serverCheckpoint.accepted_stays : (generationRecoveryState?.accepted_stays || {}),
+          generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
+        }
+      : {
+          ...(generationRecoveryState||{}),
+          schema_version:3,
+          generation_engine:'v3',
+          planner_build:ITBMO_PLANNER_BUILD,
+          generation_protocol:ITBMO_GENERATION_PROTOCOL,
+          completed_cities:[],
+          pending_cities:savedDestinations.map(item=>item.city),
+          city_attempts:{},
+          accepted_stays:{},
+          last_error:null,
+          generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
+        };
+    if(!serverCheckpointCompatible){
+      console.warn('[ITBMO V95 RECOVERY MIGRATION] stale server checkpoint ignored after generation_begin',{
+        previous_build:serverCheckpoint.planner_build||'legacy',
+        current_build:ITBMO_PLANNER_BUILD
+      });
+    }
 
     if(begin?.new_run && manualRetry){
       savedDestinations.forEach(({city})=>{
@@ -10167,6 +10319,11 @@ async function runPaidGeneration({manualRetry=false}={}){
   }catch(err){
     if(generationResetInProgress || err?.code==='GENERATION_CANCELLED_BY_RESET' || Number(runEpoch)!==Number(generationRunEpoch)){
       console.info('[PAID GENERATION ORCHESTRATOR] cancelled by itinerary reset');
+      return;
+    }
+    if(err?.code==='ITBMO_BUILD_ALIGNMENT_REQUIRED'){
+      _v95ShowDeploymentUpdate_(err);
+      recoveryPublished=true;
       return;
     }
     console.error('[PAID GENERATION ORCHESTRATOR]',err);
@@ -15122,7 +15279,7 @@ function _v86ExperiencePlanFingerprint_(story={}){
     dayTrips:_v93GenuineExplicitDayTrips_(st).map(dt=>({id:dt.id,day:dt.day,place:dt.place}))
   }));
   return _v86StableHash_(JSON.stringify({
-    allocation_schema:'V94_GLOBAL_INVENTORY_BALANCED_UNITS',
+    allocation_schema:'V95_BUILD_ALIGNED_GLOBAL_INVENTORY_BALANCED_UNITS',
     explicit,
     preferences:plannerState?.preferencesV2||null,
     special:plannerState?.specialConditions||'',
@@ -15151,7 +15308,8 @@ async function _v86FetchExperiencePlan_(payload={}){
   let lastError=null;
   for(let attempt=1;attempt<=2;attempt++){
     try{
-      const response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'experience_plan',experience_plan:payload})});
+      const response=await fetch(API_URL,{method:'POST',headers:_v95GenerationHeaders_({'Content-Type':'application/json'}),body:JSON.stringify({mode:'experience_plan',client_build:ITBMO_PLANNER_BUILD,generation_protocol:ITBMO_GENERATION_PROTOCOL,experience_plan:payload})});
+      await _v95ThrowIfBuildMismatch_(response);
       const data=await response.json().catch(()=>({}));
       if(response.ok&&data?.ok&&_v89ExperiencePlanResponseValid_(data,payload)){
         _captureExactUsage_(data);
@@ -15160,6 +15318,7 @@ async function _v86FetchExperiencePlan_(payload={}){
       const error=new Error(data?.code||(response.ok?'V94_EXPERIENCE_KNOWLEDGE_INVALID':`EXPERIENCE_PLAN_HTTP_${response.status||0}`));error.status=response.status||502;throw error;
     }catch(error){
       lastError=error;
+      if(error?.code==='ITBMO_BUILD_ALIGNMENT_REQUIRED')throw error;
       if(attempt<2)await new Promise(resolve=>setTimeout(resolve,900));
     }
   }
@@ -15180,7 +15339,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
       return claims.filter(claim=>String(claim?.owner_scope||'').toUpperCase()==='EXCURSION').every(claim=>(st.dayTrips||[]).some(dt=>String(dt?._itbmo_inventory_id||'')===String(claim?.owner_inventory_id||'')));
     });
   if(reusable){
-    console.info('[ITBMO V94 EXPERIENCE CONTRACT] sealed plan reused',story._itbmo_experience_plan_v86);
+    console.info('[ITBMO V95 EXPERIENCE CONTRACT] sealed plan reused',story._itbmo_experience_plan_v86);
     return {ok:true,planned:Number(story._itbmo_experience_plan_v86.planned||0),reused:true};
   }
   const pendingAutomaticRequirement=Boolean(story._itbmo_experience_plan_v86?.requires_automatic_discovery);
@@ -15194,7 +15353,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
     engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
     applyTripStoryToCompatibility(story);renderTripStorySummary();
     if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
-    console.info('[ITBMO V94 USER ROUTE] dense traveler-authored physical structure preserved; automatic discovery bypassed',story._itbmo_experience_plan_v86);
+    console.info('[ITBMO V95 USER ROUTE] dense traveler-authored physical structure preserved; automatic discovery bypassed',story._itbmo_experience_plan_v86);
     return {ok:true,planned:0,reused:false,bypassed_for_user_route:true};
   }
   const transitionDates=_v71MainTransitionDates_(story);
@@ -15215,12 +15374,12 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
       user_day_trips:_v93GenuineExplicitDayTrips_(st).map(dt=>({id:dt.id,day:Number(dt.day||1),identity:dt.place,mandatory:true,transport_mode:dt.outbound?.transportMode||null}))
     }))
   };
-  console.info('[ITBMO V94 EXPERIENCE KNOWLEDGE] requesting compact inventory, route manifests and polar-light profile',payload.stays.map(st=>({base:st.base,days:st.days,user_day_trips:st.user_day_trips.length,budget:st.inventory_budget})));
+  console.info('[ITBMO V95 EXPERIENCE KNOWLEDGE] requesting compact inventory, route manifests and polar-light profile',payload.stays.map(st=>({base:st.base,days:st.days,user_day_trips:st.user_day_trips.length,budget:st.inventory_budget})));
   let response;
   try{response=await _v86FetchExperiencePlan_(payload);}
   catch(error){
     if(explicitOnlyFallback&&!removedAutomatic){
-      console.warn('[ITBMO V94 EXPERIENCE CONTRACT] strategic knowledge unavailable; continuing only because the route is genuinely traveler-explicit',error);
+      console.warn('[ITBMO V95 EXPERIENCE CONTRACT] strategic knowledge unavailable; continuing only because the route is genuinely traveler-explicit',error);
       return {ok:false,planned:0,reused:false,bypassed_for_explicit_route:true,error};
     }
     story._itbmo_experience_plan_v86={version:'V94',fingerprint,contract_state:'PENDING_RETRY',requires_automatic_discovery:true,planned:0,error_code:String(error?.message||'EXPERIENCE_KNOWLEDGE_FAILED'),updated_at:new Date().toISOString()};
@@ -15228,7 +15387,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
     if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
     const blocked=new Error('V94_EXPERIENCE_CONTRACT_REQUIRED');
     blocked.code='V94_EXPERIENCE_CONTRACT_REQUIRED';blocked.recoveryStage='experience_plan';blocked.retryable=true;blocked.cause=error;
-    console.warn('[ITBMO V94 EXPERIENCE CONTRACT] fail-closed before Route Resolver/V3; retry resumes this stage',error);
+    console.warn('[ITBMO V95 EXPERIENCE CONTRACT] fail-closed before Route Resolver/V3; retry resumes this stage',error);
     throw blocked;
   }
   const byId=new Map((response.stays||[]).map(plan=>[String(plan?.stay_id||''),plan]));
@@ -15460,7 +15619,7 @@ async function _v86PrepareExperiencePlanBeforeRoutes_(){
   engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
   applyTripStoryToCompatibility(story);renderTripStorySummary();
   if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
-  console.info('[ITBMO V94 EXPERIENCE CONTRACT] deterministic balanced units, sealed POI ownership and polar-light profiles ready',{planned,stays:story.stays.map(st=>({base:st.place,profile:st._itbmo_experience_plan_v86?.profile,light:st._itbmo_experience_plan_v86?.light_profile,coverage:st._itbmo_experience_plan_v86?.inventory_coverage,budget:st._itbmo_experience_plan_v86?.allocation_budget,ownership:st._itbmo_experience_plan_v86?.poi_ownership?.length||0,day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place,origin:dt._itbmo_origin,duration:dt._itbmo_duration_class,effort:dt._itbmo_effort_class,priority:dt._itbmo_priority,inventory_id:dt._itbmo_inventory_id||null,microstops:dt._itbmo_route_manifest?.microstops?.length||0,topology:dt._itbmo_route_manifest?.topology||null}))}))});
+  console.info('[ITBMO V95 EXPERIENCE CONTRACT] deterministic balanced units, sealed POI ownership and polar-light profiles ready',{planned,stays:story.stays.map(st=>({base:st.place,profile:st._itbmo_experience_plan_v86?.profile,light:st._itbmo_experience_plan_v86?.light_profile,coverage:st._itbmo_experience_plan_v86?.inventory_coverage,budget:st._itbmo_experience_plan_v86?.allocation_budget,ownership:st._itbmo_experience_plan_v86?.poi_ownership?.length||0,day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place,origin:dt._itbmo_origin,duration:dt._itbmo_duration_class,effort:dt._itbmo_effort_class,priority:dt._itbmo_priority,inventory_id:dt._itbmo_inventory_id||null,microstops:dt._itbmo_route_manifest?.microstops?.length||0,topology:dt._itbmo_route_manifest?.topology||null}))}))});
   return {ok:true,planned,reused:false};
 }
 function _v71DayTripHasTravelerClockAuthority_(dt={}){
@@ -15602,7 +15761,8 @@ async function _v71FetchRouteResolver_(movements=[]){
   for(let attempt=0;attempt<delays.length;attempt++){
     if(delays[attempt])await new Promise(resolve=>setTimeout(resolve,delays[attempt]));
     try{
-      const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'route_resolver',lang:getLang(),movements})});
+      const response=await fetch('/api/chat',{method:'POST',headers:_v95GenerationHeaders_({'Content-Type':'application/json'}),body:JSON.stringify({mode:'route_resolver',client_build:ITBMO_PLANNER_BUILD,generation_protocol:ITBMO_GENERATION_PROTOCOL,lang:getLang(),movements})});
+      await _v95ThrowIfBuildMismatch_(response);
       const data=await response.json().catch(()=>({}));
       if(response.ok&&Array.isArray(data?.routes))return data;
       const err=new Error(data?.code||`ROUTE_RESOLVER_HTTP_${response.status||0}`);
@@ -15614,6 +15774,7 @@ async function _v71FetchRouteResolver_(movements=[]){
       console.warn('[ITBMO V71 ROUTE RESOLVER RETRY]',{attempt:attempt+1,status:response.status,code:err.code});
     }catch(err){
       lastError=err;
+      if(err?.code==='ITBMO_BUILD_ALIGNMENT_REQUIRED')throw err;
       if(err?.status && ![429,502,503,504].includes(Number(err.status)))throw err;
       if(attempt>=delays.length-1)break;
       console.warn('[ITBMO V71 ROUTE RESOLVER RETRY]',{attempt:attempt+1,code:err?.code||err?.message||'NETWORK'});
