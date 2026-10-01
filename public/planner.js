@@ -3175,7 +3175,7 @@ function openGuidedPersonalizationJourney(){
   engine.state.preferences=engine.state.preferences||{global:{notes:''},places:{}};
   engine.state.preferences.global=engine.state.preferences.global||{notes:''};
   const defaults=()=>({saved:false,lodgingChoice:'',lodgingText:'',arrivalTransport:'',localTransport:'recommend',pace:'balanced',interests:[],mustDo:'',avoid:'',reservations:'',notes:''});
-  places.forEach(p=>{engine.state.preferences.places[p.key]=Object.assign(defaults(),engine.state.preferences.places[p.key]||{});});
+  places.forEach(p=>{const merged=Object.assign(defaults(),engine.state.preferences.places[p.key]||{});if(!merged.saved && merged.lodgingChoice==='recommend') merged.lodgingChoice='';engine.state.preferences.places[p.key]=merged;});
   let step='global', index=0;
   const overlay=document.createElement('div'); overlay.id='guided-personalization-overlay'; overlay.className='trip-story-overlay guided-journey-overlay guided-personalization-overlay';
   overlay.innerHTML=`<div class="guided-journey" role="dialog" aria-modal="true"><header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'Tu recorrido ya está listo. Ahora hagámoslo realmente tuyo.':'Your route is ready. Now let’s make it truly yours.'}</p></div><button type="button" data-gp-close>×</button></header><nav class="guided-journey__progress"><button class="is-done">${es?'Viajeros':'Travelers'}</button><i>›</i><button class="is-done">${es?'Ruta':'Route'}</button><i>›</i><button class="is-active">${es?'Personalización':'Personalization'}</button><i>›</i><button disabled>${es?'Itinerario':'Itinerary'}</button></nav><div class="guided-journey__layout"><main class="guided-journey__active" data-gp-active></main><aside class="guided-journey__story"><div class="guided-journey__story-head"><div><small>${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><b>${es?'Tu viaje sigue tomando forma':'Your trip keeps taking shape'}</b></div><button type="button" id="guided-info-chat-open">Info Chat · <span data-gp-chat-left>${Number(document.querySelector('#info-chat-remaining')?.textContent?.match(/\d+/)?.[0]||0)}</span></button></div><div data-gp-story></div></aside></div><button class="guided-journey__mobile-story" type="button" data-gp-mobile>${es?'Ver mi recorrido':'View my journey'}</button></div>`;
@@ -3191,7 +3191,7 @@ function openGuidedPersonalizationJourney(){
     }
     if(step==='place'){
       const place=places[index]; if(!place){step='language';render();return;} const pref=engine.state.preferences.places[place.key];
-      active.innerHTML=shell(es?'UNA PARADA A LA VEZ':'ONE STOP AT A TIME',es?`Personalicemos ${_tripStoryEsc_(place.name)}`:`Let’s personalize ${_tripStoryEsc_(place.name)}`,es?'Indica sólo lo que sepas. Si prefieres que ITBMO decida, elige “Recomiéndame”.':'Tell us only what you know. If you prefer ITBMO to decide, choose “Recommend”.',`<div class="gj-form gj-form--personalize"><label>${es?'Hospedaje':'Lodging'}<small class="gj-field-help">${es?'Selecciona la opción que mejor describe lo que ya sabes sobre tu hospedaje.':'Choose the option that best describes what you already know about your lodging.'}</small><select data-gpp="lodgingChoice"><option value="">${es?'Selecciona una opción':'Select an option'}</option><option value="recommend">${es?'Aún no lo tengo · recomiéndame una zona base':'Not set yet · recommend a base area'}</option><option value="hotel">${es?'Ya tengo hotel o alojamiento':'I already have lodging'}</option><option value="area">${es?'Sé la zona aproximada':'I know the approximate area'}</option><option value="address">${es?'Tengo dirección o ubicación':'I have an address/location'}</option></select></label><label>${es?'Nombre, zona o dirección (opcional)':'Name, area or address (optional)'}<small class="gj-field-help">${es?'Complétalo sólo si ya tienes una referencia concreta.':'Complete this only if you already have a specific reference.'}</small><input data-gpp="lodgingText" value="${_tripStoryEsc_(pref.lodgingText||'')}"></label><label>${es?`Cómo te moverás en ${_tripStoryEsc_(place.name)}`:`How you will get around ${_tripStoryEsc_(place.name)}`}<small class="gj-field-help">${es?'Indica tu forma principal de desplazarte dentro del destino; ITBMO combinará opciones cuando tenga sentido.':'Choose your main way of getting around the destination; ITBMO can combine options when useful.'}</small><select data-gpp="localTransport"><option value="recommend">${es?'Recomiéndame':'Recommend'}</option><option value="walk">${es?'A pie':'Walking'}</option><option value="public">${es?'Transporte público':'Public transport'}</option><option value="car">${es?'Automóvil':'Car'}</option><option value="taxi">Taxi / Uber</option><option value="mixed">${es?'Mixto':'Mixed'}</option></select></label><label>${es?'Ritmo':'Pace'}<small class="gj-field-help">${es?'Define cuánto quieres hacer en un día normal.':'Set how much you want to do on a typical day.'}</small><select data-gpp="pace"><option value="relaxed">${es?'Relajado':'Relaxed'}</option><option value="balanced">${es?'Equilibrado':'Balanced'}</option><option value="intense">${es?'Intenso':'Intense'}</option></select></label></div><div class="gj-pref-optional"><div class="gj-pref-optional__head"><b>${es?'Afinar esta parada · opcional':'Fine-tune this stop · optional'}</b><small>${es?`Cuéntanos sólo lo que sea importante para ${_tripStoryEsc_(place.name)}. Si dejas algo vacío, ITBMO decidirá por ti.`:`Tell us only what matters for ${_tripStoryEsc_(place.name)}. If you leave something blank, ITBMO will decide for you.`}</small></div><label>${es?'Imprescindibles':'Must-do'}<small class="gj-field-help">${es?'Indica los lugares o experiencias que sí o sí quieres incluir. Si lo dejas vacío, ITBMO seleccionará los imperdibles más relevantes.':'Enter places or experiences you definitely want included. If blank, ITBMO will select the most relevant highlights.'}</small><textarea data-gpp="mustDo" placeholder="${es?'Ej.: Museo del Prado, Sagrada Familia, paseo en barco…':'E.g. Prado Museum, Sagrada Família, boat ride…'}">${_tripStoryEsc_(pref.mustDo||'')}</textarea></label><label>${es?'Reservas confirmadas':'Confirmed reservations'}<small class="gj-field-help">${es?'Agrega actividades, entradas, restaurantes o tours que ya tengas reservados, idealmente con fecha y hora. ITBMO organizará el recorrido alrededor de ellos.':'Add activities, tickets, restaurants or tours already booked, ideally with date and time. ITBMO will plan around them.'}</small><textarea data-gpp="reservations" placeholder="${es?'Ej.: Louvre · 03/01 · 10:00':'E.g. Louvre · Jan 3 · 10:00'}">${_tripStoryEsc_(pref.reservations||'')}</textarea></label><label>${es?'Quiero evitar':'I want to avoid'}<small class="gj-field-help">${es?'Indica lugares, actividades o situaciones que prefieres excluir de esta parada.':'Enter places, activities or situations you prefer to exclude from this stop.'}</small><textarea data-gpp="avoid" placeholder="${es?'Ej.: demasiados museos, caminatas largas, vida nocturna…':'E.g. too many museums, long walks, nightlife…'}">${_tripStoryEsc_(pref.avoid||'')}</textarea></label><label>${es?'Algo más':'Anything else'}<small class="gj-field-help">${es?'Añade cualquier detalle específico de este destino que no encaje en los campos anteriores.':'Add any destination-specific detail that does not fit the fields above.'}</small><textarea data-gpp="notes" placeholder="${es?'Cualquier detalle adicional para esta parada…':'Any additional detail for this stop…'}">${_tripStoryEsc_(pref.notes||'')}</textarea></label></div>`,next(index===places.length-1?(es?'Guardar y continuar':'Save and continue'):(es?'Guardar y siguiente destino':'Save and next stop')));
+      active.innerHTML=shell(es?'UNA PARADA A LA VEZ':'ONE STOP AT A TIME',es?`Personalicemos ${_tripStoryEsc_(place.name)}`:`Let’s personalize ${_tripStoryEsc_(place.name)}`,es?'Indica sólo lo que sepas. Si prefieres que ITBMO decida, elige “Recomiéndame”.':'Tell us only what you know. If you prefer ITBMO to decide, choose “Recommend”.',`<div class="gj-form gj-form--personalize"><label>${es?'Hospedaje':'Lodging'}<button type="button" class="gj-help-link gj-help-link--compact" data-gp-help="lodging"><span>i</span>${es?'Ver opciones':'View options'}</button><select data-gpp="lodgingChoice"><option value="">${es?'Selecciona una opción':'Select an option'}</option><option value="recommend">${es?'Aún no lo tengo · recomiéndame una zona base':'Not set yet · recommend a base area'}</option><option value="hotel">${es?'Ya tengo hotel o alojamiento':'I already have lodging'}</option><option value="area">${es?'Sé la zona aproximada':'I know the approximate area'}</option><option value="address">${es?'Tengo dirección o ubicación':'I have an address/location'}</option></select></label><label>${es?'Nombre, zona o dirección (opcional)':'Name, area or address (optional)'}<button type="button" class="gj-help-link gj-help-link--compact" data-gp-help="lodgingText"><span>i</span>${es?'Cuándo completarlo':'When to complete'}</button><input data-gpp="lodgingText" value="${_tripStoryEsc_(pref.lodgingText||'')}"></label><label>${es?`Cómo te moverás en ${_tripStoryEsc_(place.name)}`:`How you will get around ${_tripStoryEsc_(place.name)}`}<button type="button" class="gj-help-link gj-help-link--compact" data-gp-help="localTransport"><span>i</span>${es?'Cómo funciona':'How it works'}</button><select data-gpp="localTransport"><option value="recommend">${es?'Recomiéndame':'Recommend'}</option><option value="walk">${es?'A pie':'Walking'}</option><option value="public">${es?'Transporte público':'Public transport'}</option><option value="car">${es?'Automóvil':'Car'}</option><option value="taxi">Taxi / Uber</option><option value="mixed">${es?'Mixto':'Mixed'}</option></select></label><label>${es?'Ritmo':'Pace'}<button type="button" class="gj-help-link gj-help-link--compact" data-gp-help="pace"><span>i</span>${es?'Qué significa':'What this means'}</button><select data-gpp="pace"><option value="relaxed">${es?'Relajado':'Relaxed'}</option><option value="balanced">${es?'Equilibrado':'Balanced'}</option><option value="intense">${es?'Intenso':'Intense'}</option></select></label></div><div class="gj-pref-optional"><div class="gj-pref-optional__head"><b>${es?'Afinar esta parada · opcional':'Fine-tune this stop · optional'}</b><small>${es?`Cuéntanos sólo lo que sea importante para ${_tripStoryEsc_(place.name)}. Si dejas algo vacío, ITBMO decidirá por ti.`:`Tell us only what matters for ${_tripStoryEsc_(place.name)}. If you leave something blank, ITBMO will decide for you.`}</small></div><label>${es?'Imprescindibles':'Must-do'}<button type="button" class="gj-help-link gj-help-link--compact" data-gp-help="mustDo"><span>i</span>${es?'Qué incluir':'What to include'}</button><textarea data-gpp="mustDo" placeholder="${es?'Ej.: Museo del Prado, Sagrada Familia, paseo en barco…':'E.g. Prado Museum, Sagrada Família, boat ride…'}">${_tripStoryEsc_(pref.mustDo||'')}</textarea></label><label>${es?'Reservas confirmadas':'Confirmed reservations'}<button type="button" class="gj-help-link gj-help-link--compact" data-gp-help="reservations"><span>i</span>${es?'Qué agregar':'What to add'}</button><textarea data-gpp="reservations" placeholder="${es?'Ej.: Louvre · 03/01 · 10:00':'E.g. Louvre · Jan 3 · 10:00'}">${_tripStoryEsc_(pref.reservations||'')}</textarea></label><label>${es?'Quiero evitar':'I want to avoid'}<button type="button" class="gj-help-link gj-help-link--compact" data-gp-help="avoid"><span>i</span>${es?'Cómo usarlo':'How to use it'}</button><textarea data-gpp="avoid" placeholder="${es?'Ej.: demasiados museos, caminatas largas, vida nocturna…':'E.g. too many museums, long walks, nightlife…'}">${_tripStoryEsc_(pref.avoid||'')}</textarea></label><label>${es?'Algo más':'Anything else'}<button type="button" class="gj-help-link gj-help-link--compact" data-gp-help="notes"><span>i</span>${es?'Qué poner aquí':'What belongs here'}</button><textarea data-gpp="notes" placeholder="${es?'Cualquier detalle adicional para esta parada…':'Any additional detail for this stop…'}">${_tripStoryEsc_(pref.notes||'')}</textarea></label></div>`,next(index===places.length-1?(es?'Guardar y continuar':'Save and continue'):(es?'Guardar y siguiente destino':'Save and next stop')));
       active.querySelectorAll('[data-gpp]').forEach(el=>{
         if(el.tagName!=='SELECT')return;
         const key=el.dataset.gpp;
@@ -3211,6 +3211,23 @@ function openGuidedPersonalizationJourney(){
       active.innerHTML=shell(es?'TU VIAJE ESTÁ LISTO':'YOUR TRIP IS READY',es?'Todo está preparado para crear tu itinerario':'Everything is ready to create your itinerary',es?'ITBMO utilizará tu recorrido, movimientos, excursiones y preferencias.':'ITBMO will use your route, movements, day trips and preferences.',`<div class="gj-ready-card">✦ ${es?'La personalización quedó guardada.':'Your personalization has been saved.'}</div>`,next(es?'Crear mi itinerario':'Create my itinerary'));active.querySelector('[data-gp-next]').onclick=()=>{overlay.querySelector('[data-stage="itinerary"]')?.classList.add('is-active');startV2PaidGeneration();};return;
     }
   };
+  const preferenceHelp={
+    lodging:es?['Hospedaje','Elige la opción que describa lo que realmente sabes. Si aún no tienes alojamiento, ITBMO puede recomendar una zona base; si ya tienes hotel, zona o dirección, selecciónalo y añade la referencia a la derecha.']:['Lodging','Choose the option that matches what you actually know. If lodging is not set, ITBMO can recommend a base area; if you already know the hotel, area or address, select it and add the reference on the right.'],
+    lodgingText:es?['Nombre, zona o dirección','Déjalo vacío si todavía no tienes una referencia concreta. Complétalo únicamente cuando conozcas el hotel, alojamiento, zona aproximada, dirección o ubicación que ITBMO debe usar como base.']:['Name, area or address','Leave this blank if you do not yet have a concrete reference. Complete it only when you know the lodging, approximate area, address or location ITBMO should use as the base.'],
+    localTransport:es?['Cómo te moverás','Selecciona tu forma principal de desplazarte dentro del destino. Si eliges “Recomiéndame”, ITBMO decidirá según distancias, contexto y recorrido; puede combinar opciones cuando tenga sentido.']:['Getting around','Choose your main way of moving within the destination. If you choose “Recommend”, ITBMO will decide from distances, context and route, combining options when useful.'],
+    pace:es?['Ritmo','Relajado prioriza más tiempo y menos cambios; Equilibrado busca un ritmo completo sin sobrecargar; Intenso aprovecha más actividades cuando la logística lo permite.']:['Pace','Relaxed prioritizes more time and fewer changes; Balanced aims for a full day without overload; Intense fits more activities when logistics allow.'],
+    mustDo:es?['Imprescindibles','Escribe los lugares o experiencias que sí o sí quieres incluir. Si lo dejas vacío, ITBMO seleccionará automáticamente los imperdibles más relevantes para esta parada.']:['Must-do','Enter places or experiences you definitely want included. If blank, ITBMO will automatically select the most relevant highlights for this stop.'],
+    reservations:es?['Reservas confirmadas','Agrega actividades, entradas, restaurantes o tours que ya tengas reservados, idealmente con fecha y hora. ITBMO organizará el recorrido alrededor de esos compromisos.']:['Confirmed reservations','Add activities, tickets, restaurants or tours already booked, ideally with date and time. ITBMO will organize the route around those commitments.'],
+    avoid:es?['Quiero evitar','Indica lugares, actividades, ritmos o situaciones que prefieres excluir de esta parada. ITBMO los tratará como una restricción de planificación.']:['I want to avoid','Enter places, activities, pacing or situations you prefer to exclude from this stop. ITBMO will treat them as a planning constraint.'],
+    notes:es?['Algo más','Usa este espacio para cualquier detalle específico de este destino que no encaje en los campos anteriores. Si no tienes nada adicional, déjalo vacío.']:['Anything else','Use this for any destination-specific detail that does not fit the fields above. If there is nothing else, leave it blank.']
+  };
+  active.addEventListener('click',event=>{
+    const help=event.target.closest('[data-gp-help]');
+    if(!help)return;
+    event.preventDefault();event.stopPropagation();
+    const content=preferenceHelp[help.dataset.gpHelp];
+    if(content)_tripStoryOpenInstruction_(content[0],content[1]);
+  });
   window._itbmoGuidedPreferencesReady=()=>{step='ready';render();};
   active.addEventListener('click',event=>{
     if(!event.target.closest('[data-gp-back]'))return;
@@ -4204,13 +4221,13 @@ Meals:
 - Do not repeat the same named restaurant on another day.
 - Dinner is optional; include it when it genuinely improves the itinerary and fits the natural rhythm of the destination and day.
 
-Aurora:
-- Include aurora only when plausible by latitude, season and darkness.
-- Do NOT create a standalone aurora activity row by default.
-- When auroras are plausible for the city/date, put aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city, with a realistic dark-hour window, a guided-tour option, weather/cloud/geomagnetic/road checks and a clear statement that visibility is not guaranteed.
-- Because the aurora note is present on EVERY plausible day, the traveler automatically has multiple weather-dependent opportunities across the stay; never rely on only one selected night.
-- Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference through the final-row NOTE and guided-tour recommendation. Do not convert the preference itself into a standalone row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
-- Avoid identical notes on consecutive nights.
+Seasonal / weather-dependent night experiences:
+- Include them only when plausible for the destination, exact date, season and darkness.
+- They are a multi-hour BLOCK inside one selected calendar day, never a separate physical planning unit.
+- Choose the strongest viable night rather than repeating the same experience every night. Avoid the final night when another viable night exists.
+- Protect realistic operating/transport time (up to a substantial multi-hour night window when the experience genuinely requires it), state uncertainty naturally, and mention a guided option when useful.
+- If the selected block materially reduces sleep, make the following day lighter/later when feasible.
+- A genuinely confirmed fixed-time booking supplied by the user is authoritative and may be represented explicitly.
 
 Intelligent day-trip selection:
 - Evaluate the complete trip before assigning days. Compare the marginal value of secondary city activities against nearby excursions using total trip length, the number of days required for the core city, relative tourism value, transfer time, season, traveler fit and route coherence.
@@ -4292,12 +4309,12 @@ Itinerary rules (aligned with API v52.5):
 - Macro-tours/day trips: first evaluate a broad candidate pool, then curate the strongest realistic set of major stops plus relevant low-detour micro-stops, followed by a final localized return row to the base. On a full-day scenic route, normally aim for roughly 4–8 meaningful visit stops when daylight, safety and the user window allow; this is a flexible quality range, never a quota. Do not compress anchor experiences or add filler. Avoid the final day when stronger scheduling alternatives exist.
 - For every candidate micro-stop, evaluate incremental tourism value and experience diversity. A distinct lighthouse, cliff, historic church, geological formation or viewpoint may outrank another similar waterfall even at comparable distance.
 
-Auroras (only if plausible by latitude/season):
-- Do NOT create a standalone aurora row by default.
-- Put the aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day when auroras are plausible for the city/date.
-- Repeat the opportunity on EVERY plausible day so weather-dependent backup opportunities are naturally preserved across the stay.
-- The note must include a realistic dark-hour window, guided-tour option, cloud/weather/geomagnetic/road checks and no-visibility guarantee.
-- If the user explicitly provides a confirmed aurora booking/time and asks to schedule it, that confirmed fixed booking may be represented as a row.
+Seasonal night experiences (only when plausible for destination/date/season):
+- Keep the experience inside the selected calendar day; never make it an independent physical planning unit.
+- Select one primary viable night instead of duplicating the same experience nightly, avoiding the final night when another viable night exists.
+- Protect the real multi-hour night window, transport and contingency guidance; never guarantee weather-dependent visibility/conditions.
+- Make the following day lighter/later when the night block materially reduces rest.
+- A confirmed fixed booking supplied by the user remains authoritative.
 
 Safety:
 - Don't propose activities in areas with relevant risks, impossible hours, or obvious restrictions.
@@ -6042,6 +6059,22 @@ function _calendarDatesForStay_(baseDate='',totalDays=0){
   });
 }
 
+function _globalExperienceArchitecturePolicy_(){
+  return {
+    scope:'Global and destination-agnostic. Never hardcode a city, country, attraction or named route.',
+    inventory_first:'Before assigning detailed rows, build a compact inventory of the strongest distinct experience buckets for the stay: core urban anchors, viable regional/day-trip candidates, seasonal experiences, nature/scenic corridors and deliberately light recovery time when needed.',
+    day_trip_assignment:'When the traveler has not mandated the daily structure, compare regional/day-trip candidates with remaining secondary base-destination content. Assign at most one principal regional/day-trip identity to a day. Use it only when its incremental tourism value clearly exceeds the displaced filler and it fits the real door-to-door window.',
+    physical_unit_rule:'A declared day trip remains its own physical planning unit. An automatically selected regional excursion must still behave as one indivisible day identity: one coherent outbound corridor, on-route visits, and return to the real overnight base; never scatter the same excursion across multiple days.',
+    fatigue_rule:'Classify demanding days from duration, driving/transfer load, hiking/outdoor exposure, very early starts and late-night experiences. Avoid two demanding regional days consecutively when a reasonable urban/light alternative exists. After a materially late seasonal night experience, bias the next day toward a later/easier start and lower physical load.',
+    route_coherence:'No duplicate stops, aliases or repeated experience buckets. Order major stops and micro-stops in natural geographic sequence; never create avoidable out-and-back zigzags merely to add content.',
+    micro_stop_rule:'Micro-stops are optional enrichment, not anchors. Add only low-detour, high-incremental-value stops. A normal micro-stop/rest/comfort stop should not consume more than about 75 minutes unless the place is itself a genuine anchor experience.',
+    seasonal_night_rule:'A seasonal or weather-dependent night experience is a block inside the selected calendar day, never a separate physical planning unit. Choose the best viable night rather than repeating it every night; avoid the final night when another viable night exists, preserve realistic operating/transport time, and lighten the following day when the block materially reduces sleep. If conditions are uncertain, explain verification/contingency naturally instead of inventing certainty.',
+    transport_rule:'Respect the traveler transport choice. If self-driving is unsuitable or materially risky for the season/conditions or stated experience, recommend a commercial tour or appropriate alternative rather than silently assuming safe self-drive. Do not claim live road/weather validation.',
+    user_precedence:'Explicit user must-dos, reservations, route movements, restrictions and chosen transport remain authoritative. Automatic inventory fills gaps; it never overrides a compatible user mandate.',
+    recovery_rule:'Keep generation recoverable by physical/planning unit. Retry only affected units when deterministic validation fails and preserve healthy units before the final merge.'
+  };
+}
+
 function _specialCalendarEventPolicy_(){
   return {
     rule:'Actively inspect the real calendar date of every itinerary day for destination-relevant special dates, major public celebrations, culturally important observances or exceptional events that can materially change the best plan for that day.',
@@ -6091,6 +6124,7 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
       transfer_buffer_policy:'Before rail/bus/ferry departures, include realistic station/terminal access plus a prudent boarding buffer. Airports require materially larger buffers. Never treat the user fixed departure interval as if station access starts at that same minute.'
     },
     global_day_trip_policy:_globalDayTripPolicy_(),
+    global_experience_architecture_policy:_globalExperienceArchitecturePolicy_(),
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
     calendar_dates:_calendarDatesForStay_(baseDate,totalDays),
     special_calendar_event_policy:_specialCalendarEventPolicy_(),
@@ -6135,12 +6169,15 @@ TRIP-WIDE RULES:
 - No anchor, alias, district, landmark, restaurant, museum, thermal experience, wildlife experience,
   macro-route or corridor may be reserved on two days.
 - Arrival and final days must have disjoint anchors.
-- Decide intelligently whether nearby day trips should replace lower-value secondary city content. Compare total trip duration, core-city coverage needs, relative excursion quality, door-to-door transfer time, season/daylight, traveler fit and route coherence.
+- Apply global_experience_architecture_policy BEFORE assigning day identities: inventory the strongest distinct urban, regional/day-trip, scenic/nature and seasonal experience buckets for the stay.
+- Decide intelligently whether nearby day trips should replace lower-value secondary city content. Compare total trip duration, core-city coverage needs, relative excursion quality, door-to-door transfer time, season/daylight, traveler fit and route coherence. Assign at most one principal regional/day-trip identity to a calendar day.
 - Prefer strong unused regional/signature buckets over generic city filler when the comparison clearly favors them, but never displace unmet core city highlights.
 - Use the normalized lodging base as the primary geographic anchor and reserve corridors that minimize unnecessary transfers.
 - Convert all preferences and restrictions into actual day identities, timing and routing decisions.
 - Apply the first/intermediate/final-day time policy contained in KNOWN USER FACTS.
 - Inspect calendar_dates and apply special_calendar_event_policy before finalizing each day identity. A meaningful special-date anchor must not be displaced by generic sightseeing.
+- Sequence the inventory with fatigue awareness: avoid consecutive demanding regional days when a reasonable lighter/urban day can separate them; after a materially late seasonal night block, make the following day lighter/later when feasible.
+- Seasonal/weather-dependent night experiences are blocks INSIDE a selected day, never independent physical units. Choose the best viable night rather than duplicating the same experience every night; avoid the final night when another viable night exists.
 - If inventory is exhausted, make a deliberately light but distinct day; never recycle icons.
 - Respect the actual daily windows, season, useful daylight, travelers, base and transport.
 - Do not invent flight, airport, check-out, rental company or car-return logistics.
@@ -6206,6 +6243,7 @@ HARD RULES:
 - Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
 - Do not borrow anchors from any other day.
 - When the approved identity is a regional route or macro-tour, enrich it like an expert guide: evaluate iconic or highly recommendable low-detour viewpoints, minor waterfalls, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops.
+- Keep comfort/photo/micro-stops concise: normally no more than about 75 minutes unless the stop is itself a genuine anchor experience.
 - Include a micro-stop only when it adds meaningful incremental tourism value, preserves route rhythm and does not materially increase total route time.
 - Prefer diversity of experiences: once a category is already well represented, favor a distinct high-value category over another similar minor stop.
 - Do not force extra rows. Remove weak stops when stronger alternatives exist.
@@ -6224,8 +6262,7 @@ HARD RULES:
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
 - Macro-routes must be geographically sequential, contain meaningful separate micro-stops and end
   with an explicit return to the lodging/base.
-- Do not create a standalone aurora row by default. When plausible, put concise conditional aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city: realistic dark-hour window, safe self-drive when appropriate, guided-tour option, cloud/geomagnetic/road checks and no guarantee.
-- The final-row aurora note must appear on EVERY plausible day, including when auroras were explicitly requested in Preferences. An explicit aurora preference alone NEVER becomes a dedicated row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may become a dedicated row.
+- For plausible seasonal/weather-dependent night experiences, choose one primary viable night and keep the experience as a block inside that calendar day, never as an independent physical unit. Avoid the final night when another viable night exists; preserve realistic multi-hour logistics and make the following day lighter/later when needed. Never guarantee weather-dependent conditions. A confirmed fixed-time booking supplied by the user remains authoritative.
 - Preserve official proper names; all generic user-facing text and duration labels must use the
   selected itinerary language.
 - Never use generic destinations such as "nearby village", "local restaurant", "services",
@@ -6309,14 +6346,20 @@ function _dayDate_(baseDate='',day=1){
 }
 
 function _isHighLatitudeWinterContext_(city='',baseDate=''){
-  const normalized=_canonicalText_(`${city} ${plannerState?.specialConditions||''}`);
+  /* V85.16: destination-agnostic guard. We no longer maintain a city/country
+     allow-list. Deterministic night/daylight QA activates only when the traveler
+     context itself signals a night-sky/aurora objective; automatic discovery is
+     left to the planning model using destination/date/season. */
+  const preferenceText=_canonicalText_(JSON.stringify({
+    global:plannerState?.preferencesV2?.global||null,
+    places:plannerState?.preferencesV2?.places||null,
+    special:plannerState?.specialConditions||''
+  }));
+  const requested=/\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht|night sky|cielo nocturno)\b/i.test(preferenceText);
   const date=_parseBaseDate_(baseDate);
   const month=date ? date.getMonth()+1 : null;
-
-  const highLatitude=/\b(iceland|reykjavik|akureyri|husavik|vik|norway|tromso|alta|lofoten|svalbard|bodo|sweden|kiruna|abisko|finland|rovaniemi|lapland|greenland|nuuk|ilulissat|faroe|alaska|fairbanks|anchorage|yellowknife|whitehorse|nunavut|yukon|scotland|orkney|shetland)\b/i.test(normalized.replace(/\s+/g,' '));
-
-  const northernWinter=month==null || [10,11,12,1,2,3].includes(month);
-  return highLatitude && northernWinter;
+  const darkSeason=month==null || [9,10,11,12,1,2,3,4].includes(month);
+  return requested && darkSeason;
 }
 
 function _winterUsefulDaylightWindow_(city='',baseDate='',day=1){
@@ -6641,7 +6684,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         errors.push({
           code:'RIGID_AURORA_ROW',
           day,row,
-          instruction:'Remove the standalone aurora row. Even when auroras or an aurora tour were explicitly requested in Preferences, aurora guidance belongs as an ADDITIONAL note in the FINAL row of EVERY plausible day. Only a genuinely confirmed fixed-time booking may remain as a row.'
+          instruction:'Do not turn a weather-dependent night experience into its own physical planning unit. Keep it as a multi-hour block inside the selected calendar day (normally described in the final row note unless a confirmed fixed-time booking requires an explicit row). Select one primary viable night, avoid the final night when another viable night exists, and lighten the following day when needed.'
         });
       }
     }
@@ -6672,18 +6715,22 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
     // Robustness is protected below by route-window utilization and thinness checks,
     // while the generation prompt chooses a natural end from real tourism value.
 
-    // HARD QUALITY RULE: in a plausible aurora city/season, EVERY day must carry
-    // an additional aurora opportunity note in the Notes of that day's FINAL row.
-    // An explicit aurora preference still remains a note; it does not become a row.
+    // V85.16 GLOBAL NIGHT-EXPERIENCE POLICY: when a high-latitude winter context
+    // makes a weather-dependent night experience plausible, require one primary
+    // selected opportunity across the stay rather than duplicating it every night.
+    // The final night is intentionally excluded when another night exists.
     if(dayRows.length && _isHighLatitudeWinterContext_(city,baseDate)){
-      const lastRow=dayRows[dayRows.length-1] || {};
-      if(!_isAuroraRow_({notes:lastRow.notes||''})){
-        errors.push({
-          code:'MISSING_AURORA_FINAL_NOTE',
-          day,
-          row:dayRows.length,
-          instruction:'Add an aurora opportunity as an ADDITIONAL note in the Notes field of this day\'s FINAL row. Do this for every day in this city when latitude/season/darkness make auroras plausible, even if the user explicitly requested auroras in Preferences. Mention clear/cloud conditions, geomagnetic conditions, no guarantee, and guided-tour option. Do not create a standalone aurora row.'
-        });
+      const viableDays=expectedAuditDays.filter(d=>d!==expectedAuditDays.at(-1));
+      const selectedDay=viableDays.length ? viableDays[Math.max(0,Math.floor((viableDays.length-1)/2))] : day;
+      if(day===selectedDay){
+        const anyNightNote=Object.values(byDay).flat().some(row=>_isAuroraRow_({notes:row?.notes||''}));
+        if(!anyNightNote){
+          errors.push({
+            code:'MISSING_AURORA_FINAL_NOTE',
+            day:selectedDay,
+            instruction:'Add one primary conditional night-sky/seasonal opportunity inside the selected calendar day. Use a realistic multi-hour dark window, explain that conditions are not guaranteed, mention a guided option when useful, avoid the final night when another night exists, and keep the following day lighter/later if rest is materially reduced. Do not repeat the same opportunity every night.'
+          });
+        }
       }
     }
   }
@@ -6935,10 +6982,12 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
   Driving, indoor attractions, meals and thermal experiences may use darker hours.
 - If a regional route does not fit daylight, remove the weakest stop instead of moving it into darkness.
 - A regional day should contain a useful, geographically coherent set of major stops and expert-selected micro-stops, with an explicit return to the named base unless sleeping elsewhere.
+- Do not schedule demanding regional days back-to-back when a strong lighter/urban sequencing alternative exists. Respect seasonal driving risk and the traveler's stated transport; where self-drive is materially unsuitable, recommend a tour/safer alternative without pretending to have live road or weather data.
+- Keep ordinary micro/comfort stops to about 75 minutes maximum unless the stop is itself a true anchor experience.
 - For a full-day scenic route, evaluate a broad candidate pool and normally retain roughly 4–8 meaningful visit stops when daylight, safety and timing allow. This is not a quota: preserve realistic dwell at anchor experiences and remove weak filler.
 - For macro-tours, evaluate low-detour viewpoints, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops; retain only those with strong incremental tourism value.
 - Prefer experience diversity over repetitive minor variants, and never add rows merely to fill space.
-- In every city/date where auroras are plausible, add an aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day, not just one selected night. This applies even when the user explicitly requested auroras or an aurora tour in Preferences. Each daily note should mention that visibility is not guaranteed and depends on clear/cloud conditions and geomagnetic activity, and should mention the guided-tour option. Do not create a standalone aurora row. Only a genuinely confirmed fixed-time booking separately provided by the user may remain as a dedicated row.
+- For any plausible seasonal/weather-dependent night experience (for example a natural night-sky phenomenon), choose the best viable night as a BLOCK INSIDE that calendar day, never as a separate physical planning unit. Do not repeat the same experience every night. Avoid the final night when another viable night exists; preserve a realistic multi-hour operating window when the experience requires it, and make the following day lighter/later when sleep is materially reduced. If conditions are uncertain, state that naturally and recommend verification or a guided option when useful. A genuinely confirmed fixed-time booking supplied by the user remains authoritative.
 - Use the selected itinerary language consistently, including duration labels.
 - Write like an expert human concierge:
   * specific, practical and destination-aware;
@@ -7136,7 +7185,7 @@ HARD RULES:
 - A pure movement interval contains only transport; a visit interval contains transport plus activity. Use realistic category dwell and conservative regional transfers.
 - Scenic outdoor stops must fit plausible useful daylight.
 - Regional days require logical micro-stops, a realistic on-route lunch/meal break when the day spans lunch, and explicit return to the lodging/base near the applicable end time.
-- Aurora, when plausible, belongs as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city rather than a standalone activity. This applies even when explicitly requested in Preferences.
+- Seasonal/weather-dependent night experiences belong inside the chosen calendar day, not as independent physical units. Select the best viable night instead of repeating the same experience nightly; avoid the final night when another viable night exists and reduce the following day's load when a late block materially affects rest.
 - One concrete To per row. Local mobility may contain up to three intelligently ranked options, each with an estimated time and a useful condition; the duration upper bound must keep every option feasible.
 - Use one selected language consistently, including duration labels.
 `.trim();
@@ -8926,7 +8975,7 @@ ${lockedDaysText}
 
 KEY RULES (MANDATORY):
 - "activity" MUST ALWAYS: "Destination – <Specific sub-stop>" (includes returns/transfers).
-  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
+  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Regional Scenic Route", "Historic Valley Day Trip", "Nearby Heritage City").
   • If it's NOT a day trip, "Destination" can be "${city}".
 - from/to/transport/notes: NEVER empty. Avoid generic items without clear names.
 - VERY IMPORTANT:
@@ -8940,11 +8989,12 @@ TRANSPORT (smart priority, no invention):
   2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
-AURORAS (if plausible):
-- Do NOT create a standalone aurora activity merely because the user asked for auroras.
-- Add an aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city.
-- Each note must use a realistic dark-hour window, explain that visibility is not guaranteed and depends on clouds/weather and geomagnetic activity, and mention a guided-tour option.
-- Only a genuinely confirmed fixed-time booking separately supplied by the user may be represented as a dedicated row.
+SEASONAL / WEATHER-DEPENDENT NIGHT EXPERIENCE (if plausible):
+- Treat it as a block inside one selected calendar day, not as an independent physical unit.
+- Select the best viable night instead of repeating it every night; avoid the final night when another viable night exists.
+- Preserve realistic multi-hour timing and transport; explain weather/condition uncertainty and a guided option when useful.
+- Reduce the following day's load when the late block materially affects rest.
+- A confirmed fixed-time booking supplied by the user remains authoritative.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
@@ -10382,7 +10432,7 @@ Instrucción:
 - Si el usuario no indicó hora final, no existe una hora fija objetivo. Determina el final natural según destino, temporada, horarios reales, logística, comidas/descanso, ritmo y valor turístico. No cierres el día de forma claramente prematura si aún quedan experiencias valiosas y viables, pero tampoco agregues relleno ni sobrecargues el itinerario solo para extender el horario.
 - En el Día 1, la hora indicada significa que el viajero ya está en el alojamiento; completa el check-in o depósito de equipaje antes de cualquier visita y no inventes el traslado de llegada.
 - Si el día atraviesa el horario de almuerzo, integra una comida realista según costumbre local (como referencia, 12:00–15:00).
-- Cuando las auroras sean plausibles por ubicación, época y oscuridad, agrega una nota adicional sobre auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica incluso si el usuario pidió auroras explícitamente en Preferencias. No crees una fila independiente salvo una reserva real confirmada con hora fija y explícitamente solicitada.
+- Cuando una experiencia nocturna estacional o dependiente del clima sea plausible, selecciona una noche principal y trátala como un bloque dentro de ese día, no como una unidad física independiente. Evita la última noche si existe otra viable, conserva una ventana nocturna realista, aclara la incertidumbre y aligera el día siguiente si el descanso se reduce. Una reserva confirmada con hora fija prevalece.
 - Day trips: decide libremente si aportan valor; si los propones, hazlos completos, realistas, con comida en ruta cuando corresponda y regreso coherente con la hora final.
 - No limites trayectos por regla fija; usa sentido común y experiencia turística real.
 - Valida plausibilidad global y seguridad.
@@ -10736,7 +10786,7 @@ Instrucción del usuario: ${text}
 
 - Integra lo pedido sin borrar lo existente.
 - Si no se indica día concreto, reoptimiza TODA la ciudad.
-- Para auroras: si aplican por ubicación, época y oscuridad, agrega una nota adicional de oportunidad de auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica aunque el usuario las pida explícitamente en Preferencias. No crees una fila independiente por esa preferencia; solo una reserva real confirmada con hora fija, indicada separadamente por el usuario, puede representarse como fila.
+- Para experiencias nocturnas estacionales o dependientes del clima: selecciona una noche principal viable y mantenla como bloque dentro de ese día; no la repitas cada noche ni la conviertas en unidad física. Evita la última noche si hay otra viable, conserva tiempo realista y aligera el día siguiente cuando corresponda. Una reserva confirmada con hora fija prevalece.
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 `.trim();
 
@@ -14097,7 +14147,7 @@ function _tripStoryResetRoute_(story){
 }
 
 function _tripStoryOpenInstruction_(title,body){
-  const host=document.querySelector('#guided-trip-story-overlay') || document.body;
+  const host=document.querySelector('#guided-personalization-overlay') || document.querySelector('#guided-trip-story-overlay') || document.body;
   host.querySelector('.gj-instruction-overlay')?.remove();
   const modal=document.createElement('div');
   modal.className='gj-instruction-overlay';
