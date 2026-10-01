@@ -18,6 +18,8 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
 // while keeping bounded repair work on the fast/cost-efficient Luna tier.
 const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-luna";
 const REPAIR_MODEL = process.env.OPENAI_REPAIR_MODEL || "gpt-5.6-luna";
+const ITBMO_PLANNER_BUILD = "V95";
+const ITBMO_GENERATION_PROTOCOL = "physical-units-v15";
 
 /* =========================================================
    INFO CHAT ENTITLEMENT · payment gate + 10-query quota
@@ -2393,12 +2395,35 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
 // ==============================
 export default async function handler(req, res) {
   try {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("X-ITBMO-Server-Build", ITBMO_PLANNER_BUILD);
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
     const body = req.body || {};
     const mode = body.mode || "planner";
+    const generationModes = new Set(["experience_plan", "route_resolver", "planner_v3"]);
+    if (generationModes.has(String(mode).toLowerCase())) {
+      const clientBuild = String(req.headers?.["x-itbmo-planner-build"] || body?.client_build || "").trim();
+      const clientProtocol = String(req.headers?.["x-itbmo-generation-protocol"] || body?.generation_protocol || "").trim();
+      if (clientBuild !== ITBMO_PLANNER_BUILD || clientProtocol !== ITBMO_GENERATION_PROTOCOL) {
+        console.warn("[ITBMO V95 BUILD ALIGNMENT] rejected incompatible generation client before model call", {
+          mode,
+          expected_build:ITBMO_PLANNER_BUILD,
+          received_build:clientBuild || null,
+          expected_protocol:ITBMO_GENERATION_PROTOCOL,
+          received_protocol:clientProtocol || null
+        });
+        return res.status(409).json({
+          ok:false,
+          code:"ITBMO_CLIENT_BUILD_MISMATCH",
+          planner_build:ITBMO_PLANNER_BUILD,
+          generation_protocol:ITBMO_GENERATION_PROTOCOL,
+          retryable_after_refresh:true
+        });
+      }
+    }
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
     const plannerUsage = (mode === "planner" || mode === "planner_v3" || mode === "experience_plan") ? _newUsageCollector_() : null;
@@ -2504,10 +2529,10 @@ RETURN JSON ONLY:
         );
         const candidate = _v93ExperiencePlanJSON_(raw);
         if (candidate && Array.isArray(candidate.stays)) parsed = candidate;
-        else console.warn("[ITBMO V94 EXPERIENCE KNOWLEDGE] internal structured retry", {attempt,raw_length:String(raw || "").length});
+        else console.warn("[ITBMO V95 EXPERIENCE KNOWLEDGE] internal structured retry", {attempt,raw_length:String(raw || "").length});
       }
       if (!parsed || !Array.isArray(parsed.stays)) {
-        console.warn("[ITBMO V94 EXPERIENCE KNOWLEDGE] invalid response", {raw_length:String(raw || "").length});
+        console.warn("[ITBMO V95 EXPERIENCE KNOWLEDGE] invalid response", {raw_length:String(raw || "").length});
         return res.status(502).json({ok:false,code:"EXPERIENCE_KNOWLEDGE_INVALID_RESPONSE",retryable:true});
       }
       // V94 deterministic contract normalization. A model occasionally returned
