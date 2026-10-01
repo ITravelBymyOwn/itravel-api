@@ -9844,6 +9844,18 @@ async function restorePaidGenerationIfNeeded(){
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   const restoreEpoch=generationRunEpoch;
   try{
+    const plannerMode=String(new URLSearchParams(window.location.search).get('mode') || '').trim().toLowerCase();
+    // V108 · mode=new is an explicit clean-planning boundary.
+    // Never hydrate a saved/recoverable trip into the creation surface.
+    // Previous trips remain available only through Mis Viajes.
+    if(plannerMode==='new'){
+      storeActiveTripId(null);
+      _tripStoryClearDraft_();
+      try{_travelV2()?.setTripStory?.(null);}catch(_){}
+      const myTrips=qs('#planner-my-trips'); if(myTrips) myTrips.hidden=false;
+      _journeyLoadHistory_().then(()=>_journeyRenderHistory_()).catch(()=>{});
+      return;
+    }
     const token=getStoredSessionToken();
     const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
     let tripId=requestedTripId || getStoredActiveTripId();
@@ -9868,7 +9880,6 @@ async function restorePaidGenerationIfNeeded(){
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
     if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
 
-    const plannerMode=new URLSearchParams(window.location.search).get('mode');
     if(trip.status==='generated'){
       if(plannerMode==='new'){
         storeActiveTripId(null);
@@ -14332,6 +14343,15 @@ function applyTripStoryToCompatibility(story){const stays=(story?.stays||[]).map
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   syncPlannerLanguageShell();
+  const _itbmoFreshNewMode_=String(new URLSearchParams(window.location.search).get('mode')||'').trim().toLowerCase()==='new';
+  if(_itbmoFreshNewMode_){
+    // Preserve the exact V85 entry experience: one large CTA and nothing pre-opened.
+    // A draft can only be recovered after X during this live page session; reload/new entry is clean.
+    _tripStoryClearDraft_();
+    try{_travelV2()?.setTripStory?.(null);}catch(_){}
+    try{document.querySelectorAll('.trip-story-overlay,.guided-personalization-overlay').forEach(x=>x.remove());}catch(_){}
+    document.body.classList.remove('trip-story-open','guided-preferences-open');
+  }
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   qs('#build-trip-story')?.addEventListener('click',openTripStoryBuilder);
   qs('#build-guided-journey')?.addEventListener('click',openTripStoryBuilder);
