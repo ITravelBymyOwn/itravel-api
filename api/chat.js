@@ -804,7 +804,7 @@ Apply these rules only when producing actual itinerary rows.
 3. REALISTIC EXPERIENCE DWELL — CATEGORY-BASED
 Before assigning a row duration, classify the experience:
 - destination thermal lagoon / major hot-spring or spa complex: normally 2h30–4h;
-- an iconic large-scale thermal lagoon or wellness complex: normally allow substantial actual experience time appropriate to the venue, plus
+- an iconic thermal lagoon comparable to Blue Lagoon: minimum 3h of actual experience time, plus
   realistic arrival, parking, check-in, changing, shower and exit logistics when material;
 - whale watching / wildlife cruise / marine safari: normally 2h30–4h of activity time, plus
   check-in, boarding and disembarkation logistics;
@@ -2213,9 +2213,48 @@ DAY TRIPS / MACRO-TOURS:
   • Each day must have a clearly distinct identity.
   • Do NOT use translated naming to disguise repetition.
 
-GLOBAL DESTINATION CURATION:
-- Apply the same destination-agnostic standards to every country and base. Use travel knowledge to choose distinct, realistic, high-value regional corridors and signature experiences; never rely on a city-specific list embedded in this prompt.
-- Prefer geographic diversity, coherent routes, realistic dwell time, and strong destination-defining anchors over filler or repeated structures.
+ICELAND CURATION (when relevant):
+  • From Reykjavik, prioritize high-value realistic day trips such as Golden Circle, South Coast, Reykjanes / Blue Lagoon area, Snæfellsnes, Silver Circle / Borgarfjörður, lava tunnel / geothermal route, whale watching / marine experience, and realistic Southwest / West Iceland options.
+  • For a 7-day Reykjavik itinerary in winter, avoid using 4+ days as pure urban museum/harbor/café filler.
+  • Keep pure Reykjavik city content limited unless the user specifically requested a city-only trip.
+  • For South Coast:
+    - If the route reaches the Reynisfjara / Vík area, Vík should normally be included unless there is a strong reason not to.
+    - Prefer a coherent progression such as Seljalandsfoss → Skógafoss → Vík and/or Reynisfjara → return.
+    - Reynisfjara must appear as a real row if that South Coast stretch is being used; do NOT leave it only in notes.
+  • For Snæfellsnes:
+    - Prefer specific iconic stops such as Kirkjufell, Arnarstapi/Hellnar, Djúpalónssandur, Lóndrangar, Búðir/Búðakirkja when appropriate.
+    - Avoid vague placeholders like only "National Park" if specific named stops are available.
+  • For Reykjanes / Blue Lagoon:
+    - Reserve Blue Lagoon and the Reykjanes corridor to ONE day only.
+    - Allocate at least 3h of actual lagoon activity plus realistic arrival/check-in/changing/exit
+      logistics.
+    - Only after protecting that time, select the best feasible subset from the full corridor
+      inventory, which may include Bridge Between Continents, Sandvík, Gunnuhver, Reykjanesviti,
+      Valahnúkur, Brimketill, Kleifarvatn and Seltún/Krýsuvík.
+    - Do not include all stops blindly: useful daylight, safety, access, route continuity and the
+      user's pace decide.
+    - Never create a second Reykjanes or second Blue Lagoon day elsewhere in the same trip.
+  • For Silver Circle / Borgarfjörður:
+    - Prefer real stops such as Borgarnes, Deildartunguhver, Hraunfossar, Barnafoss, Reykholt, and Krauma when they fit naturally.
+  • For lava tunnel / geothermal route:
+    - Prefer real stops such as Raufarhólshellir, Hveragerði, Hellisheiði, geothermal exhibition area, or nearby coherent geothermal/scenic stops.
+  • For whale watching / marine experience:
+    - Use it only if plausible for season, operating location and traveler profile.
+    - Normally protect at least 2h30 of actual marine-tour time plus check-in, boarding and return.
+    - Reserve the wildlife/marine anchor to one day only and do not repeat the same harbor filler
+      pattern on other days.
+  • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights when they would be exhausting and low quality.
+  • Do NOT repeat the same Iceland macro-route across different days.
+  • If Golden Circle was already used, do NOT create another Golden Circle variant later in the itinerary.
+  • If South Coast was already used, avoid rebuilding another equivalent South Coast corridor day.
+  • If Snæfellsnes was already used, do not recycle the same peninsula structure.
+  • If Reykjanes / Blue Lagoon area was already used, do not create a second equivalent Reykjanes day unless the route is truly different and there are no better alternatives.
+  • Prefer new geographic corridors before repeating known ones.
+  • Iceland itineraries must maximize geographic diversity across days.
+  • Regional Iceland days should feel dense, continuous, and exploratory:
+    - avoid giant dead gaps
+    - enrich routes with real scenic/geothermal/coastal micro-stops
+    - ensure the day feels like a full coherent expedition.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
@@ -2369,7 +2408,7 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
-    const plannerUsage = (mode === "planner" || mode === "planner_v3" || mode === "experience_plan") ? _newUsageCollector_() : null;
+    const plannerUsage = (mode === "planner" || mode === "planner_v3") ? _newUsageCollector_() : null;
 
     /* ROUTE RESOLVER · planning-grade multimodal logistics.
        It estimates a physically plausible chain when the traveler has not
@@ -2406,45 +2445,6 @@ export default async function handler(req, res) {
         results.forEach(routes=>resolved.push(...routes));
       }
       return res.status(200).json({ok:true,routes:resolved});
-    }
-
-    /* CLEAN AUTO EXPERIENCE INVENTORY · additive to the stable V85 core.
-       This call discovers knowledge only. The browser deterministically decides
-       how many physical day-trip units fit and preserves traveler-authored routes. */
-    if (mode === "experience_plan") {
-      const input = body?.experience_plan && typeof body.experience_plan === "object" ? body.experience_plan : null;
-      const stays = Array.isArray(input?.stays) ? input.stays.slice(0, 30) : [];
-      if (!stays.length) return res.status(200).json({ok:true,version:"CLEAN_V85_AUTO_1",stays:[]});
-      const outputLanguage = String(input?.itinerary_language || lang || "en").toLowerCase().startsWith("es") ? "Spanish" : "English";
-      const prompt = `
-You are ITBMO's global destination-knowledge architect. Return a compact tourism inventory only: no itinerary, no prose outside JSON, and no day allocation.
-
-AUTHORITATIVE INPUT:
-${JSON.stringify(input)}
-
-GOAL:
-For each overnight base, identify whether it behaves mainly as URBAN_CORE, REGIONAL_GATEWAY, MIXED_BASE, NATURE_BASE or REST_BASE, then return a bounded, non-redundant inventory of the strongest BASE and EXCURSION experiences that are realistic for the supplied dates and trip length.
-
-RULES:
-- The traveler input is authoritative. Never contradict explicit destinations, dates, day trips, transport or restrictions.
-- Reason globally from travel knowledge. Do not use a hard-coded city, country, attraction or route list.
-- EXCURSION means a genuine same-day outward experience from the overnight base. BASE means tourism in/near the overnight base and must not become a separate day-trip unit.
-- For stays of 5+ days in a REGIONAL_GATEWAY, MIXED_BASE or NATURE_BASE, include all distinct DEFINING/ESSENTIAL/HIGH full-day excursions that materially explain the destination, up to inventory_budget. Do not pre-allocate them to days.
-- Keep excursions physically distinct. Never split one macro-route into several excursion items and never repeat the same canonical stop across two route manifests.
-- Every EXCURSION must have a coherent route_manifest with 3-10 geographically ordered internal microstops when the excursion naturally has multiple stops. These are anchors inside ONE physical unit, never separate day trips.
-- Classify duration_class as FULL_DAY, HALF_DAY_AM, HALF_DAY_PM or EVENING. Classify effort_class as LIGHT, MODERATE or HEAVY based on real door-to-door burden.
-- seasonal_feasibility is STRONG, CONDITIONAL or UNSUITABLE. Without live data, use CONDITIONAL plus verification_note rather than inventing closures, weather, schedules or availability.
-- Recommend viable transport modes independently of purchase: rental_car, public_transport, organized_tour, private_transfer. If the traveler indicates a rental car, treat it as available but still flag genuinely difficult seasonal driving in verification_note.
-- Aurora or equivalent night-only natural phenomena are metadata overlays, never a physical excursion/day-trip unit and never consume a daytime slot.
-- Return traveler-facing labels in ${outputLanguage}. Keep enums/keys exactly as specified.
-
-RETURN JSON ONLY:
-{"version":"CLEAN_V85_AUTO_1","stays":[{"stay_id":"exact input stay_id","profile":"URBAN_CORE|REGIONAL_GATEWAY|MIXED_BASE|NATURE_BASE|REST_BASE","must_see_inventory":[{"inventory_id":"stable short id","identity":"canonical experience/route","scope":"BASE|EXCURSION","physical_destination":"real base or outward route/region","duration_class":"FULL_DAY|HALF_DAY_AM|HALF_DAY_PM|EVENING","priority":"DEFINING|ESSENTIAL|HIGH|STANDARD","signature_level":1,"seasonal_feasibility":"STRONG|CONDITIONAL|UNSUITABLE","recommended_modes":["rental_car"],"effort_class":"LIGHT|MODERATE|HEAVY","route_manifest":{"topology":"CIRCUIT|OUT_AND_BACK|CORRIDOR|RADIAL|MIXED","microstops":[{"stop_id":"stable id","identity":"canonical stop","priority":"DEFINING|ESSENTIAL|HIGH|OPTIONAL","sequence":1,"estimated_dwell_minutes":30,"conditional":false}],"verification_note":"brief"}}],"aurora":{"plausible":false,"phenomenon":"AURORA_BOREALIS|AURORA_AUSTRALIS|null","message":"brief conditional guidance"}}]}
-`.trim();
-      const raw = await callStructured([{role:"system",content:prompt}],0.12,7000,120000,plannerUsage,PLANNER_MODEL,"low");
-      let parsed=null;try{parsed=JSON.parse(String(raw||"").replace(/^```json\s*/i,"").replace(/```$/i,"").trim());}catch{}
-      if(!parsed||!Array.isArray(parsed.stays))return res.status(502).json({ok:false,code:"EXPERIENCE_PLAN_INVALID_RESPONSE"});
-      return res.status(200).json({...parsed,ok:true,usage:_usagePayload_(plannerUsage)});
     }
 
     /* CITY NORMALIZATION · isolated pre-save validation.
