@@ -9221,3 +9221,7 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .gj-choice-help:hover{text-decoration:underline}
 @keyframes gjPopoverIn{from{opacity:0;transform:translateY(-3px) scale(.985)}to{opacity:1;transform:none}}
 @media(max-width:720px){.gj-instruction-popover{max-width:calc(100vw - 24px);padding:14px 38px 14px 16px;border-radius:14px}}
+
+/* ITBMO V85.3 · surgical guided-field clarity */
+.gj-field-hint{display:block;margin:4px 0 7px;color:#70839b;font-size:11px;line-height:1.35;font-weight:500}
+.guided-journey select:disabled,.guided-journey input:disabled{opacity:.62;cursor:not-allowed;background:#f4f7fa;color:#73869b}
