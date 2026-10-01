@@ -9216,3 +9216,15 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .gj-help-bubble span{display:block}
 .gj-help-bubble__close{position:absolute;right:9px;top:9px;width:27px;height:27px;border:0;border-radius:50%;background:#edf6fb;color:#12395f;font-size:19px;line-height:1;cursor:pointer}
 @media(max-width:720px){.gj-help-bubble{width:min(320px,calc(100vw - 52px))}}
+
+/* =========================================================
+   ITBMO V87 — Personalización clara + CTA post-generación
+   Ajuste UX quirúrgico; no altera lógica de ruta/generación.
+========================================================= */
+.gj-field-help{display:block;margin-top:-2px;color:#74869a;font-size:.72rem;font-weight:650;line-height:1.32;min-height:1.9em}
+.gj-section-help{display:block;margin-top:-5px;margin-bottom:2px;color:#74869a;font-size:.76rem;font-weight:600;line-height:1.4}
+#planner-post-generation .new-planning-button,
+#planner-post-generation .new-planning-button:hover,
+#planner-post-generation .new-planning-button:focus,
+#planner-post-generation .new-planning-button:focus-visible,
+#planner-post-generation .new-planning-button:active{color:#fff!important;-webkit-text-fill-color:#fff!important;text-shadow:0 1px 1px rgba(0,35,80,.20)!important;background:linear-gradient(115deg,#087BFA,#13A9B5)!important;border:0!important;opacity:1!important}
