@@ -9240,3 +9240,13 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .trip-story-overlay .gj-pref-optional textarea{min-height:84px;padding:12px 13px}
 .trip-story-overlay .gj-focus__content{gap:18px}
 @media(max-width:800px){.trip-story-overlay .gj-subpanel{padding:14px}.trip-story-overlay .gj-disclosure--card{padding:14px}}
+
+
+/* V85.4 — strict modal/Planner isolation */
+#preferences-stage.is-stage-hidden,
+#preferences-stage[aria-hidden="true"]{
+  display:none !important;
+}
+body:not(.trip-story-open) .guided-journey-overlay{
+  display:none !important;
+}
