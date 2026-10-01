@@ -9216,7 +9216,7 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 #preferences-stage[aria-hidden="true"]{
   display:none !important;
 }
-body:not(.trip-story-open) .guided-journey-overlay{
+body:not(.trip-story-open):not(.guided-preferences-open) .guided-journey-overlay{
   display:none !important;
 }
 
@@ -9371,4 +9371,86 @@ body:not(.trip-story-open) .guided-journey-overlay{
     flex-direction:column;
     gap:16px;
   }
+}
+
+
+/* ==========================================================================
+   ITBMO V85.14 — Guided Journey modal handoff + symmetric Apple-like rhythm
+   Scope: presentation and modal continuity only. No generation-core changes.
+   ========================================================================== */
+@media (min-width: 860px){
+  #guided-trip-story-overlay .gj-focus__content > .gj-form,
+  #guided-trip-story-overlay .gj-form.gj-full{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    column-gap:22px;
+    row-gap:18px;
+    align-items:start;
+  }
+
+  #guided-trip-story-overlay .gj-form > label{
+    min-width:0;
+    align-content:start;
+  }
+
+  /* Help links share the heading row instead of creating an extra vertical row.
+     This keeps paired date/time fields aligned even when only one needs help. */
+  #guided-trip-story-overlay .gj-form > label:has(> .gj-help-link){
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-rows:auto 50px;
+    column-gap:10px;
+    row-gap:8px;
+    align-items:center;
+  }
+  #guided-trip-story-overlay .gj-form > label:has(> .gj-help-link) > .gj-help-link{
+    grid-column:2;
+    grid-row:1;
+    margin:0;
+    white-space:nowrap;
+    justify-self:end;
+  }
+  #guided-trip-story-overlay .gj-form > label:has(> .gj-help-link) > input,
+  #guided-trip-story-overlay .gj-form > label:has(> .gj-help-link) > select{
+    grid-column:1 / -1;
+    grid-row:2;
+    width:100%;
+  }
+
+  #guided-trip-story-overlay .gj-disclosure{
+    margin:2px 0 0;
+    padding:18px;
+  }
+  #guided-trip-story-overlay .gj-disclosure > b{
+    display:block;
+    margin-bottom:7px;
+  }
+  #guided-trip-story-overlay .gj-disclosure > .gj-help-link{
+    margin:0 0 14px;
+  }
+  #guided-trip-story-overlay .gj-segmented{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:12px;
+  }
+  #guided-trip-story-overlay .gj-segmented button{
+    min-height:56px;
+    height:100%;
+  }
+
+  /* When ITBMO resolves transport, the hidden transport selector consumes no
+     grid space; arrival date and ready-time become a clean symmetric pair. */
+  #guided-trip-story-overlay .gj-progressive-field.is-collapsed,
+  #guided-trip-story-overlay .gj-progressive-field[aria-hidden="true"]{
+    display:none !important;
+  }
+
+  #guided-trip-story-overlay .gj-focus__actions{
+    min-height:62px;
+    align-items:center;
+  }
+}
+
+/* Personalization is itself a guided modal. It must remain visible after the
+   Route modal is handed off and body.trip-story-open is intentionally removed. */
+body.guided-preferences-open #guided-personalization-overlay{
+  display:flex !important;
 }
