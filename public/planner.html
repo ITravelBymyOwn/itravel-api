@@ -6,7 +6,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=217" />
+  <link rel="stylesheet" href="./planner.css?v=218" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -344,7 +344,10 @@
           <h3>Tu viaje empieza aquí</h3>
           <p>Una decisión sencilla cada vez. Verás cómo tu recorrido toma forma mientras lo construyes.</p>
         </div>
-        <button type="button" id="build-guided-journey" class="guided-journey-entry__button"><small>CREA TU VIAJE</small><b>Comenzar</b><span>→</span></button>
+        <div class="guided-journey-entry__actions">
+          <button type="button" id="reset-planner" class="guided-journey-entry__reset" disabled hidden>Reiniciar itinerario</button>
+          <button type="button" id="build-guided-journey" class="guided-journey-entry__button"><small>CREA TU VIAJE</small><b>Comenzar</b><span>→</span></button>
+        </div>
       </section>
 
       <div class="guided-journey-legacy" aria-hidden="true">
@@ -523,10 +526,6 @@
 
       <!-- ✅ QUIRÚRGICO: botones al final del tab Planner -->
       
-      <!-- 🆕 Botón de reinicio reubicado -->
-      <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
-        Reiniciar planificación
-      </button>
 
       <!-- ✅ Se eliminó la sección de Presupuesto del sidebar -->
     </section>
@@ -1232,7 +1231,7 @@
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
 <script src="./travel-model-v2.js?v=13"></script>
-<script src="./planner.js?v=217"></script>
+<script src="./planner.js?v=218"></script>
  
 </body>
 </html>
