@@ -18,8 +18,8 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
 // while keeping bounded repair work on the fast/cost-efficient Luna tier.
 const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-luna";
 const REPAIR_MODEL = process.env.OPENAI_REPAIR_MODEL || "gpt-5.6-luna";
-const ITBMO_PLANNER_BUILD = "V98";
-const ITBMO_GENERATION_PROTOCOL = "physical-units-v18";
+const ITBMO_PLANNER_BUILD = "V99";
+const ITBMO_GENERATION_PROTOCOL = "physical-units-v19";
 
 /* =========================================================
    INFO CHAT ENTITLEMENT · payment gate + 10-query quota
