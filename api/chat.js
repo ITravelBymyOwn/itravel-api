@@ -18,8 +18,8 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
 // while keeping bounded repair work on the fast/cost-efficient Luna tier.
 const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-luna";
 const REPAIR_MODEL = process.env.OPENAI_REPAIR_MODEL || "gpt-5.6-luna";
-const ITBMO_PLANNER_BUILD = "V97";
-const ITBMO_GENERATION_PROTOCOL = "physical-units-v17";
+const ITBMO_PLANNER_BUILD = "V98";
+const ITBMO_GENERATION_PROTOCOL = "physical-units-v18";
 
 /* =========================================================
    INFO CHAT ENTITLEMENT · payment gate + 10-query quota
@@ -2415,7 +2415,7 @@ export default async function handler(req, res) {
       const clientBuild = String(req.headers?.["x-itbmo-planner-build"] || body?.client_build || "").trim();
       const clientProtocol = String(req.headers?.["x-itbmo-generation-protocol"] || body?.generation_protocol || "").trim();
       if (clientBuild !== ITBMO_PLANNER_BUILD || clientProtocol !== ITBMO_GENERATION_PROTOCOL) {
-        console.warn("[ITBMO V97 BUILD ALIGNMENT] rejected incompatible generation client before model call", {
+        console.warn("[ITBMO V98 BUILD ALIGNMENT] rejected incompatible generation client before model call", {
           mode,
           expected_build:ITBMO_PLANNER_BUILD,
           received_build:clientBuild || null,
@@ -2536,13 +2536,13 @@ RETURN JSON ONLY:
         );
         const candidate = _v93ExperiencePlanJSON_(raw);
         if (candidate && Array.isArray(candidate.stays)) parsed = candidate;
-        else console.warn("[ITBMO V97 EXPERIENCE KNOWLEDGE] internal structured retry", {attempt,raw_length:String(raw || "").length});
+        else console.warn("[ITBMO V98 EXPERIENCE KNOWLEDGE] internal structured retry", {attempt,raw_length:String(raw || "").length});
       }
       if (!parsed || !Array.isArray(parsed.stays)) {
-        console.warn("[ITBMO V97 EXPERIENCE KNOWLEDGE] invalid response", {raw_length:String(raw || "").length});
+        console.warn("[ITBMO V98 EXPERIENCE KNOWLEDGE] invalid response", {raw_length:String(raw || "").length});
         return res.status(502).json({ok:false,code:"EXPERIENCE_KNOWLEDGE_INVALID_RESPONSE",retryable:true});
       }
-      // V97 deterministic contract normalization. Aurora is metadata only: never
+      // V98 deterministic contract normalization. Aurora is metadata only: never
       // a must-see inventory item, excursion allocation, or Physical Unit.
       const inputById = new Map(stays.map(stay => [String(stay?.stay_id || ""), stay]));
       const normalizedStays = parsed.stays.map(stay => {
