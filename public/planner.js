@@ -9461,6 +9461,26 @@ function _applyGeneratedUIState({showModal=false}={}){
   document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
   document.querySelector('#guided-personalization-overlay')?.remove();
   document.body.classList.remove('guided-preferences-open');
+
+  // V85.4 · CLEAN POST-GENERATION PLANNER
+  // Personalization is transient UI. After successful generation it must disappear,
+  // while generated data and paid-generation recovery remain untouched.
+  if($preferencesStage){
+    $preferencesStage.classList.remove('is-stage-active');
+    $preferencesStage.classList.add('is-stage-hidden');
+    $preferencesStage.setAttribute('aria-hidden','true');
+  }
+  const planningChat=qs('#chat-container');
+  if(planningChat) planningChat.style.display='none';
+
+  // Reset lives beside the journey entry as a quiet secondary action and is shown
+  // only when there is actual trip state to reset.
+  if($resetBtn){
+    const hasTripState=Boolean(currentTripId || (savedDestinations||[]).length || hasGeneratedItineraryRows());
+    $resetBtn.hidden=!hasTripState;
+    $resetBtn.disabled=!hasTripState;
+  }
+
   if(!showModal) showWOW(false);
   setExportToolbarVisibility(true);
   setPlanningChatLocked(true);
@@ -13854,6 +13874,14 @@ function applyTravelBuilderWorkspaceCopy(){
 }
 
 function updateTravelBuilderProgress(){
+  const reset=qs('#reset-planner');
+  if(reset){
+    const hasTripState=Boolean(currentTripId || qsa('#city-list .city-row').some(row=>
+      Boolean(qs('.country',row)?.value?.trim() || qs('.city',row)?.value?.trim() || qs('.baseDate',row)?.value)
+    ) || hasGeneratedItineraryRows());
+    reset.hidden=!hasTripState;
+    if(!hasTripState) reset.disabled=true;
+  }
   const items=qsa('.planner-stage-nav__item');
   if(!items.length) return;
   const hasRoute=qsa('#city-list .city-row').some(row=>{
