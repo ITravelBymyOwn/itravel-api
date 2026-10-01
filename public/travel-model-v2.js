@@ -731,7 +731,7 @@
   }
 
   function preferenceDefaults(place){
-    return {saved:false,lodgingChoice:'recommend',lodgingText:'',arrivalTransport:'recommend',localTransport:'recommend',pace:'balanced',interests:[],mustDo:'',avoid:'',reservations:'',notes:''};
+    return {saved:false,lodgingChoice:'',lodgingText:'',arrivalTransport:'recommend',localTransport:'recommend',pace:'balanced',interests:[],mustDo:'',avoid:'',reservations:'',notes:''};
   }
   function renderPreferences(host,savedDestinations=[],model,onChange){
     if(!host) return;
@@ -773,7 +773,7 @@
     const ui=wizardShell(copy(`Personaliza ${place.name}`,`Personalize ${place.name}`),copy('Primero pedimos lo imprescindible. Después puedes añadir detalles opcionales para afinar todavía más la planificación.','We ask for the essentials first. Then you can add optional details to fine-tune the plan.'));
     ui.body.innerHTML=`
       ${place.type==='daytrip'?'':`<section class="route-v2-step is-open"><div class="route-v2-step-index">1</div><div class="route-v2-step-content"><h4>${copy('Hospedaje','Lodging')} <em>${copy('Obligatorio','Required')}</em></h4><p>${copy(`Indica dónde te hospedarás en ${place.name}. Si aún no tienes alojamiento, ITBMO usará una zona base conveniente solo para optimizar rutas y tiempos; no reservará ni seleccionará un hotel por ti.`,`Tell us where you will stay in ${place.name}. It can be a name, address, area, landmark, or simply ask us to recommend one.`)}</p>
-      <select data-p="lodgingChoice"><option value="recommend">${copy('Aún no tengo alojamiento · usa una zona base conveniente','I do not have lodging yet · use a convenient base area')}</option><option value="hotel">${copy('Tengo hotel/alojamiento','I have lodging')}</option><option value="area">${copy('Solo sé la zona aproximada','I only know the approximate area')}</option><option value="address">${copy('Tengo una dirección / ubicación','I have an address / location')}</option><option value="reference">${copy('Tengo un punto de referencia','I have a landmark')}</option></select>
+      <select data-p="lodgingChoice"><option value="">${copy('Selecciona una opción','Select an option')}</option><option value="recommend">${copy('Aún no tengo alojamiento · usa una zona base conveniente','I do not have lodging yet · use a convenient base area')}</option><option value="hotel">${copy('Tengo hotel/alojamiento','I have lodging')}</option><option value="area">${copy('Solo sé la zona aproximada','I only know the approximate area')}</option><option value="address">${copy('Tengo una dirección / ubicación','I have an address / location')}</option><option value="reference">${copy('Tengo un punto de referencia','I have a landmark')}</option></select>
       <input data-p="lodgingText" value="${esc(pref.lodgingText)}" placeholder="${copy('Nombre, dirección, zona, coordenadas o referencia…','Name, address, area, coordinates or landmark…')}"></div></section>`}
       <section class="route-v2-step is-open"><div class="route-v2-step-index">${place.type==='daytrip'?1:2}</div><div class="route-v2-step-content"><h4>${copy('Transporte','Transport')} <em>${copy('Obligatorio','Required')}</em></h4><p>${copy('Dinos cómo llegarás y cómo prefieres moverte. Si aún no lo sabes, selecciona “Recomiéndame”.','Tell us how you will arrive and how you prefer to get around. If you do not know yet, choose “Recommend”.')}</p>
       <div class="route-v2-grid2"><label>${copy('Cómo llegarás','How you will arrive')}<select data-p="arrivalTransport">${transportOptions(pref.arrivalTransport)}</select></label><label>${copy(`Cómo te moverás en ${place.name}`,`How you will get around ${place.name}`)}<select data-p="localTransport">${localTransportOptions(pref.localTransport)}</select></label></div></div></section>
@@ -786,7 +786,7 @@
       <label>${copy('Algo más que debamos saber','Anything else we should know')}<textarea data-p="notes" placeholder="${copy('Cualquier detalle adicional que pueda ayudarnos a personalizar mejor este lugar…','Any additional detail that can help us personalize this place better…')}">${esc(pref.notes)}</textarea></label>
       </div></section>
       <div class="route-v2-modal-actions"><button type="button" class="route-v2-cancel">${copy('Cancelar','Cancel')}</button><button type="button" class="route-v2-save">${copy('Guardar y continuar','Save and continue')}</button></div>`;
-    if(ui.body.querySelector('[data-p="lodgingChoice"]')) ui.body.querySelector('[data-p="lodgingChoice"]').value=pref.lodgingChoice||'recommend';
+    if(ui.body.querySelector('[data-p="lodgingChoice"]')) ui.body.querySelector('[data-p="lodgingChoice"]').value=pref.lodgingChoice||'';
     ui.body.querySelector('[data-p="arrivalTransport"]').value=pref.arrivalTransport||'recommend';
     ui.body.querySelector('[data-p="localTransport"]').value=pref.localTransport||'recommend';
     ui.body.querySelector('[data-p="pace"]').value=pref.pace||'balanced';
