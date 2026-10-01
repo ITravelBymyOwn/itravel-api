@@ -9861,15 +9861,39 @@ async function restorePaidGenerationIfNeeded(){
     // V85.4 UX invariant: an explicit NEW itinerary is always a clean construction.
     // Never hydrate/recover a prior trip merely because it is still the active/recoverable trip.
     if(plannerMode==='new' && !requestedTripId){
+      // V85.5: NEW means pristine V85 entry UI. Do not leave any recovered
+      // planning-chat/post-payment surface visible behind the route launcher.
       storeActiveTripId(null);
       try{ _tripStoryClearDraft_(); }catch(_){}
       try{ _travelV2()?.setTripStory?.(null); }catch(_){}
+
+      planningStarted=false;
+      collectingHotels=false;
+      session=[];
+      metaProgressIndex=0;
+      agentConversationLang=null;
+      preferencesStageTripId=null;
+      preferencesConfirmedTripId=null;
+
+      if($chatBox){
+        $chatBox.style.display='none';
+        $chatBox.classList.remove('is-planning-complete');
+      }
+      if($chatM) $chatM.innerHTML='';
+      setPlanningChatLocked(true);
+
       const prefStage=qs('#preferences-stage');
       if(prefStage){
         prefStage.classList.remove('is-stage-active','is-confirmed');
         prefStage.classList.add('is-stage-hidden');
         prefStage.setAttribute('aria-hidden','true');
       }
+
+      const summary=qs('#trip-story-summary');
+      if(summary) summary.hidden=true;
+
+      // Reset stays available as the secondary utility, but never exposes
+      // the legacy Planner Chat simply by entering mode=new.
       return;
     }
 
