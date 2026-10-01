@@ -9220,3 +9220,23 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .trip-story-overlay .gj-field-disabled .gj-field-help{
   opacity:.78;
 }
+
+/* V85.3 — premium guided-route layout refinements */
+.trip-story-overlay .gj-form--transfer{gap:18px 20px;align-items:start}
+.trip-story-overlay .gj-form--transfer>label{align-content:start}
+.trip-story-overlay .gj-disclosure--card{padding:16px 17px;border:1px solid #d8e6f2;border-radius:16px;background:linear-gradient(180deg,#fff,#f8fcff)}
+.trip-story-overlay .gj-subpanel{padding:16px 17px;border:1px solid #dce8f3;border-radius:16px;background:#fff;gap:16px 18px}
+.trip-story-overlay .gj-subpanel.is-disabled{background:#f5f8fb;border-style:dashed}
+.trip-story-overlay .gj-field-help{font-size:.74rem;line-height:1.45;margin:0;color:#6c7f94;font-weight:560}
+.trip-story-overlay .gj-form label{gap:8px;line-height:1.25}
+.trip-story-overlay .gj-form input,.trip-story-overlay .gj-form select{min-height:50px;box-shadow:0 1px 0 rgba(7,43,77,.02)}
+.trip-story-overlay .gj-segmented button{min-height:52px;padding:12px 15px}
+.trip-story-overlay .gj-form--personalize{gap:18px 20px;margin-bottom:5px}
+.trip-story-overlay .gj-pref-optional{gap:16px;padding:20px;margin-top:4px}
+.trip-story-overlay .gj-pref-optional__head{display:grid;gap:5px;padding-bottom:4px}
+.trip-story-overlay .gj-pref-optional__head>b{font-size:.95rem;color:#0b2d56}
+.trip-story-overlay .gj-pref-optional__head>small{color:#718398;line-height:1.45}
+.trip-story-overlay .gj-pref-optional label{gap:7px}
+.trip-story-overlay .gj-pref-optional textarea{min-height:84px;padding:12px 13px}
+.trip-story-overlay .gj-focus__content{gap:18px}
+@media(max-width:800px){.trip-story-overlay .gj-subpanel{padding:14px}.trip-story-overlay .gj-disclosure--card{padding:14px}}
