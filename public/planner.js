@@ -12948,6 +12948,9 @@ async function requestPlanningStart(){
   if(!validateBaseDatesDMY()) return;
 
   if(!ITBMO_COMMERCE_CONFIG.commerceEnabled){
+    const routeOverlay=document.querySelector('#guided-trip-story-overlay');
+    if(routeOverlay) routeOverlay.remove();
+    document.body.classList.remove('trip-story-open');
     showPreferencesStage();
     return;
   }
@@ -12965,6 +12968,14 @@ async function requestPlanningStart(){
     });
     if(!confirmed) return;
     paymentWarningAcceptedTripId=currentTripId;
+
+    /* V85.15 · Route -> payment is a real modal handoff.
+       The guided Route surface must not remain underneath the payment overlays.
+       Keeping it mounted was the reason a paid/admin-bypass flow appeared to
+       "return" to Route: Personalization opened underneath the old modal. */
+    const routeOverlay=document.querySelector('#guided-trip-story-overlay');
+    if(routeOverlay) routeOverlay.remove();
+    document.body.classList.remove('trip-story-open');
   }
 
   const previousLabel=$start?.textContent || '';
@@ -12982,6 +12993,7 @@ async function requestPlanningStart(){
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
     if(alreadyPaid){
       await _persistPostPaymentProgress_('preferences');
+      closePaymentPreparing();
       showPostPaymentWelcome();
       return;
     }
