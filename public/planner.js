@@ -3087,7 +3087,12 @@ function openGuidedPersonalizationJourney(){
     if(step==='place'){
       const place=places[index]; if(!place){step='language';render();return;} const pref=engine.state.preferences.places[place.key];
       active.innerHTML=shell(es?'UNA PARADA A LA VEZ':'ONE STOP AT A TIME',es?`Personalicemos ${_tripStoryEsc_(place.name)}`:`Let’s personalize ${_tripStoryEsc_(place.name)}`,es?'Indica sólo lo que sepas. Si prefieres que ITBMO decida, elige “Recomiéndame”.':'Tell us only what you know. If you prefer ITBMO to decide, choose “Recommend”.',`<div class="gj-form gj-form--personalize"><label>${es?'Hospedaje':'Lodging'}<small class="gj-field-help">${es?'Selecciona la opción que mejor describe lo que ya sabes sobre tu hospedaje.':'Choose the option that best describes what you already know about your lodging.'}</small><select data-gpp="lodgingChoice"><option value="">${es?'Selecciona una opción':'Select an option'}</option><option value="recommend">${es?'Aún no lo tengo · recomiéndame una zona base':'Not set yet · recommend a base area'}</option><option value="hotel">${es?'Ya tengo hotel o alojamiento':'I already have lodging'}</option><option value="area">${es?'Sé la zona aproximada':'I know the approximate area'}</option><option value="address">${es?'Tengo dirección o ubicación':'I have an address/location'}</option></select></label><label>${es?'Nombre, zona o dirección (opcional)':'Name, area or address (optional)'}<small class="gj-field-help">${es?'Complétalo sólo si ya tienes una referencia concreta.':'Complete this only if you already have a specific reference.'}</small><input data-gpp="lodgingText" value="${_tripStoryEsc_(pref.lodgingText||'')}"></label><label>${es?`Cómo te moverás en ${_tripStoryEsc_(place.name)}`:`How you will get around ${_tripStoryEsc_(place.name)}`}<small class="gj-field-help">${es?'Indica tu forma principal de desplazarte dentro del destino; ITBMO combinará opciones cuando tenga sentido.':'Choose your main way of getting around the destination; ITBMO can combine options when useful.'}</small><select data-gpp="localTransport"><option value="recommend">${es?'Recomiéndame':'Recommend'}</option><option value="walk">${es?'A pie':'Walking'}</option><option value="public">${es?'Transporte público':'Public transport'}</option><option value="car">${es?'Automóvil':'Car'}</option><option value="taxi">Taxi / Uber</option><option value="mixed">${es?'Mixto':'Mixed'}</option></select></label><label>${es?'Ritmo':'Pace'}<small class="gj-field-help">${es?'Define cuánto quieres hacer en un día normal.':'Set how much you want to do on a typical day.'}</small><select data-gpp="pace"><option value="relaxed">${es?'Relajado':'Relaxed'}</option><option value="balanced">${es?'Equilibrado':'Balanced'}</option><option value="intense">${es?'Intenso':'Intense'}</option></select></label></div><div class="gj-pref-optional"><div class="gj-pref-optional__head"><b>${es?'Afinar esta parada · opcional':'Fine-tune this stop · optional'}</b><small>${es?`Cuéntanos sólo lo que sea importante para ${_tripStoryEsc_(place.name)}. Si dejas algo vacío, ITBMO decidirá por ti.`:`Tell us only what matters for ${_tripStoryEsc_(place.name)}. If you leave something blank, ITBMO will decide for you.`}</small></div><label>${es?'Imprescindibles':'Must-do'}<small class="gj-field-help">${es?'Indica los lugares o experiencias que sí o sí quieres incluir. Si lo dejas vacío, ITBMO seleccionará los imperdibles más relevantes.':'Enter places or experiences you definitely want included. If blank, ITBMO will select the most relevant highlights.'}</small><textarea data-gpp="mustDo" placeholder="${es?'Ej.: Museo del Prado, Sagrada Familia, paseo en barco…':'E.g. Prado Museum, Sagrada Família, boat ride…'}">${_tripStoryEsc_(pref.mustDo||'')}</textarea></label><label>${es?'Reservas confirmadas':'Confirmed reservations'}<small class="gj-field-help">${es?'Agrega actividades, entradas, restaurantes o tours que ya tengas reservados, idealmente con fecha y hora. ITBMO organizará el recorrido alrededor de ellos.':'Add activities, tickets, restaurants or tours already booked, ideally with date and time. ITBMO will plan around them.'}</small><textarea data-gpp="reservations" placeholder="${es?'Ej.: Louvre · 03/01 · 10:00':'E.g. Louvre · Jan 3 · 10:00'}">${_tripStoryEsc_(pref.reservations||'')}</textarea></label><label>${es?'Quiero evitar':'I want to avoid'}<small class="gj-field-help">${es?'Indica lugares, actividades o situaciones que prefieres excluir de esta parada.':'Enter places, activities or situations you prefer to exclude from this stop.'}</small><textarea data-gpp="avoid" placeholder="${es?'Ej.: demasiados museos, caminatas largas, vida nocturna…':'E.g. too many museums, long walks, nightlife…'}">${_tripStoryEsc_(pref.avoid||'')}</textarea></label><label>${es?'Algo más':'Anything else'}<small class="gj-field-help">${es?'Añade cualquier detalle específico de este destino que no encaje en los campos anteriores.':'Add any destination-specific detail that does not fit the fields above.'}</small><textarea data-gpp="notes" placeholder="${es?'Cualquier detalle adicional para esta parada…':'Any additional detail for this stop…'}">${_tripStoryEsc_(pref.notes||'')}</textarea></label></div>`,next(index===places.length-1?(es?'Guardar y continuar':'Save and continue'):(es?'Guardar y siguiente destino':'Save and next stop')));
-      active.querySelectorAll('[data-gpp]').forEach(el=>{if(el.tagName==='SELECT')el.value=pref[el.dataset.gpp]??(el.dataset.gpp==='lodgingChoice'?'':'recommend');});active.querySelector('[data-gp-next]').onclick=()=>{active.querySelectorAll('[data-gpp]').forEach(el=>pref[el.dataset.gpp]=el.value);pref.saved=true;engine.state.preferences.places[place.key]=pref;persist();index+=1;step=index>=places.length?'language':'place';render();requestAnimationFrame(()=>active.scrollTo({top:0,behavior:'smooth'}));};return;
+      active.querySelectorAll('[data-gpp]').forEach(el=>{
+        if(el.tagName!=='SELECT')return;
+        const key=el.dataset.gpp;
+        if(key==='lodgingChoice') el.value=String(pref.lodgingChoice||'');
+        else el.value=pref[key]??'recommend';
+      });active.querySelector('[data-gp-next]').onclick=()=>{active.querySelectorAll('[data-gpp]').forEach(el=>pref[el.dataset.gpp]=el.value);pref.saved=true;engine.state.preferences.places[place.key]=pref;persist();index+=1;step=index>=places.length?'language':'place';render();requestAnimationFrame(()=>active.scrollTo({top:0,behavior:'smooth'}));};return;
     }
     if(step==='language'){
       const langs=['Español','English','Français','Italiano','Deutsch','Português','Nederlands','Català','日本語','한국어','中文','Русский','العربية'];
@@ -9849,8 +9854,26 @@ async function restorePaidGenerationIfNeeded(){
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   const restoreEpoch=generationRunEpoch;
   try{
+    const params=new URLSearchParams(window.location.search);
+    const plannerMode=String(params.get('mode')||'').trim().toLowerCase();
+    const requestedTripId=String(params.get('trip_id') || '').trim();
+
+    // V85.4 UX invariant: an explicit NEW itinerary is always a clean construction.
+    // Never hydrate/recover a prior trip merely because it is still the active/recoverable trip.
+    if(plannerMode==='new' && !requestedTripId){
+      storeActiveTripId(null);
+      try{ _tripStoryClearDraft_(); }catch(_){}
+      try{ _travelV2()?.setTripStory?.(null); }catch(_){}
+      const prefStage=qs('#preferences-stage');
+      if(prefStage){
+        prefStage.classList.remove('is-stage-active','is-confirmed');
+        prefStage.classList.add('is-stage-hidden');
+        prefStage.setAttribute('aria-hidden','true');
+      }
+      return;
+    }
+
     const token=getStoredSessionToken();
-    const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
     let tripId=requestedTripId || getStoredActiveTripId();
     let trip=null;
 
@@ -9873,7 +9896,6 @@ async function restorePaidGenerationIfNeeded(){
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
     if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
 
-    const plannerMode=new URLSearchParams(window.location.search).get('mode');
     if(trip.status==='generated'){
       if(plannerMode==='new'){
         storeActiveTripId(null);
@@ -13987,7 +14009,19 @@ function openTripStoryBuilder({reuseExisting=false}={}){
   document.body.appendChild(overlay); document.body.classList.add('trip-story-open');
   const active=overlay.querySelector('[data-gj-active]'), storyHost=overlay.querySelector('[data-gj-story]');
   const persist=()=>{}; // V85.1: no persistent/autosaved route draft.
-  const close=()=>{_tripStorySaveDraft_(story);overlay.remove();document.body.classList.remove('trip-story-open');};
+  const close=()=>{
+    _tripStorySaveDraft_(story);
+    overlay.remove();
+    document.body.classList.remove('trip-story-open');
+    const prefStage=qs('#preferences-stage');
+    if(prefStage){
+      prefStage.classList.remove('is-stage-active','is-confirmed');
+      prefStage.classList.add('is-stage-hidden');
+      prefStage.setAttribute('aria-hidden','true');
+    }
+    const summary=qs('#trip-story-summary');
+    if(summary) summary.hidden=true;
+  };
   overlay.querySelector('[data-gj-close]').onclick=close;
   const countryField=(value,code,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" data-country-code="${_tripStoryEsc_(code||'')}" placeholder="${es?'Escribe el país…':'Type country…'}"><div class="trip-story-suggestions" hidden></div></div>`;
   const destinationField=(value,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" placeholder="${es?'Escribe el destino…':'Type destination…'}"><div class="trip-story-suggestions" hidden></div></div>`;
