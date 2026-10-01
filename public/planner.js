@@ -9793,6 +9793,7 @@ async function _journeyOpenTrip_(tripId){
 function _journeyStartNew_(){
   /* This is intentionally NOT Reset: no trip is archived or deleted.
      We only detach the old active-trip pointer and reload a clean Planner. */
+  _tripStoryClearDraft_();
   storeActiveTripId(null);
   try{localStorage.removeItem('itbmo_trip_workspace_snapshot_v1');}catch(_){}
   const url=new URL(window.location.href);
@@ -13799,18 +13800,14 @@ function _tripStoryRequiredTimeOptions_(selected=''){const es=getLang()==='es';r
 function _tripStoryTimeStatusOptions_(selected='estimated'){const es=getLang()==='es';return [['confirmed',es?'Confirmado · ya tengo el horario':'Confirmed · I have the schedule'],['estimated',es?'Estimado · podré ajustarlo después':'Estimated · I can update it later']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
 function _tripStoryDaysOptions_(selected=1){return Array.from({length:30},(_,i)=>`<option value="${i+1}" ${Number(selected)===i+1?'selected':''}>${i+1}</option>`).join('');}
 function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};}
-function _tripStoryDraftKey_(){const who=String(currentUser?.id||currentUser?.email||'guest').replace(/[^a-z0-9_.@-]/gi,'_');return `itbmo_trip_story_draft_v1_${who}`;}
-function _tripStoryLoadDraft_(){
-  const key=_tripStoryDraftKey_();
-  for(const store of [localStorage,sessionStorage]){try{const raw=store.getItem(key);if(raw){const parsed=JSON.parse(raw);if(parsed?.story)return parsed.story;return parsed;}}catch(_){}}
-  return null;
-}
-function _tripStorySaveDraft_(story){
-  const key=_tripStoryDraftKey_(),payload=JSON.stringify({saved_at:new Date().toISOString(),story});
-  try{localStorage.setItem(key,payload);}catch(_){}
-  try{sessionStorage.setItem(key,payload);}catch(_){}
-}
-function _tripStoryClearDraft_(){const key=_tripStoryDraftKey_();try{sessionStorage.removeItem(key);}catch(_){}try{localStorage.removeItem(key);}catch(_){}}
+/* V106: unfinished route recovery is intentionally MEMORY-ONLY.
+   It exists solely so an accidental close of the route builder can be reopened
+   during the same Planner session. It must never hydrate a new visit, reload,
+   new trip, payment flow, Preferences stage or another saved trip. */
+let _itbmoTripStoryClosedDraft_=null;
+function _tripStoryLoadDraft_(){return _itbmoTripStoryClosedDraft_ ? JSON.parse(JSON.stringify(_itbmoTripStoryClosedDraft_)) : null;}
+function _tripStorySaveDraft_(story){_itbmoTripStoryClosedDraft_=story ? JSON.parse(JSON.stringify(story)) : null;}
+function _tripStoryClearDraft_(){_itbmoTripStoryClosedDraft_=null;}
 function _tripStoryMinimizeBuilder_(){
   const ov=document.querySelector('.trip-story-overlay.guided-journey-overlay');if(!ov)return false;
   try{ov.querySelector(':focus')?.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}
@@ -13962,7 +13959,7 @@ function openTripStoryBuilder(){
   let phase='travelers', activeStay=0, pendingNextStay=null, editReturnPhase=null, editReturnStay=null, dayTripDraft=null, dayTripEditIndex=null, guidedValidationMode=false;
   const overlay=document.createElement('div'); overlay.className='trip-story-overlay guided-journey-overlay';
   overlay.innerHTML=`<div class="guided-journey" role="dialog" aria-modal="true" aria-label="${es?'Crea tu viaje':'Build your trip'}">
-    <header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'No estás llenando un formulario. Estás viendo cómo tu viaje toma forma.':'You are not filling out a form. You are watching your trip take shape.'}</p></div><button type="button" data-gj-close aria-label="${es?'Cerrar':'Close'}">×</button></header>
+    <header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'No estás llenando un formulario. Estás viendo cómo tu viaje toma forma.':'You are not filling out a form. You are watching your trip take shape.'}</p></div><div class="gj-window-actions"><button type="button" data-gj-minimize aria-label="${es?'Minimizar':'Minimize'}" title="${es?'Minimizar para consultar el Planner':'Minimize to consult the Planner'}">—</button><button type="button" data-gj-close aria-label="${es?'Cerrar':'Close'}">×</button></div></header>
     <nav class="guided-journey__progress" aria-label="${es?'Progreso':'Progress'}"><button type="button" data-stage="travelers">${es?'Viajeros':'Travelers'}</button><i>›</i><button type="button" data-stage="route">${es?'Ruta':'Route'}</button><i>›</i><button type="button" data-stage="personalize" disabled>${es?'Personalización':'Personalization'}</button><i>›</i><button type="button" data-stage="itinerary" disabled>${es?'Itinerario':'Itinerary'}</button></nav>
     <div class="guided-journey__layout"><main class="guided-journey__active" data-gj-active></main><aside class="guided-journey__story"><div class="guided-journey__story-head"><div><small>${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><b>${es?'Tu viaje toma forma aquí':'Your trip takes shape here'}</b></div><div class="gj-story-head-actions"><button type="button" data-gj-copy>${es?'Copiar recorrido':'Copy journey'}</button><button type="button" class="gj-route-reset" data-gj-reset>${es?'Reiniciar recorrido':'Reset route'}</button></div></div><div data-gj-story></div></aside></div>
     <button class="guided-journey__mobile-story" type="button" data-gj-mobile-story>${es?'Ver mi recorrido':'View my journey'}</button>
@@ -13970,8 +13967,13 @@ function openTripStoryBuilder(){
   document.body.appendChild(overlay); document.body.classList.add('trip-story-open');
   const active=overlay.querySelector('[data-gj-active]'), storyHost=overlay.querySelector('[data-gj-story]');
   const persist=()=>_tripStorySaveDraft_(story);
-  const close=()=>{try{overlay.querySelector(':focus')?.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}persist();_tripStoryMinimizeBuilder_();};
+  // X = close only this route window. Keep the unfinished values in memory so
+  // pressing Create itinerary again during this same Planner session restores
+  // them. Do not expose a resume chip and do not persist across reloads.
+  const close=()=>{try{overlay.querySelector(':focus')?.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}persist();overlay.remove();document.body.classList.remove('trip-story-open');const resume=document.querySelector('#itbmo-resume-trip-builder');if(resume)resume.hidden=true;};
   overlay.querySelector('[data-gj-close]').onclick=close;
+  // Minimize is a separate action intended for consulting My Trips / Planner.
+  overlay.querySelector('[data-gj-minimize]')?.addEventListener('click',()=>{persist();_tripStoryMinimizeBuilder_();});
   const countryField=(value,code,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" data-country-code="${_tripStoryEsc_(code||'')}" placeholder="${es?'Escribe el país…':'Type country…'}"><div class="trip-story-suggestions" hidden></div></div>`;
   const destinationField=(value,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" placeholder="${es?'Escribe el destino…':'Type destination…'}"><div class="trip-story-suggestions" hidden></div></div>`;
   const bindLocation=(input,onPick,kind='country',countryCode=()=>'',options={} )=>{if(!input)return;let timer;input.oninput=()=>{onPick({label:input.value,code:'',typing:true});clearTimeout(timer);const menu=input.parentElement.querySelector('.trip-story-suggestions'),q=input.value.trim();if(q.length<(kind==='country'?2:3)){menu.hidden=true;return;}if(kind==='country'){const items=_tripStoryCountrySuggestions_(q);menu.innerHTML=items.length?items.map(x=>`<button type="button">${_tripStoryEsc_(x.label)}</button>`).join(''):`<div>${es?'Puedes conservar lo escrito.':'You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:items[n].label,code:items[n].code});render();});}else{timer=setTimeout(async()=>{const items=await _tripStorySuggestions_(countryCode(),q,{global:Boolean(options.global)});if(input.value.trim()!==q)return;menu.innerHTML=items.length?items.slice(0,10).map(x=>`<button type="button">${_tripStoryEsc_(typeof x==='string'?x:x.label)}</button>`).join(''):`<div>${es?'No aparece en la lista. Puedes conservar lo escrito.':'Not listed. You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:typeof items[n]==='string'?items[n]:items[n].label});render();});},180);}};};
