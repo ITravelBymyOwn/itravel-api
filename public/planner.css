@@ -9225,3 +9225,12 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 /* ITBMO V85.3 · surgical guided-field clarity */
 .gj-field-hint{display:block;margin:4px 0 7px;color:#70839b;font-size:11px;line-height:1.35;font-weight:500}
 .guided-journey select:disabled,.guided-journey input:disabled{opacity:.62;cursor:not-allowed;background:#f4f7fa;color:#73869b}
+
+
+/* ITBMO V85.4 · clean post-generation Planner */
+.guided-journey-entry__actions{display:flex;align-items:center;gap:12px;flex:0 0 auto}
+.guided-journey-entry__reset{border:1px solid rgba(255,255,255,.34);border-radius:16px;padding:13px 16px;background:rgba(255,255,255,.08);color:#fff;font:inherit;font-weight:800;white-space:nowrap;cursor:pointer;transition:background .18s ease,border-color .18s ease,transform .18s ease}
+.guided-journey-entry__reset:hover:not(:disabled){background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.52);transform:translateY(-1px)}
+.guided-journey-entry__reset:disabled{opacity:.42;cursor:default}
+.guided-journey-entry__reset[hidden]{display:none!important}
+@media(max-width:800px){.guided-journey-entry__actions{width:100%;margin-top:20px;flex-direction:column-reverse;align-items:stretch}.guided-journey-entry__actions .guided-journey-entry__button{margin-top:0}.guided-journey-entry__reset{width:100%}}
