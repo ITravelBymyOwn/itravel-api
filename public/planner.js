@@ -14012,7 +14012,7 @@ function openTripStoryBuilder({reuseExisting=false}={}){
   story.stays=(story.stays||[]).map(_tripStoryEnsureStay_);
   if(!story.stays.length) story.stays=[_tripStoryEnsureStay_({days:1})];
   let phase='travelers', activeStay=0, pendingNextStay=null, editReturnPhase=null, editReturnStay=null, dayTripDraft=null, dayTripEditIndex=null;
-  const overlay=document.createElement('div'); overlay.className='trip-story-overlay guided-journey-overlay';
+  const overlay=document.createElement('div'); overlay.id='guided-trip-story-overlay'; overlay.className='trip-story-overlay guided-journey-overlay';
   overlay.innerHTML=`<div class="guided-journey" role="dialog" aria-modal="true" aria-label="${es?'Crea tu viaje':'Build your trip'}">
     <header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'No estás llenando un formulario. Estás viendo cómo tu viaje toma forma.':'You are not filling out a form. You are watching your trip take shape.'}</p></div><button type="button" data-gj-close aria-label="${es?'Cerrar':'Close'}">×</button></header>
     <nav class="guided-journey__progress" aria-label="${es?'Progreso':'Progress'}"><button type="button" data-stage="travelers">${es?'Viajeros':'Travelers'}</button><i>›</i><button type="button" data-stage="route">${es?'Ruta':'Route'}</button><i>›</i><button type="button" data-stage="personalize" disabled>${es?'Personalización':'Personalization'}</button><i>›</i><button type="button" data-stage="itinerary" disabled>${es?'Itinerario':'Itinerary'}</button></nav>
