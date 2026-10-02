@@ -6198,10 +6198,11 @@ function _isHighLatitudeWinterContext_(city='',baseDate=''){
   const date=_parseBaseDate_(baseDate);
   const month=date ? date.getMonth()+1 : null;
 
-  const highLatitude=/\b(iceland|reykjavik|akureyri|husavik|vik|norway|tromso|alta|lofoten|svalbard|bodo|sweden|kiruna|abisko|finland|rovaniemi|lapland|greenland|nuuk|ilulissat|faroe|alaska|fairbanks|anchorage|yellowknife|whitehorse|nunavut|yukon|scotland|orkney|shetland)\b/i.test(normalized.replace(/\s+/g,' '));
-
+  // V99: destination-name latitude lists were removed. TIE owns destination/season
+  // intelligence and can pass a weather/night overlay without hardcoded places.
+  const explicitHighLatitude=/\b(high[- ]latitude|arctic|subarctic|polar|aurora[- ]season|northern lights season|temporada de auroras)\b/i.test(normalized.replace(/\s+/g,' '));
   const northernWinter=month==null || [10,11,12,1,2,3].includes(month);
-  return highLatitude && northernWinter;
+  return explicitHighLatitude && northernWinter;
 }
 
 function _winterUsefulDaylightWindow_(city='',baseDate='',day=1){
@@ -6259,7 +6260,7 @@ function _genericPlaceReason_(value=''){
 function _activityProfile_(row={}){
   const text=_canonicalText_(`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`);
 
-  if(/\b(blue lagoon|thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal)\b/.test(text)){
+  if(/\b(thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal)\b/.test(text)){
     return {type:'MAJOR_THERMAL',min:180};
   }
   if(/\b(whale watching|avistamiento de ballenas|wildlife cruise|marine safari|safari marino|boat wildlife)\b/.test(text)){
@@ -7681,7 +7682,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v5-daytrip-isolation';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v6-tie-structure';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -7799,7 +7800,105 @@ function _v3IsFullTransitDay_(routeDay={}){
   return movementMinutes+operationalMinutes>=360;
 }
 
+
+/* =========================================================
+   V99 · TRAVEL INTELLIGENCE ENGINE (TIE) ADAPTER
+   Strategic structure is isolated from V3 execution. TIE may improve an open
+   Stay, but a failure always returns the proven V98 physical units unchanged.
+========================================================= */
+const ITBMO_TIE_ENABLED=true;
+const ITBMO_TIE_SCHEMA='ITBMO_TIE_STRUCTURE_V1';
+const _tieStructureCache_=new Map();
+
+function _tieStableRequest_(contract={},unit={}){
+  const openDays=(unit.days||[]).map(day=>{
+    const windows=(unit.windows||[]).filter(w=>Number(w.day)===Number(day)).map(w=>({day:Number(w.day),date:w.date||null,start:w.start||null,end:w.end||null,open_end:Boolean(w.open_end),minimum_useful_target:w.minimum_useful_target||null}));
+    return {day:Number(day),date:windows[0]?.date||null,windows};
+  });
+  const allUnits=_v3BuildPhysicalStayUnits_({...contract,tie_physical_units:null,_tie_bypass:true});
+  const fixedUnits=allUnits.filter(u=>u.unit_type==='DAY_TRIP').map(u=>({type:'USER_FIXED_DAY_TRIP',days:u.days,base:u.base_destination,destination:u.physical_destination}));
+  const neighboring=(contract.trip_story_stays||[]).map(st=>({place:st.place,startDate:st.startDate,days:st.days,transitOnly:Boolean(st.transitOnly),explicit_day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place}))}));
+  return {
+    schema:'ITBMO_TIE_REQUEST_V1',
+    stay:{id:unit.id,base_destination:unit.base_destination||unit.physical_destination,days:unit.days,previous_destination:unit.previous_destination||null,next_destination:unit.next_destination||null},
+    open_days:openDays,
+    immutable:{fixed_units:fixedUnits,fixed_movements:(contract.movement_ledger||[]),neighboring_stays:neighboring},
+    traveler:{transport_preference:contract.transport_preference||null,global_preferences:contract.global_preferences||null,special_conditions:contract.special_conditions||null,travelers:contract.travelers||null,traveler_profiles:contract.traveler_profiles||null,place_preference:Object.entries(contract.place_preferences||{}).find(([place])=>_v3PhysicalKey_(place)===unit.physical_key)?.[1]||null},
+    calendar_context:(contract.calendar_dates||[]).filter(x=>(unit.days||[]).includes(Number(x.day))).map(x=>{
+      const iso=String(x.date||''); const md=iso.slice(5);
+      const marker=md==='12-24'?'CHRISTMAS_EVE':md==='12-25'?'CHRISTMAS_DAY':md==='12-31'?'NEW_YEARS_EVE':md==='01-01'?'NEW_YEARS_DAY':null;
+      return {...x,calendar_marker:marker};
+    }),
+    evidence:{provider:'OFFLINE_KNOWLEDGE',source_type:'MODEL_KNOWLEDGE',live:false,observed_at:null,freshness:'not_live',confidence:'planning_grade',items:[]},
+    policies:{web_ready:true,do_not_claim_live_data:true,one_owner_per_experience:true,preserve_user_fixed:true}
+  };
+}
+
+function _tieValidateBrowser_(plan={},request={}){
+  if(!plan||plan.schema!==ITBMO_TIE_SCHEMA)return {ok:false,errors:['BAD_SCHEMA']};
+  const expected=[...new Set((request.open_days||[]).map(x=>Number(x.day)).filter(Boolean))].sort((a,b)=>a-b);
+  const units=Array.isArray(plan.units)?plan.units:[]; const seen=new Set(),errors=[];
+  units.forEach(u=>{const d=Number(u.day);if(!expected.includes(d))errors.push(`OUTSIDE:${d}`);if(seen.has(d))errors.push(`DUP:${d}`);seen.add(d);if(!['BASE_FULL','BASE_LIGHT','REGIONAL_FULL','REGIONAL_HALF'].includes(String(u.type||'')))errors.push(`TYPE:${d}`);if(String(u.type||'').startsWith('REGIONAL')&&!(u.route_manifest||[]).length)errors.push(`MANIFEST:${d}`);});
+  expected.forEach(d=>{if(!seen.has(d))errors.push(`MISSING:${d}`);});
+  return {ok:!errors.length,errors};
+}
+
+async function _tieCallStructure_(request){
+  const fingerprint=_v3StableHash_(JSON.stringify(request));
+  if(_tieStructureCache_.has(fingerprint))return _tieStructureCache_.get(fingerprint);
+  const started=performance.now();
+  try{
+    const res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'tie_structure',tie_request:request})});
+    const data=await res.json();
+    if(data?.usage)_captureExactUsage_(data);
+    if(!res.ok||!data?.ok||!data?.plan)throw new Error(data?.error?.code||`TIE_HTTP_${res.status}`);
+    const validation=_tieValidateBrowser_(data.plan,request);
+    if(!validation.ok)throw new Error(`TIE_BROWSER_VALIDATION:${validation.errors.join(',')}`);
+    const value={plan:data.plan,fingerprint,duration_ms:Math.round(performance.now()-started)};
+    _tieStructureCache_.set(fingerprint,value);
+    console.info('[ITBMO TIE] structure accepted',{base:request.stay?.base_destination,days:request.stay?.days,confidence:data.plan.confidence,duration_ms:value.duration_ms,units:data.plan.units.map(u=>({day:u.day,type:u.type,identity:u.identity,microstops:(u.route_manifest||[]).length})),overlays:(data.plan.night_overlays||[]).length});
+    return value;
+  }catch(error){
+    console.warn('[ITBMO TIE] safe fallback to V98 physical structure',error);
+    return null;
+  }
+}
+
+function _tieApplyPlanToBaseUnit_(baseUnit,plan){
+  const byDay=new Map((plan.units||[]).map(u=>[Number(u.day),u]));
+  const baseWindows=(baseUnit.windows||[]).filter(w=>{const p=byDay.get(Number(w.day));return p&&!String(p.type||'').startsWith('REGIONAL');});
+  const out=[];
+  if(baseWindows.length){
+    const days=[...new Set(baseWindows.map(w=>Number(w.day)))].sort((a,b)=>a-b);
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:baseWindows,days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:(plan.night_overlays||[]).filter(o=>(o.eligible_days||[]).some(d=>days.includes(Number(d)))),verification_needs:plan.verification_needs||[]}});
+  }
+  (plan.units||[]).filter(u=>String(u.type||'').startsWith('REGIONAL')).forEach((directive,index)=>{
+    const windows=(baseUnit.windows||[]).filter(w=>Number(w.day)===Number(directive.day));
+    if(!windows.length)return;
+    const manifest=(directive.route_manifest||[]).map(x=>x.name).filter(Boolean);
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:(plan.night_overlays||[]).filter(o=>(o.eligible_days||[]).includes(Number(directive.day))),verification_needs:plan.verification_needs||[]}});
+  });
+  return out.length?out:[baseUnit];
+}
+
+async function _tieEnrichPhysicalUnits_(contract,units){
+  if(!ITBMO_TIE_ENABLED)return units;
+  const enriched=[];
+  for(const unit of units){
+    // Explicit Day Trips and short fragments are already structurally defined by the traveler.
+    if(unit.unit_type!=='BASE_STAY'||(unit.days||[]).length<2){enriched.push(unit);continue;}
+    const request=_tieStableRequest_(contract,unit);
+    const result=await _tieCallStructure_(request);
+    if(!result||String(result.plan?.confidence||'low')==='low'){enriched.push(unit);continue;}
+    enriched.push(..._tieApplyPlanToBaseUnit_(unit,result.plan));
+  }
+  enriched.sort((a,b)=>Math.min(...(a.days||[9999]))-Math.min(...(b.days||[9999]))||String(a.id).localeCompare(String(b.id)));
+  enriched.forEach((u,i)=>u.sequence=i+1);
+  return enriched;
+}
+
 function _v3BuildPhysicalStayUnits_(contract={}){
+  if(Array.isArray(contract?.tie_physical_units)&&contract.tie_physical_units.length&&!contract?._tie_bypass)return JSON.parse(JSON.stringify(contract.tie_physical_units));
   const routeDays=[...(contract.route_days||[])].sort((a,b)=>Number(a.day)-Number(b.day));
   const storyStays=(contract.trip_story_stays||[]).filter(st=>st?.place&&st?.startDate&&!st?.transitOnly);
   const transfers=routeDays.flatMap(d=>(d.fixed_transfers||[]).map((t,transferIndex)=>({...t,transfer_id:t.transfer_id||`day-${Number(d.day)}-transfer-${transferIndex+1}`,day:Number(d.day),date:d.date||null})));
@@ -8021,6 +8120,7 @@ function _v3StayContract_(contract,unit){
     base_destination:unit.base_destination||unit.physical_destination,
     allowed_physical_locations:unit.allowed_physical_locations||[unit.physical_destination],
     day_trips:unit.day_trips||[],
+    tie_structure:unit.tie_structure||null,
     itinerary_language:contract.itinerary_language,
     planning_windows:unit.windows,
     boundary_context:{previous_destination:unit.previous_destination,next_destination:unit.next_destination,inbound:unit.inbound_boundary,outbound:unit.outbound_boundary},
@@ -8188,10 +8288,12 @@ PHYSICAL STAY GENERATION CONTRACT — authoritative JSON:
 ${JSON.stringify(stayContract)}
 
 Plan ONLY the useful time supplied for this physical planning unit. Its type is ${unit.unit_type||'BASE_STAY'}, its overnight/base destination is ${unit.base_destination||unit.physical_destination}, and its physical tourism destination is ${unit.physical_destination||unit.base_destination}. This is one chronological fragment of a continuous trip.
-- Generate tourism/activity rows only. DO NOT generate fixed movements; ITBMO inserts every supplied transfer deterministically.
-- Every row must remain inside one supplied planning_window, at that window's physical location, and must use that window's original global day number.
+- Never regenerate USER_FIXED/fixed boundary movements; ITBMO inserts those deterministically. For a TIE-discovered REGIONAL unit with no supplied fixed excursion legs, you DO own the non-fixed regional access, micro-stop movements and realistic return to the overnight base inside the planning window.
+- Every row must remain inside one supplied planning_window and use that window's original global day number. For ordinary BASE/DAY_TRIP units, respect the window physical location. For a TIE REGIONAL unit, the window is the authoritative clock boundary anchored to the base and the supplied route_manifest/allowed_physical_locations define the regional corridor inside it.
 - If unit_type is DAY_TRIP, maximize a coherent, traveler-friendly visit inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it.
 - If unit_type is BASE_STAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
+- If tie_structure is supplied, it is the authoritative strategic brief for this unit. Protect its day identity, experience cluster, CORE/HIGH route_manifest stops, structural slack, night overlays and verification needs. OPTIONAL/DROP_FIRST micro-stops may be omitted when physical feasibility, daylight, fatigue or a stronger anchor requires it. Do not invent live confirmation for verification_required items.
+- For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler.
 - First identify and protect the physical destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
 - When a planning window has no explicit start, choose a traveler-friendly start time appropriate to the destination (normally around 08:00–09:00). Do not invent extreme starts such as 05:30 unless a supplied fixed boundary, reservation, special condition or genuinely time-critical experience requires it.
 - Do not assume that Day 1 of the parent destination is Day 1 here. Preserve the supplied global day numbers exactly.
@@ -8379,7 +8481,9 @@ Repair ONLY the supplied scope. Preserve all valid content you can. Keep every r
 
 async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,transport){
   const contract=_v3CompactContract_(city,dest,perDay,baseDate,hotel,transport);
-  const units=_v3BuildPhysicalStayUnits_(contract);
+  const baseUnits=_v3BuildPhysicalStayUnits_(contract);
+  const units=await _tieEnrichPhysicalUnits_(contract,baseUnits);
+  contract.tie_physical_units=JSON.parse(JSON.stringify(units));
   if(!units.length) throw new Error(`V3_NO_PHYSICAL_STAYS:${city}`);
   console.info(`[ITBMO V3 STAYS] trip: ${units.length} independent physical planning unit(s)`,units.map(u=>({id:u.id,place:u.physical_destination,days:u.days,windows:u.windows.length,type:u.unit_type||'BASE_STAY',dayTrips:(u.day_trips||[]).length})));
 
@@ -8812,7 +8916,7 @@ ${lockedDaysText}
 
 KEY RULES (MANDATORY):
 - "activity" MUST ALWAYS: "Destination – <Specific sub-stop>" (includes returns/transfers).
-  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
+  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., a named regional circuit or excursion destination).
   • If it's NOT a day trip, "Destination" can be "${city}".
 - from/to/transport/notes: NEVER empty. Avoid generic items without clear names.
 - VERY IMPORTANT:
