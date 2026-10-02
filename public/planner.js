@@ -22,6 +22,10 @@
 ========================================================= */
 
 
+const ITBMO_RUNTIME_BUILD='V107';
+const ITBMO_RUNTIME_ASSET='planner.js?v=224';
+console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true});
+
 /* ---------- Helpers DOM ---------- */
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
@@ -4969,6 +4973,13 @@ function normalizeRow(r = {}, fallbackDay = 1){
     physical_location:String(r.physical_location ?? r.physicalLocation ?? commerceContext?.physical_destination ?? '').trim() || null,
     stay_unit_id:String(r.stay_unit_id ?? r.stayUnitId ?? '').trim() || null,
     planning_window_id:String(r.planning_window_id ?? r.planningWindowId ?? '').trim() || null,
+    // V107 · Preserve strategic TIE metadata across every normalize/push/merge cycle.
+    // These fields are presentation/strategy metadata only; they do not alter chronology.
+    _tie_day_identity:String(r._tie_day_identity ?? r.tie_day_identity ?? '').trim() || null,
+    _tie_day_cluster:String(r._tie_day_cluster ?? r.tie_day_cluster ?? '').trim() || null,
+    _tie_unit_type:String(r._tie_unit_type ?? r.tie_unit_type ?? '').trim() || null,
+    _tie_aurora_context:Boolean(r._tie_aurora_context ?? r.tie_aurora_context),
+    _tie_aurora_row_authorized:Boolean(r._tie_aurora_row_authorized ?? r.tie_aurora_row_authorized),
     commerce_context:safeCommerce
   }));
 }
@@ -7700,7 +7711,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v7-tie-semantic-night';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v8-tie-metadata-persist';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
