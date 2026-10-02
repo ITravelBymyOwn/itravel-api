@@ -7463,21 +7463,34 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
 
     dayRows.forEach((row,index)=>{
       const start=_hhmmToMinutes_(row.start),end=_hhmmToMinutes_(row.end);
-      if(start==null||end==null||end<=start){
+      const isTransport=_isPureTransportRow_(row);
+      const unit=unitById.get(String(row?.stay_unit_id||''));
+      const candidateWindows=(unit?.windows||[]).filter(w=>Number(w.day)===day);
+      const matchingNightWindow=!isTransport&&candidateWindows.find(w=>{
+        if(!Boolean(w?.crosses_midnight)||String(w?.role||'')!=='NIGHT_OVERLAY') return false;
+        const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
+        if(start==null||end==null||ws==null) return false;
+        const rowEnd=end<=start?end+1440:end;
+        const windowEnd=we!=null&&we<=ws?we+1440:we;
+        return start>=ws&&(windowEnd==null||rowEnd<=windowEnd);
+      });
+      const absoluteEnd=matchingNightWindow&&end!=null&&start!=null&&end<=start?end+1440:end;
+      if(start==null||absoluteEnd==null||absoluteEnd<=start){
         errors.push({code:'INVALID_TIME',day,row:index+1,start:row.start,end:row.end});
         return;
       }
-      const isTransport=_isPureTransportRow_(row);
       if(isTransport) return;
 
       // A generated activity must fit one authoritative physical window belonging
-      // to its own Stay Unit. This is stronger and less ambiguous than comparing
-      // POI names across independently generated stays.
-      const unit=unitById.get(String(row?.stay_unit_id||''));
-      const candidateWindows=(unit?.windows||[]).filter(w=>Number(w.day)===day);
+      // to its own Stay Unit. Night overlays may legitimately cross midnight; use
+      // the same absolute-minute semantics as _v3StampStayRows_ so the final hard
+      // gate cannot reject a row that the authoritative window stamper accepted.
       const inside=candidateWindows.some(w=>{
         const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
-        return (ws==null||start>=ws)&&(we==null||end<=we);
+        const nightCross=Boolean(w?.crosses_midnight)&&String(w?.role||'')==='NIGHT_OVERLAY';
+        const rowEnd=nightCross&&end<=start?end+1440:end;
+        const windowEnd=nightCross&&we!=null&&we<=ws?we+1440:we;
+        return (ws==null||start>=ws)&&(windowEnd==null||rowEnd<=windowEnd);
       });
       if(unit && candidateWindows.length && !inside){
         errors.push({code:'ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',day,row:index+1,stay_unit_id:unit.id});
