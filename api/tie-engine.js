@@ -39,6 +39,8 @@ NIGHT / SPECIAL MOMENTS
 - Consider culturally iconic night experiences, shows, performances, special dinners, night markets, astronomy/nature opportunities and destination-defining evening experiences.
 - Detect structurally relevant dates from calendar_context and adapt the day around them. Do not invent year-specific events, opening hours or availability.
 - Weather-dependent overlays need alternatives/eligible days and must never be guaranteed.
+- Aurora / northern-lights opportunities are mobile, probabilistic night experiences, not ordinary fixed attractions. Distinguish a local/self-directed observation from a true mobile aurora hunt. When the destination and mobility make a guided hunt valuable, prefer a guided mobile hunt as the primary recommendation and retain self-drive/local observation as an alternative. A mobile hunt should normally reserve an extended 240–360 minute night window because it may travel substantial distance to seek clearer skies; use a shorter 120–180 minute local-observation window only when that is genuinely the intended experience. Never guarantee sightings.
+- Aurora opportunities should be reschedulable across structurally eligible nights when conditions are poor; do not force the final night when an earlier viable night exists, and protect the following day from excessive fatigue.
 - recovery_cost must influence the following day.
 
 WEB-READY EVIDENCE
@@ -57,7 +59,7 @@ OUTPUT EXACTLY
   "confidence":"high|medium|low",
   "destination_profile":{"urban_depth":"low|medium|high|very_high","regional_gravity":"low|medium|high|very_high","geographic_dispersion":"low|medium|high","mobility_leverage":"low|medium|high","season_sensitivity":"low|medium|high","night_value":"low|medium|high","weather_sensitivity":"low|medium|high","reservation_rigidity":"low|medium|high"},
   "units":[{"day":1,"type":"BASE_FULL|BASE_LIGHT|REGIONAL_FULL|REGIONAL_HALF","identity":"short unique unit identity","cluster":"base or regional cluster name","intensity":"low|medium|high","flexibility":"low|medium|high","weather_dependency":"low|medium|high","reservation_rigidity":"low|medium|high","structural_slack_minutes":60,"route_manifest":[{"name":"physical experience/stop","priority":"CORE|HIGH|OPTIONAL|DROP_FIRST","minimum_dwell_minutes":30,"reason":"short reason","verification_required":false,"evidence_refs":[]}]}],
-  "night_overlays":[{"type":"short semantic type","identity":"experience","eligible_days":[1],"preferred_day":1,"start_window":"HH:MM-HH:MM or flexible","duration_minutes":120,"weather_dependency":"low|medium|high","reservation_rigidity":"low|medium|high","recovery_cost":"none|low|medium|high","verification_required":true,"evidence_refs":[]}],
+  "night_overlays":[{"type":"short semantic type","identity":"experience","eligible_days":[1],"preferred_day":1,"start_window":"HH:MM-HH:MM or flexible","duration_minutes":300,"mobility":"fixed|mobile|either","recommended_mode":"guided_hunt|self_drive|local_observation|independent","alternative_mode":"self_drive|local_observation|guided_hunt|none","reschedulable":true,"weather_dependency":"low|medium|high","reservation_rigidity":"low|medium|high","recovery_cost":"none|low|medium|high","verification_required":true,"evidence_refs":[]}],
   "ownership":[{"experience":"canonical experience","owner_day":1,"owner_unit_identity":"identity"}],
   "verification_needs":["only material current-data checks"],
   "reasoning_summary":"one compact sentence"
