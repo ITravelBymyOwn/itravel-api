@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V109';
-const ITBMO_RUNTIME_ASSET='planner.js?v=226';
+const ITBMO_RUNTIME_BUILD='V110';
+const ITBMO_RUNTIME_ASSET='planner.js?v=227';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6318,14 +6318,45 @@ function _activityDurationBounds_(duration=''){
   return _durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
 }
 
+// V110 semantic itinerary roles. Utility rows are part of the physical truth of a
+// trip, but they must never masquerade as tourism richness or be duplicated merely
+// to fill a clock. Keep this deliberately language-tolerant and deterministic.
+function _v110SemanticRole_(row={}){
+  if(_isPureTransportRow_(row)) return 'transfer';
+  const t=_canonicalText_(`${row?.kind||''} ${row?.activity||''} ${row?.notes||''}`);
+  if(/\b(cooking class|clase de cocina|food tour|tour gastronomico|tasting experience|experiencia gastronomica)\b/.test(t)) return 'experience';
+  if(/\b(lunch|almuerzo|dinner|cena|breakfast|desayuno|meal|comida|brunch)\b/.test(t)) return 'meal';
+  if(/\b(rest|descanso|recovery|recuperacion|pausa|break)\b/.test(t)) return 'recovery';
+  if(/\b(buffer|margen|access|acceso|check in|control|queue|fila|security)\b/.test(t)) return 'buffer';
+  if(/\b(return|regreso|retorno|back to|vuelta).*(hotel|alojamiento|base|lodging|accommodation)\b/.test(t)) return 'return';
+  if(/\b(free time|tiempo libre|flexible|flexibilidad)\b/.test(t)) return 'free_time';
+  return 'experience';
+}
+function _v110RowSpan_(row={}){
+  const s=_hhmmToMinutes_(row.start),e=_hhmmToMinutes_(row.end);if(s==null||e==null)return 0;
+  let span=e-s;if(span<=0)span+=1440;return Math.max(0,span);
+}
+function _v110DayLoad_(rows=[]){
+  const stats={experience:0,utility:0,experience_rows:0,meal_rows:0,recovery_rows:0,first:null,last:null};
+  (rows||[]).forEach(r=>{const role=_v110SemanticRole_(r),span=_v110RowSpan_(r);const st=_hhmmToMinutes_(r.start),en=_hhmmToMinutes_(r.end);if(st!=null)stats.first=stats.first==null?st:Math.min(stats.first,st);if(en!=null){let x=en;if(st!=null&&x<=st)x+=1440;stats.last=stats.last==null?x:Math.max(stats.last,x);}if(role==='experience'){stats.experience+=span;stats.experience_rows++;}else{stats.utility+=span;if(role==='meal')stats.meal_rows++;if(role==='recovery')stats.recovery_rows++;}});
+  stats.total_span=stats.first!=null&&stats.last!=null?Math.max(0,stats.last-stats.first):0;return stats;
+}
+function _v110DayIsSufficient_(rows=[]){
+  const x=_v110DayLoad_(rows);
+  // A day is sufficient when it already contains substantial real experience or a
+  // long coherent anchor/logistics chain. Meals/rest/buffers do not inflate this.
+  return x.experience>=240 || (x.experience>=180&&x.total_span>=420) || (x.experience_rows>=3&&x.experience>=150);
+}
 function _regionalDayLooksThin_(rows=[]){
-  const meaningful=(rows||[]).filter(r=>!_isUtilityRow_(r));
+  const meaningful=(rows||[]).filter(r=>_v110SemanticRole_(r)==='experience');
   const regionalSignal=(rows||[]).some(r=>
-    /\b(route|ruta|circle|c[ií]rculo|peninsula|pen[ií]nsula|coast|costa|day trip|excursi[oó]n|region|regional)\b/i.test(
-      `${r?.activity||''} ${r?.notes||''}`
-    )
+    /\b(route|ruta|circle|c[ií]rculo|peninsula|pen[ií]nsula|coast|costa|day trip|excursi[oó]n|region|regional)\b/i.test(`${r?.activity||''} ${r?.notes||''}`) || (_transportBoundsFromField_(r?.transport||'')?.max||0)>=75
   );
-  return regionalSignal && meaningful.length<4;
+  if(!regionalSignal)return false;
+  const load=_v110DayLoad_(rows);
+  // Row count alone is not quality. A destination-defining anchor plus necessary
+  // regional logistics can be a premium full day with only 3–5 rows.
+  return meaningful.length<2 && load.experience<150 && load.total_span<360;
 }
 
 function _noteTemplateRatio_(rows=[]){
@@ -6452,6 +6483,12 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
 
       if(i>0 && priorTo && r.from && !_arePoiAliases_(priorTo,r.from)){
         const previousRow=dayRows[i-1]||{};
+        // V110: a transport/return cannot originate from a place the chronology
+        // never reached. Do not silently rewrite this away: it may reveal a missing
+        // experience/transition (the Paris/New York orphan-reference failure mode).
+        if(_isPureTransportRow_(r) && !_isPureTransportRow_(previousRow)){
+          errors.push({code:'ORPHAN_TRANSFER_ORIGIN',day,row,previous_to:priorTo,current_from:r.from,activity:r.activity||null,instruction:'The traveler has not reached this transfer origin. Restore the missing transition/experience if it is structurally intended, otherwise start the transfer from the actual previous location. Never invent a hidden activity.'});
+        }
         // A pure intercity transfer is a boundary between POI-level continuity
         // and city-level route identity. Requiring the previous landmark to equal
         // the city name (or the next city name to equal the next landmark) creates
@@ -6574,12 +6611,19 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       const pe=_hhmmToMinutes_(prev.end),ns=_hhmmToMinutes_(next.start);
       if(pe==null||ns==null||ns<=pe)continue;
       const gap=ns-pe;if(gap<=45)continue;
-      // Generic notes about meals, stations or buffers do not account for an
-      // actual unscheduled interval in the exported chronology.
       const explicit=`${prev.notes||''} ${next.notes||''}`;
       const explained=explicit.includes(`${prev.end}-${next.start}`)||explicit.includes(`${prev.end}–${next.start}`);
-      if(!_isPureTransportRow_(prev)&&!_isPureTransportRow_(next)&&!explained){
-        errors.push({code:'UNEXPLAINED_GAP',day,previous_row:i,next_row:i+1,gap_minutes:gap,previous_end:prev.end,next_start:next.start,instruction:'Keep unexplained gaps at 45 minutes or less. If the time is genuinely needed, represent the meal, rest, access, transfer or reservation buffer explicitly; otherwise tighten the chronology without adding filler.'});
+      const load=_v110DayLoad_(dayRows);
+      const roles=dayRows.map(_v110SemanticRole_);
+      const midday=pe<14*60+30&&ns>11*60+30;
+      const mealAlreadyPlanned=roles.includes('meal');
+      // V110: blank time is not automatically a defect. Once a day is already
+      // experientially sufficient, a moderate gap may be legitimate breathing room.
+      // Never invite the model to manufacture a second lunch/dinner/rest merely to
+      // satisfy chronology. Only material gaps in an insufficient day remain repairable.
+      const materialGap=gap>90 || (!_v110DayIsSufficient_(dayRows)&&gap>60);
+      if(!_isPureTransportRow_(prev)&&!_isPureTransportRow_(next)&&!explained&&materialGap){
+        errors.push({code:'UNEXPLAINED_GAP',day,previous_row:i,next_row:i+1,gap_minutes:gap,previous_end:prev.end,next_start:next.start,day_experience_minutes:load.experience,meal_already_planned:mealAlreadyPlanned,instruction:midday&&!mealAlreadyPlanned?'Classify this interval before changing the itinerary. If a meal is genuinely missing, add ONE realistic meal; otherwise tighten the chronology or leave justified free/recovery time. Never duplicate a meal/rest to fill time.':'Classify this interval before changing the itinerary. Prefer chronology correction or justified free/recovery time; do not invent meals, rests, buffers or attractions merely to fill a clock.'});
       }
     }
 
@@ -6689,11 +6733,12 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
             if(gap>45 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
           }
         }
-        if(leadingGap>60 || trailingGap>60 || largestInternalGap>45 || unexplainedMealGap>45){
+        const daySufficient=_v110DayIsSufficient_(dayRows);
+        if(!daySufficient && (leadingGap>90 || trailingGap>90 || largestInternalGap>75 || unexplainedMealGap>75)){
           errors.push({
             code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,
             leading_gap_minutes:leadingGap,trailing_gap_minutes:trailingGap,largest_internal_gap_minutes:largestInternalGap,unexplained_meal_gap_minutes:unexplainedMealGap,
-            instruction:`Use the substantial available time in ${window.location} coherently. Keep unexplained gaps within about 30–45 minutes. When a longer interval is genuinely needed, represent the meal, rest, access buffer or transfer explicitly; preserve a realistic non-overloaded pace and never add filler merely to occupy time.`
+            instruction:`Use the substantial available time in ${window.location} only when genuine high-value content is still missing. Classify gaps first; never manufacture a meal/rest/buffer to occupy time, and never duplicate a meal already present.`
           });
         }
       }
@@ -6703,14 +6748,15 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       const openWindowMinimum = we==null
         ? (ws < 12*60 ? {rows:3,minutes:240} : ws < 15*60 ? {rows:2,minutes:150} : ws < 18*60 ? {rows:1,minutes:45} : null)
         : null;
-      const closedWindowTooThin=availableMinutes!=null && availableMinutes>=210 &&
+      const daySufficientForWindow=_v110DayIsSufficient_(dayRows);
+      const closedWindowTooThin=!daySufficientForWindow && availableMinutes!=null && availableMinutes>=210 &&
         (useful.length<2 || usefulMinutes<Math.min(150,Math.round(availableMinutes*0.45)));
-      const openWindowTooThin=openWindowMinimum &&
+      const openWindowTooThin=!daySufficientForWindow && openWindowMinimum &&
         (useful.length<openWindowMinimum.rows || usefulMinutes<openWindowMinimum.minutes);
       if(closedWindowTooThin || openWindowTooThin){
         errors.push({
           code:'ROUTE_WINDOW_TOO_THIN',day:ctx.day,location:window.location,window_start:window.start,window_end:window.end||'open',available_minutes:availableMinutes,useful_rows:useful.length,useful_minutes:usefulMinutes,minimum_useful_rows:openWindowMinimum?.rows||null,minimum_useful_minutes:openWindowMinimum?.minutes||null,
-          instruction:`This usable window in ${window.location} is materially under-planned. Rebuild it with a coherent, high-value sequence sized to the real tourism opportunity, logistics and traveler pace. Include meal/rest only when appropriate; do not touch fixed transfers, force a finishing hour, or add filler.`
+          instruction:`This usable window in ${window.location} is materially under-planned. Rebuild it with a coherent, high-value sequence sized to the real tourism opportunity, logistics and traveler pace. Meals/rest/buffers are logistics, never richness. Add them only when genuinely missing and never duplicate them. Do not touch fixed transfers, force a finishing hour, or add filler.`
         });
       }
       rowsInWindow.forEach((r,index)=>{
@@ -7385,7 +7431,7 @@ function _v3HardBlockingCodes_(){
   return new Set([
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
-    'OVERLAP','CONTINUITY','WRONG_OVERNIGHT_BASE',
+    'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','WRONG_OVERNIGHT_BASE',
     'INVENTED_DEPARTURE_LOGISTICS',
     'ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','REGIONAL_DAY_TOO_THIN','UNEXPLAINED_GAP',
     'GLOBAL_DUPLICATE_POI','CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP',
@@ -7434,11 +7480,11 @@ function _v3LogAuditDetails_(label,city,unitId,errors=[]){
 // after the candidate is merged, so localized repair never weakens final QA.
 function _v3RepairScope_(material=[]){
   const list=Array.isArray(material)?material:[];
-  const crossDayCodes=new Set(['GLOBAL_DUPLICATE_POI','MISSING_DAY','WRONG_OVERNIGHT_BASE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
-  if(!list.length || list.some(e=>crossDayCodes.has(String(e?.code||'')))) return {type:'stay',days:[]};
+  const trueStayCodes=new Set(['WRONG_OVERNIGHT_BASE']);
+  if(!list.length || list.some(e=>trueStayCodes.has(String(e?.code||'')))) return {type:'stay',days:[]};
   const days=[...new Set(list.flatMap(e=>[e?.day,...(Array.isArray(e?.days)?e.days:[])]).map(Number).filter(Boolean))].sort((a,b)=>a-b);
   if(days.length===1) return {type:'day',days};
-  if(days.length===2 && Math.abs(days[0]-days[1])<=1) return {type:'days',days};
+  if(days.length>=2) return {type:'days',days};
   return {type:'stay',days:[]};
 }
 
@@ -7610,7 +7656,8 @@ function _v3FitDurationToInterval_(row={}){
 }
 
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
-  let out=_v3EnforceHardRouteFacts_(rows,contract);
+  let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r); // V110: transport rows cannot leak activity dwell metadata.
+
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
   for(let pass=0;pass<5;pass++){
@@ -7719,6 +7766,23 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
         const idx=out.indexOf(current);
         if(idx>=0){out.splice(idx,1);removed.push({day:Number(current.day),poi:current.to||current.activity,reason:'adjacent_semantic_duplicate'});changed=true;}
       }
+    }
+
+    // V110 semantic utility guard: meals/recovery are traveler logistics, not
+    // richness. Remove a later near-duplicate utility row of the same role when the
+    // first already satisfies that need. This catches differently worded double
+    // lunches/dinners/rest blocks that exact-text dedupe cannot see.
+    const semanticOrdered=[...out].sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    for(let i=1;i<semanticOrdered.length;i++){
+      const a=semanticOrdered[i-1],b=semanticOrdered[i];if(Number(a.day)!==Number(b.day))continue;
+      const ra=_v110SemanticRole_(a),rb=_v110SemanticRole_(b);if(ra!==rb||!['meal','recovery','return'].includes(ra))continue;
+      const ae=_hhmmToMinutes_(a.end),bs=_hhmmToMinutes_(b.start);if(ae==null||bs==null||bs<ae||bs-ae>120)continue;
+      if(ra==='meal'){
+        const ta=_canonicalText_(a.activity||''),tb=_canonicalText_(b.activity||'');
+        const lunchA=/lunch|almuerzo|comida/.test(ta),lunchB=/lunch|almuerzo|comida/.test(tb),dinnerA=/dinner|cena/.test(ta),dinnerB=/dinner|cena/.test(tb);
+        if(!((lunchA&&lunchB)||(dinnerA&&dinnerB)))continue;
+      }
+      const idx=out.indexOf(b);if(idx>=0){out.splice(idx,1);removed.push({day:Number(b.day),poi:b.to||b.activity,reason:`semantic_${ra}_duplicate`});changed=true;}
     }
 
     // Remove a second end-of-day lodging return only when the traveler is
@@ -8406,6 +8470,7 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - TIE NIGHT OVERLAY EXECUTION: when tie_structure.night_overlays contains an overlay whose preferred_day belongs to this unit, materialize that preferred overlay as REAL chronological itinerary row(s) inside the supplied NIGHT_OVERLAY planning window. Include realistic movement when needed, the actual named night experience, duration and return/safety logic. Weather-dependent natural phenomena are opportunities, never guarantees; state verification requirements in Notes. Do not reduce a preferred TIE overlay to preparation/checking text only. Eligible non-preferred days remain alternatives, not duplicate mandatory rows.
 - AURORA EXECUTION: if the preferred overlay is an aurora/northern-lights opportunity, preserve the TIE strategy. A guided mobile aurora hunt is a genuine TOUR_EXPERIENCE: explain that the route/location may change to seek better sky conditions, recommend the guided hunt when TIE marks guided_hunt, and mention self-drive/local dark-sky observation as an alternative when supplied. Use the full extended NIGHT_OVERLAY window rather than collapsing it to a short fixed viewpoint visit. Set commerce_context.guided_tour_value=high and commercial_eligible=true for the hunt so Context Intelligence can surface distinct guided-tour options without inventing an operator. If conditions are poor, state that the opportunity may be moved to another eligible night subject to fatigue and itinerary constraints; never promise a sighting.
 - For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler. Build chronology sequentially: each next row starts only after the previous row ends plus any required movement; never independently assign overlapping clocks. If the corridor cannot fit, drop OPTIONAL then DROP_FIRST stops before compressing CORE/HIGH anchors or overlapping rows.
+- PREMIUM PACING CONTRACT: empty clock time is not automatically a defect. Meals, rest, access, buffers and hotel returns are logistics, not tourism richness. Use at most one lunch and one dinner unless the traveler explicitly requests otherwise; never add a second meal/rest/buffer merely to fill a gap or satisfy row count. A destination-defining long anchor plus necessary logistics can be a complete premium day with few rows. End naturally when the day is experientially sufficient; preserve recovery after high-fatigue or late-night experiences.
 - First identify and protect the physical destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
 - When a planning window has no explicit start, choose a traveler-friendly start time appropriate to the destination (normally around 08:00–09:00). Do not invent extreme starts such as 05:30 unless a supplied fixed boundary, reservation, special condition or genuinely time-critical experience requires it.
 - Do not assume that Day 1 of the parent destination is Day 1 here. Preserve the supplied global day numbers exactly.
@@ -8493,9 +8558,9 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     _v3LogAuditDetails_(`LOCAL REPAIR ${attempt}/${repairBudget}`,unitCity,unit.id,material);
     const stayContract=_v3StayContract_(contract,unit);
     const naturalScope=_v3RepairScope_(material);
-    // Escalation guardrail: use the smallest safe scope first. If the same Stay
-    // still needs its final local attempt, allow a full-Stay repair before failing.
-    const repairScope=(attempt>=repairBudget && naturalScope.type!=='stay')?{type:'stay',days:[]}:naturalScope;
+    // V110 escalation guardrail: always use the smallest factual scope. Retry count
+    // is never permission to expose healthy days to a whole-Stay rewrite.
+    const repairScope=naturalScope; // V110: never broaden a local defect into a whole-Stay rewrite just because the retry budget is ending.
     const scopeDays=repairScope.type==='stay'?unitDays:repairScope.days;
     const scopeDaySet=new Set(scopeDays.map(Number));
     const repairRows=repairScope.type==='stay'?rows:rows.filter(r=>scopeDaySet.has(Number(r.day)));
