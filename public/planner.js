@@ -23,7 +23,7 @@
 
 
 const ITBMO_RUNTIME_BUILD='V110';
-const ITBMO_RUNTIME_ASSET='planner.js?v=227';
+const ITBMO_RUNTIME_ASSET='planner.js?v=228';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -450,6 +450,11 @@ function syncPlannerLanguageShell(){
     const label=homeLink.querySelector('.planner-home-link__label');
     if(label) label.textContent=lang==='es'?'Inicio':'Home';
   }
+  // V110 language-shell fix: the premium Planner shell was introduced after the
+  // legacy I18N mapper and therefore several static hero/builder strings were
+  // never part of the language pass. Keep one authoritative language source
+  // (plannerState.lang) and localize the complete visible shell from it.
+  applyPlannerExperienceShellCopy();
 }
 function t(key, ...args){
   const lang = getLang();
@@ -14038,6 +14043,44 @@ function initAstraCoach(){
   closeAstraCoach({remember:false});
 }
 
+
+function applyPlannerExperienceShellCopy(){
+  const es=getLang()==='es';
+  const setText=(selector,value)=>{const el=qs(selector);if(el)el.textContent=value;};
+  const setHTML=(selector,value)=>{const el=qs(selector);if(el)el.innerHTML=value;};
+
+  setText('#planner-canvas-eyebrow',es?'TU VIAJE EMPIEZA AQUÍ':'YOUR JOURNEY STARTS HERE');
+  setHTML('#planner-canvas-title',es?'Menos formularios.<br><span>Más ganas de viajar.</span>':'Less form-filling.<br><span>More desire to travel.</span>');
+  setText('#planner-canvas-copy',es
+    ?'Organiza tus estancias y excursiones en un recorrido de hasta 30 días efectivos; ITBMO conectará las piezas.'
+    :'Organize your stays and day trips into a journey of up to 30 effective travel days; ITBMO will connect the pieces.');
+
+  setText('#planner-builder-eyebrow',es?'DISEÑA TU VIAJE':'DESIGN YOUR TRIP');
+  setText('#planner-builder-title',es?'Construye la ruta a tu manera.':'Build the route your way.');
+  setText('#planner-builder-copy',es
+    ?'Avanza paso a paso. Nada técnico: solo lo que realmente necesitamos para organizar bien tu viaje.'
+    :'Move forward step by step. Nothing technical: only what we really need to organize your trip well.');
+
+  const stageNav=qs('.planner-stage-nav');
+  if(stageNav) stageNav.setAttribute('aria-label',es?'Flujo de planificación':'Planning flow');
+
+  const guided=qs('#guided-journey-entry');
+  if(guided){
+    const heading=qs('.guided-journey-entry__copy h3',guided);
+    const copy=qs('.guided-journey-entry__copy p',guided);
+    const kicker=qs('.guided-journey-entry__button small',guided);
+    const action=qs('.guided-journey-entry__button b',guided);
+    if(heading) heading.textContent=es?'Tu viaje empieza aquí':'Your journey starts here';
+    if(copy) copy.textContent=es
+      ?'Una decisión sencilla cada vez. Verás cómo tu recorrido toma forma mientras lo construyes.'
+      :'One simple decision at a time. Watch your journey take shape as you build it.';
+    if(kicker) kicker.textContent=es?'CREA TU VIAJE':'BUILD YOUR TRIP';
+    if(action) action.textContent=es?'Comenzar':'Start';
+  }
+
+  // The workspace copy owns the stage labels and the remaining premium cards.
+  applyTravelBuilderWorkspaceCopy();
+}
 
 function applyTravelBuilderWorkspaceCopy(){
   const es=getLang()==='es';
