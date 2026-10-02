@@ -1297,6 +1297,7 @@ function clearPlannerUIForLogout(){
   // the same device cannot see the previous user's itinerary while signed out.
   clearInfoChatStateForTrip(tripIdToClear);
   _clearPostPaymentProgressLocal_(tripIdToClear);
+  try{ _tripStoryClearDraft_(); }catch(_){ }
   closeAstraCoach({remember:false});
 
   savedDestinations=[];
@@ -9390,9 +9391,18 @@ function _showCleanPlannerLanding_({clearRouteDraft=false,enableReset=false}={})
   // Compatibility route controls remain technical only; the visible entry point
   // is the large "Comenzar" CTA. Do not restore an old route into the Planner.
   if(clearRouteDraft){
-    try{ _tripStoryClearDraft_(); }catch(_){ }
-    try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
-    if(plannerState){ plannerState.travelModelV2=null; plannerState.preferencesV2=null; }
+    // V98 · Workspace-return contract. A minimized Route Builder deliberately
+    // survives navigation to Itinerary / Para tu viaje. The asynchronous paid-trip
+    // recovery below may finish after the Planner has already restored its FAB;
+    // it must never erase that in-progress builder session. This same-tab marker
+    // exists only for an intentional minimized navigation and is cleared by close,
+    // reset, completion and logout, so normal login still starts clean.
+    const preserveRouteBuilder=_tripStoryWorkspaceResumeActive_() && _tripStoryRecoveryIsUsable_(_tripStoryLoadBuilderSession_());
+    if(!preserveRouteBuilder){
+      try{ _tripStoryClearDraft_(); }catch(_){ }
+      try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
+      if(plannerState){ plannerState.travelModelV2=null; plannerState.preferencesV2=null; }
+    }
   }
 
   if($resetBtn){
@@ -13831,6 +13841,7 @@ function _tripStoryLoadDraft_(){return _tripStoryLoadDraftByKey_(_tripStoryDraft
 function _tripStorySaveDraft_(story){try{localStorage.setItem(_tripStoryDraftKey_(),JSON.stringify(story));}catch(_){}}
 function _tripStoryClearDraft_(){try{localStorage.removeItem(_tripStoryDraftKey_());sessionStorage.removeItem(_tripStoryDraftKey_());}catch(_){}
   _tripStorySetMinimizedState_(false);
+  _tripStorySetWorkspaceResume_(false);
   _tripStoryClearBuilderSession_();
 }
 // V95 · cross-workspace persistence. The route draft is stored in localStorage so
@@ -13846,6 +13857,9 @@ const ITBMO_TRIP_STORY_MINIMIZED_UI_KEY='itbmo_trip_story_minimized_ui_v1';
 // data + exact UI screen/field values while the user visits other workspaces.
 const ITBMO_TRIP_STORY_SESSION_KEY='itbmo_trip_story_builder_session_v97';
 const ITBMO_TRIP_STORY_SESSION_KEY_V96='itbmo_trip_story_builder_session_v96';
+const ITBMO_TRIP_STORY_WORKSPACE_RESUME_KEY='itbmo_trip_story_workspace_resume_v1';
+function _tripStoryWorkspaceResumeActive_(){try{return sessionStorage.getItem(ITBMO_TRIP_STORY_WORKSPACE_RESUME_KEY)==='1';}catch(_){return false;}}
+function _tripStorySetWorkspaceResume_(value){try{if(value)sessionStorage.setItem(ITBMO_TRIP_STORY_WORKSPACE_RESUME_KEY,'1');else sessionStorage.removeItem(ITBMO_TRIP_STORY_WORKSPACE_RESUME_KEY);}catch(_){}}
 function _tripStorySaveBuilderSession_(payload){try{if(payload&&typeof payload==='object')localStorage.setItem(ITBMO_TRIP_STORY_SESSION_KEY,JSON.stringify(payload));}catch(_){} }
 function _tripStoryLoadBuilderSession_(){try{
   const raw=localStorage.getItem(ITBMO_TRIP_STORY_SESSION_KEY)||localStorage.getItem(ITBMO_TRIP_STORY_SESSION_KEY_V96)||'';
@@ -14114,6 +14128,7 @@ function openTripStoryBuilder(){
   const minimize=()=>{
     if(minimized||!overlay.isConnected)return;
     minimized=true;
+    _tripStorySetWorkspaceResume_(true);
     saveBuilderSession();
     overlay.hidden=true;
     overlay.classList.add('is-minimized');
@@ -14126,7 +14141,7 @@ function openTripStoryBuilder(){
     _tripStorySetMinimizedState_(true,captureUIState());
     minimizedFab=_tripStoryCreateResumeFab_(restore);
   };
-  const close=()=>{minimized=false;saveBuilderSession();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;};
+  const close=()=>{minimized=false;saveBuilderSession();_tripStorySetMinimizedState_(false);_tripStorySetWorkspaceResume_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;};
   _tripStoryBuilderSession_={overlay,restore,minimize,close,get minimized(){return minimized;}};
   // V97: last-chance checkpoint before any full-page workspace navigation.
   const checkpointBeforeNavigation=()=>{try{if(overlay.isConnected)saveBuilderSession();}catch(_){}};
@@ -14225,10 +14240,10 @@ function openTripStoryBuilder(){
     if(phase==='review'){
       const effectiveDates=new Set();story.stays.filter(st=>!st.transitOnly).forEach(st=>{for(let d=0;d<Number(st.days||1);d++){const date=_tripStoryAddDays_(st.startDate,d);if(date)effectiveDates.add(date);}});const tooLong=effectiveDates.size>MAX_TRIP_STORY_DAYS;
       active.innerHTML=shell(es?'REVISA TU RECORRIDO':'REVIEW YOUR JOURNEY',es?'Tu viaje está tomando forma':'Your trip is taking shape',es?'Revisa la historia completa. Puedes volver a editar cualquier estancia antes de continuar al pago.':'Review the complete story. You can edit any stay before continuing to payment.',`<div class="gj-review-stats"><div><b>${story.stays.length}</b><span>${es?'destinos':'destinations'}</span></div><div><b>${effectiveDates.size}</b><span>${es?'días efectivos':'effective days'}</span></div><div><b>${story.stays.reduce((n,s)=>n+(s.dayTrips||[]).length,0)}</b><span>${es?'excursiones':'day trips'}</span></div></div>${tooLong?`<div class="gj-warning">${es?`El recorrido supera el máximo de ${MAX_TRIP_STORY_DAYS} días efectivos.`:`The route exceeds the ${MAX_TRIP_STORY_DAYS}-effective-day maximum.`}</div>`:''}<div class="gj-review-list">${story.stays.map((st,i)=>`<div class="gj-review-row"><div><b>${i+1}. ${_tripStoryEsc_(st.place||'—')}</b><small>${_tripStoryDMY_(st.startDate)} · ${st.transitOnly?(es?'Sólo tránsito':'Transit only'):`${st.days} ${st.days===1?(es?'día':'day'):(es?'días':'days')}`}</small></div><div>${i?`<button type="button" data-review-move="${i}:-1">↑</button>`:''}${i<story.stays.length-1?`<button type="button" data-review-move="${i}:1">↓</button>`:''}<button type="button" data-review-edit="${i}">${es?'Editar':'Edit'}</button><button type="button" class="gj-review-delete" data-review-delete="${i}">${es?'Eliminar':'Delete'}</button></div></div>`).join('')}</div><div class="gj-review-actions"><button type="button" data-edit-route>${es?'Volver a la última parada':'Back to last stop'}</button></div>`,tooLong?'':nextButton(es?'Guardar recorrido y continuar':'Save journey and continue','data-gj-save'));
-      active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true){_tripStoryClearDraft_();_tripStoryClearBuilderSession_();}});return;
+      active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();_tripStorySetMinimizedState_(false);_tripStorySetWorkspaceResume_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true){_tripStoryClearDraft_();_tripStoryClearBuilderSession_();}});return;
     }
   };
-  overlay.querySelector('[data-gj-reset]').onclick=()=>{_tripStorySetMinimizedState_(false);if(!confirm(es?'¿Quieres reiniciar el recorrido? Se eliminarán los destinos, excursiones y traslados que has configurado. Los viajeros se conservarán.':'Reset the route? Destinations, day trips and transfers will be deleted. Travelers will be kept.'))return;_tripStoryResetRoute_(story);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;dayTripDraft=null;dayTripEditIndex=null;activeStay=0;phase='start';persist();try{engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));}catch(_){};render();};
+  overlay.querySelector('[data-gj-reset]').onclick=()=>{_tripStorySetMinimizedState_(false);if(!confirm(es?'¿Quieres reiniciar el recorrido? Se eliminarán los destinos, excursiones y traslados que has configurado. Los viajeros se conservarán.':'Reset the route? Destinations, day trips and transfers will be deleted. Travelers will be kept.'))return;_tripStorySetWorkspaceResume_(false);_tripStoryResetRoute_(story);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;dayTripDraft=null;dayTripEditIndex=null;activeStay=0;phase='start';persist();try{engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));}catch(_){};render();};
   overlay.querySelector('[data-gj-copy]').onclick=async()=>{syncTravelers();const txt=_tripStoryCopyText_(story);try{await navigator.clipboard.writeText(txt);const b=overlay.querySelector('[data-gj-copy]'),old=b.textContent;b.textContent=es?'✓ Copiado':'✓ Copied';setTimeout(()=>b.textContent=old,1400);}catch(_){prompt(es?'Copia tu recorrido:':'Copy your journey:',txt);}};
   overlay.querySelector('[data-gj-mobile-story]').onclick=()=>overlay.querySelector('.guided-journey__story').classList.toggle('is-mobile-open');
   overlay.querySelector('[data-stage="travelers"]').onclick=()=>{travelerDraft=travelerSnapshot();phase='travelers';render();};
