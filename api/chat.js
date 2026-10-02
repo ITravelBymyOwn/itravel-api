@@ -8,6 +8,7 @@
 
 import OpenAI from "openai";
 import crypto from "crypto";
+import { buildTieSystemPrompt, validateTiePlan, TIE_SCHEMA_VERSION } from "./tie-engine.js";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -804,8 +805,7 @@ Apply these rules only when producing actual itinerary rows.
 3. REALISTIC EXPERIENCE DWELL — CATEGORY-BASED
 Before assigning a row duration, classify the experience:
 - destination thermal lagoon / major hot-spring or spa complex: normally 2h30–4h;
-- an iconic thermal lagoon comparable to Blue Lagoon: minimum 3h of actual experience time, plus
-  realistic arrival, parking, check-in, changing, shower and exit logistics when material;
+- a destination-defining thermal lagoon / major spa complex: protect substantial actual experience time plus realistic arrival, parking, check-in, changing, shower and exit logistics when material;
 - whale watching / wildlife cruise / marine safari: normally 2h30–4h of activity time, plus
   check-in, boarding and disembarkation logistics;
 - substantial guided walking or food tour: normally 2h30–4h;
@@ -1378,10 +1378,6 @@ function _v64ExperienceProfile_(row = {}) {
     `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`
   );
 
-  if (/\bblue lagoon\b|\bbl[aá]a l[oó]ni[dð]\b/.test(text)) {
-    return { type: "iconic_thermal_lagoon", minimumActivityMinutes: 180 };
-  }
-
   if (
     /\bthermal lagoon\b|\bhot springs?\b|\bthermal baths?\b|\bgeothermal spa\b|\bonsen\b|\bhammam\b|\bspa complex\b|\bbalneario\b|\btermas\b|\bbanos termales\b|\bbaños termales\b|\baguas termales\b|\blaguna termal\b/.test(text)
   ) {
@@ -1761,7 +1757,7 @@ FINAL SURGICAL REPAIR:
 - NEVER create an umbrella row whose interval covers later rows. Each row is either one pure movement or one leg plus one activity.
 - Recalculate every affected row so pure movements contain only transport time, while visit rows contain transport + activity inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
-- Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
+- A destination-defining thermal lagoon/spa complex requires substantial realistic activity time plus arrival/check-in/changing/exit logistics; never compress a major anchor to preserve weaker stops.
 - Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
 - Long regional returns must be conservative; remove optional stops rather than shortening the return.
 - Aurora, when plausible, must be an ADDITIONAL opportunity note in the NOTES of the FINAL row of EVERY day in that city, not a standalone row. This applies even when auroras or an aurora tour were explicitly requested in Preferences. Each day should preserve a weather-dependent opportunity; only a genuinely confirmed fixed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may remain as a dedicated row.
@@ -1988,11 +1984,8 @@ GENERAL RULES:
   • This applies EVEN IF the names are translated, abbreviated, paraphrased, misspelled, or written differently.
   • Treat equivalent routes/areas across languages and naming variants as the SAME underlying itinerary.
   • Examples of equivalent duplicates:
-    - "Golden Circle" = "Golden Cycle" = "Círculo Dorado" = "Cercle d'Or" = "Circolo d'Oro"
-    - "South Coast" = "Costa Sur" = "Côte Sud" = "Costa Sul"
-    - "Snæfellsnes" = "Snaefellsnes Peninsula" = "Península de Snæfellsnes"
-    - "Reykjanes Peninsula" = "Península de Reykjanes"
-    - "Old Town" = "Centro histórico" = "Historic Center" = "Vieille Ville"
+    - translated or misspelled names of the same regional circuit count as one circuit
+    - "Old Town" = "Centro histórico" = "Historic Center" = "Vieille Ville" when they refer to the same district
     - "Waterfront" = "Riverside" = "Harbor area" = "Promenade" when they refer to the same local corridor
   • The planner MUST reason semantically/geographically, not only textually.
   • If a macro-region, flagship route, neighborhood corridor, or major circuit has already been used, do NOT reuse it unless:
@@ -2115,15 +2108,15 @@ MANDATORY ROW CONTRACT:
 - activity: ALWAYS "DESTINATION – SUB-STOP" (– or - with spaces). Generic like "museum", "park", "local restaurant" is forbidden.
   IMPORTANT (GLOBAL):
   - "DESTINATION" is NOT always the base city:
-    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza").
+    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the real macro-tour / regional-corridor NAME.
     • If it's NOT a day trip, "DESTINATION" can be the base city.
   - This also applies to transfers/returns:
-    • Day trip example: "South Coast – Return to Reykjavik"
-    • City example: "Budapest – Return to hotel"
+    • Day trip pattern: "<Regional circuit> – Return to <Base city>"
+    • City pattern: "<Base city> – Return to hotel"
   - CRITICAL GEOGRAPHIC SEMANTICS:
     • If the stop is clearly outside the base city, do NOT label it as "<Base city> – <Outside stop>" unless it is explicitly a departure or return row.
     • For out-of-city attractions, prefer the real area / corridor / macro-tour name as DESTINATION.
-    • Example: avoid "Reykjavik – Blue Lagoon" as the main visit row; prefer a real external area/macro-tour label.
+    • Do not label an out-of-city anchor as if it were inside the base city; prefer its real external area/corridor/macro-tour label.
 - duration and kind:
   • A real visit/experience uses kind "activity". Put genuine mobility + its estimate in transport and only the real dwell in duration: "Activity: <realistic estimate or ~range>". If no movement is meaningful, transport may be empty.
   • A row that only moves the traveler uses kind "transport". Put mode + approximate time together in transport; duration may be empty.
@@ -2212,49 +2205,6 @@ DAY TRIPS / MACRO-TOURS:
     - or any equivalent repeated structure.
   • Each day must have a clearly distinct identity.
   • Do NOT use translated naming to disguise repetition.
-
-ICELAND CURATION (when relevant):
-  • From Reykjavik, prioritize high-value realistic day trips such as Golden Circle, South Coast, Reykjanes / Blue Lagoon area, Snæfellsnes, Silver Circle / Borgarfjörður, lava tunnel / geothermal route, whale watching / marine experience, and realistic Southwest / West Iceland options.
-  • For a 7-day Reykjavik itinerary in winter, avoid using 4+ days as pure urban museum/harbor/café filler.
-  • Keep pure Reykjavik city content limited unless the user specifically requested a city-only trip.
-  • For South Coast:
-    - If the route reaches the Reynisfjara / Vík area, Vík should normally be included unless there is a strong reason not to.
-    - Prefer a coherent progression such as Seljalandsfoss → Skógafoss → Vík and/or Reynisfjara → return.
-    - Reynisfjara must appear as a real row if that South Coast stretch is being used; do NOT leave it only in notes.
-  • For Snæfellsnes:
-    - Prefer specific iconic stops such as Kirkjufell, Arnarstapi/Hellnar, Djúpalónssandur, Lóndrangar, Búðir/Búðakirkja when appropriate.
-    - Avoid vague placeholders like only "National Park" if specific named stops are available.
-  • For Reykjanes / Blue Lagoon:
-    - Reserve Blue Lagoon and the Reykjanes corridor to ONE day only.
-    - Allocate at least 3h of actual lagoon activity plus realistic arrival/check-in/changing/exit
-      logistics.
-    - Only after protecting that time, select the best feasible subset from the full corridor
-      inventory, which may include Bridge Between Continents, Sandvík, Gunnuhver, Reykjanesviti,
-      Valahnúkur, Brimketill, Kleifarvatn and Seltún/Krýsuvík.
-    - Do not include all stops blindly: useful daylight, safety, access, route continuity and the
-      user's pace decide.
-    - Never create a second Reykjanes or second Blue Lagoon day elsewhere in the same trip.
-  • For Silver Circle / Borgarfjörður:
-    - Prefer real stops such as Borgarnes, Deildartunguhver, Hraunfossar, Barnafoss, Reykholt, and Krauma when they fit naturally.
-  • For lava tunnel / geothermal route:
-    - Prefer real stops such as Raufarhólshellir, Hveragerði, Hellisheiði, geothermal exhibition area, or nearby coherent geothermal/scenic stops.
-  • For whale watching / marine experience:
-    - Use it only if plausible for season, operating location and traveler profile.
-    - Normally protect at least 2h30 of actual marine-tour time plus check-in, boarding and return.
-    - Reserve the wildlife/marine anchor to one day only and do not repeat the same harbor filler
-      pattern on other days.
-  • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights when they would be exhausting and low quality.
-  • Do NOT repeat the same Iceland macro-route across different days.
-  • If Golden Circle was already used, do NOT create another Golden Circle variant later in the itinerary.
-  • If South Coast was already used, avoid rebuilding another equivalent South Coast corridor day.
-  • If Snæfellsnes was already used, do not recycle the same peninsula structure.
-  • If Reykjanes / Blue Lagoon area was already used, do not create a second equivalent Reykjanes day unless the route is truly different and there are no better alternatives.
-  • Prefer new geographic corridors before repeating known ones.
-  • Iceland itineraries must maximize geographic diversity across days.
-  • Regional Iceland days should feel dense, continuous, and exploratory:
-    - avoid giant dead gaps
-    - enrich routes with real scenic/geothermal/coastal micro-stops
-    - ensure the day feels like a full coherent expedition.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
@@ -2408,7 +2358,34 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
-    const plannerUsage = (mode === "planner" || mode === "planner_v3") ? _newUsageCollector_() : null;
+    const plannerUsage = (mode === "planner" || mode === "planner_v3" || mode === "tie_structure") ? _newUsageCollector_() : null;
+
+    if (mode === "tie_structure") {
+      const request = body.tie_request && typeof body.tie_request === "object" ? body.tie_request : null;
+      if (!request || !Array.isArray(request.open_days) || !request.open_days.length) {
+        return res.status(400).json({error:"TIE_INVALID_REQUEST"});
+      }
+      const tiePrompt = `${buildTieSystemPrompt()}\n\nAUTHORITATIVE TIE REQUEST:\n${JSON.stringify(request)}`;
+      const raw = await callStructured(
+        [{role:"system",content:tiePrompt},{role:"user",content:"Return the validated strategic structure JSON only."}],
+        0.12, 5200, 90000, plannerUsage, PLANNER_MODEL, "medium"
+      );
+      let parsed = cleanToJSON(raw);
+      let validation = validateTiePlan(parsed, request);
+      // Exactly one semantic repair is allowed. Never create an unbounded TIE loop.
+      if (!validation.ok) {
+        const repair = await callStructured(
+          [{role:"system",content:`${tiePrompt}\n\nSTRUCTURAL VALIDATION ERRORS:\n${JSON.stringify(validation.errors)}\nRepair only these structural defects. Preserve strong experience choices. JSON only.`}],
+          0.08, 5200, 90000, plannerUsage, REPAIR_MODEL, "low"
+        );
+        parsed = cleanToJSON(repair);
+        validation = validateTiePlan(parsed, request);
+      }
+      if (!validation.ok) {
+        return res.status(200).json({ok:false,schema:TIE_SCHEMA_VERSION,error:{code:"TIE_STRUCTURE_INVALID",details:validation.errors},usage:_usagePayload_(plannerUsage)});
+      }
+      return res.status(200).json({ok:true,schema:TIE_SCHEMA_VERSION,plan:parsed,usage:_usagePayload_(plannerUsage)});
+    }
 
     /* ROUTE RESOLVER · planning-grade multimodal logistics.
        It estimates a physically plausible chain when the traveler has not
