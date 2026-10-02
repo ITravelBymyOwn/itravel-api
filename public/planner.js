@@ -12900,10 +12900,21 @@ async function hasValidPaymentForCurrentTrip(){
   }
 }
 
+function _removePaymentPreparingOverlaysNow_(){
+  // V103: payment-preparing is a transient blocking layer (z-index 61000).
+  // Remove it synchronously before mounting the next modal so a valid
+  // post-payment step can never exist underneath a fading preparing layer.
+  qsa('.itbmo-payment-preparing-overlay').forEach(el=>el.remove());
+}
+
 function showPostPaymentWelcome(){
+  _removePaymentPreparingOverlaysNow_();
   document.querySelector('.itbmo-postpay-overlay')?.remove();
   const es=getLang()==='es';
   const overlay=document.createElement('div');overlay.className='itbmo-postpay-overlay';
+  // V103: this is an actual modal handoff, not planner content. Keep it above
+  // route/personalization/checkout layers. The preparing layer is removed above.
+  overlay.style.zIndex='62000';
   overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true">
     <div class="itbmo-postpay-icon">✓</div>
     <h3>${es?'¡Gracias por tu pago!':'Thank you for your payment!'}</h3>
@@ -12972,6 +12983,9 @@ async function requestPlanningStart(){
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
     if(alreadyPaid){
       await _persistPostPaymentProgress_('preferences');
+      // V103: end the blocking payment-status layer before the next modal is
+      // mounted. Do not rely on the 220 ms exit animation for modal handoff.
+      _removePaymentPreparingOverlaysNow_();
       showPostPaymentWelcome();
       return;
     }
