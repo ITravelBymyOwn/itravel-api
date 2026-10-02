@@ -27,11 +27,19 @@ AUTHORITIES
 - EXECUTION: do NOT create detailed row-by-row schedules, restaurants, affiliate links, operators or booking claims. The downstream V3 engine owns execution.
 
 EXPERIENCE INTELLIGENCE
+- Before allocating days, build a compact destination experience inventory. Think in experience families, not only POI names: defining anchors, major experiences, regional opportunities, characteristic bookable/guided experiences, cultural/food/night/nature experiences and supporting connective content.
+- Classify candidates by significance (defining|major|complementary|supporting), uniqueness, best mode (independent|guided|either), season/calendar sensitivity, reservation sensitivity, weather sensitivity, mobility/logistics burden and fatigue cost. This is strategic discovery, not an operator search.
+- Coverage rule: protect the strongest feasible defining/major experiences before spending large blocks on supporting neighborhoods, generic walks, cafés, filler or repeated experience families. Never force every famous attraction; omissions are allowed when traveler fit, calendar, geography, pace or a stronger alternative justifies them.
+- Richness rule: ask whether the proposed structure uses the stay well or merely stretches fewer days of content. For longer stays, increase meaningful diversity/depth when the destination opportunity set supports it; preserve deliberate recovery and slack when it does not.
+- Characteristic bookable experiences matter even when they are not classic POIs. When guided_tour_value is high, schedule the experience when it earns itinerary time or preserve it as a recommended alternative; never invent an operator.
+- Calendar feasibility precedes commitment: use supplied dates/day-of-week and robust planning knowledge to avoid knowingly assigning an anchor to a structurally unsuitable day. If current opening/availability data is required, mark verification_required and keep a comparable fallback_role instead of pretending confirmation.
 - Profile the destination continuously, not by city type: urban_depth, regional_gravity, geographic_dispersion, mobility_leverage, season_sensitivity, night_value, weather_sensitivity, reservation_rigidity.
 - Identify destination-defining and iconic experiences, but distinguish famous from genuinely trip-defining.
 - Apply opportunity cost: regional days compete with the strongest remaining base-day use.
 - Apply saturation: marginal value falls when the trip repeats the same experience family.
 - Apply regret minimization: protect omissions a traveler would reasonably consider a major missed opportunity.
+- Apply opportunity-cost review to every long supporting block: if a feasible defining/major experience remains uncovered, supporting content must not displace it without a clear traveler/calendar/logistics reason.
+- The inventory is advisory to downstream execution but the selected anchors are structural commitments: every selected defining/major experience must have an owner day/unit or an explicit omission_reason.
 - Respect the whole journey: do not assign an experience to this base when a neighboring stay is clearly the superior owner.
 
 REGIONAL CLUSTERS AND MICRO-STOPS
@@ -66,6 +74,8 @@ OUTPUT EXACTLY
   "schema":"ITBMO_TIE_STRUCTURE_V1",
   "confidence":"high|medium|low",
   "destination_profile":{"urban_depth":"low|medium|high|very_high","regional_gravity":"low|medium|high|very_high","geographic_dispersion":"low|medium|high","mobility_leverage":"low|medium|high","season_sensitivity":"low|medium|high","night_value":"low|medium|high","weather_sensitivity":"low|medium|high","reservation_rigidity":"low|medium|high"},
+  "experience_inventory":[{"experience":"canonical experience or experience family","significance":"defining|major|complementary|supporting","experience_family":"short family","guided_tour_value":"low|medium|high","best_mode":"independent|guided|either","calendar_sensitivity":"low|medium|high","reservation_rigidity":"low|medium|high","weather_dependency":"low|medium|high","mobility_burden":"low|medium|high","fatigue_cost":"low|medium|high","selected":true,"owner_day":1,"fallback_role":"short comparable fallback role or none","omission_reason":"empty when selected; compact reason when omitted","verification_required":false}],
+  "coverage_summary":{"defining_selected":0,"major_selected":0,"uncovered_high_value":[],"richness":"strong|balanced|deliberately_light","opportunity_cost_check":"pass|review"},
   "units":[{"day":1,"type":"BASE_FULL|BASE_LIGHT|REGIONAL_FULL|REGIONAL_HALF","identity":"short unique unit identity","cluster":"base or regional cluster name","intensity":"low|medium|high","flexibility":"low|medium|high","weather_dependency":"low|medium|high","reservation_rigidity":"low|medium|high","structural_slack_minutes":60,"route_manifest":[{"name":"physical experience/stop","priority":"CORE|HIGH|OPTIONAL|DROP_FIRST","minimum_dwell_minutes":30,"reason":"short reason","verification_required":false,"evidence_refs":[]}]}],
   "night_overlays":[{"type":"short semantic type","identity":"experience","eligible_days":[1],"preferred_day":1,"start_window":"HH:MM-HH:MM or flexible","duration_minutes":300,"mobility":"fixed|mobile|either","recommended_mode":"guided_hunt|self_drive|local_observation|independent","alternative_mode":"self_drive|local_observation|guided_hunt|none","reschedulable":true,"weather_dependency":"low|medium|high","reservation_rigidity":"low|medium|high","recovery_cost":"none|low|medium|high","verification_required":true,"evidence_refs":[]}],
   "ownership":[{"experience":"canonical experience","owner_day":1,"owner_unit_identity":"identity"}],
@@ -78,6 +88,10 @@ RULES
 - Do not return units for blocked/user-fixed days.
 - Every REGIONAL unit needs a non-empty route_manifest.
 - Avoid duplicate experiences across units and overlays.
+- experience_inventory must be compact and decision-useful, not an exhaustive attraction catalog.
+- Every selected defining/major inventory item needs owner_day matching an open day, a fixed user unit, or a night overlay; otherwise list it in uncovered_high_value with the reason.
+- opportunity_cost_check may be pass only when no feasible defining/major omission is being displaced by lower-value filler.
+- Do not invent exact opening hours. Calendar reasoning may use stable weekday/season patterns only when robust; otherwise verification_required=true.
 - Do not create a regional unit merely because it is theoretically possible.
 - Arrival/departure constraints and traveler pace beat density.
 - If evidence/knowledge is insufficient, prefer a conservative BASE unit and lower confidence rather than hallucinating.
@@ -99,6 +113,10 @@ export function validateTiePlan(plan, request){
     if(String(unit?.type||'').startsWith('REGIONAL') && !(Array.isArray(unit?.route_manifest)&&unit.route_manifest.length)) errors.push({code:'REGIONAL_WITHOUT_MANIFEST',day});
   }
   for(const day of openDays) if(!seen.has(day)) errors.push({code:'MISSING_OPEN_DAY',day});
+  const inventory=Array.isArray(plan?.experience_inventory)?plan.experience_inventory:[];
+  for(const item of inventory){
+    if(!['defining','major','complementary','supporting'].includes(String(item?.significance||''))) errors.push({code:'BAD_EXPERIENCE_SIGNIFICANCE',experience:item?.experience});
+  }
   const ownership=new Map();
   for(const item of Array.isArray(plan?.ownership)?plan.ownership:[]){
     const key=String(item?.experience||'').trim().toLowerCase();
