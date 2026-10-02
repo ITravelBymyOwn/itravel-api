@@ -22,9 +22,9 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V108';
-const ITBMO_RUNTIME_ASSET='planner.js?v=225';
-console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true});
+const ITBMO_RUNTIME_BUILD='V109';
+const ITBMO_RUNTIME_ASSET='planner.js?v=226';
+console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
@@ -5500,6 +5500,8 @@ const _astraGenerationMetrics_ = {
   outputTokens:0,
   totalTokens:0,
   tokenUsageSamples:0,
+  models:{},
+  configuredModels:{},
   cities:[]
 };
 
@@ -5520,6 +5522,8 @@ function _resetAstraGenerationMetrics_(){
   _astraGenerationMetrics_.outputTokens=0;
   _astraGenerationMetrics_.totalTokens=0;
   _astraGenerationMetrics_.tokenUsageSamples=0;
+  _astraGenerationMetrics_.models={};
+  _astraGenerationMetrics_.configuredModels={};
   _astraGenerationMetrics_.cities=[];
 }
 
@@ -5550,8 +5554,10 @@ function _extractExactUsage_(data){
   ) || (input+output);
 
   const modelCalls=Number(usage.model_calls ?? usage.modelCalls ?? 1) || 1;
-  if(input<=0 && output<=0 && total<=0) return null;
-  return {input,output,total,modelCalls};
+  const models=(usage.models&&typeof usage.models==='object')?usage.models:(usage.model?{[String(usage.model)]:modelCalls}:{});
+  const configuredModels=(usage.configured_models&&typeof usage.configured_models==='object')?usage.configured_models:{};
+  if(input<=0 && output<=0 && total<=0 && !Object.keys(models).length) return null;
+  return {input,output,total,modelCalls,models,configuredModels};
 }
 
 function _captureExactUsage_(data){
@@ -5566,6 +5572,8 @@ function _captureExactUsage_(data){
   _astraGenerationMetrics_.inputTokens+=usage.input;
   _astraGenerationMetrics_.outputTokens+=usage.output;
   _astraGenerationMetrics_.totalTokens+=usage.total;
+  Object.entries(usage.models||{}).forEach(([model,count])=>{_astraGenerationMetrics_.models[model]=Number(_astraGenerationMetrics_.models[model]||0)+Number(count||0);});
+  _astraGenerationMetrics_.configuredModels={..._astraGenerationMetrics_.configuredModels,...(usage.configuredModels||{})};
   _astraGenerationMetrics_.tokenUsageSamples++;
 }
 
@@ -5584,13 +5592,22 @@ function _finishAstraGenerationMetrics_(){
     tokenUsageAvailable,
     inputTokens:tokenUsageAvailable ? _astraGenerationMetrics_.inputTokens : null,
     outputTokens:tokenUsageAvailable ? _astraGenerationMetrics_.outputTokens : null,
-    totalTokens:tokenUsageAvailable ? _astraGenerationMetrics_.totalTokens : null
+    totalTokens:tokenUsageAvailable ? _astraGenerationMetrics_.totalTokens : null,
+    models:{..._astraGenerationMetrics_.models},
+    configuredModels:{..._astraGenerationMetrics_.configuredModels}
   };
 
   window.__ITBMO_LAST_GENERATION_METRICS__=snapshot;
 
   console.log(`%c[ITBMO TIMER] FULL TRIP TOTAL: ${snapshot.total}`, 'font-weight:900;color:#087f9f;');
   console.log(`[ITBMO TIMER] Model/API calls during generation: ${snapshot.modelCalls}`);
+  const actualModels=Object.keys(snapshot.models||{});
+  if(actualModels.length){
+    console.log(`[ITBMO MODEL] Actual OpenAI model(s): ${actualModels.map(m=>`${m} × ${snapshot.models[m]}`).join(' · ')}`);
+    const nonLuna=actualModels.filter(m=>!/^gpt-5\.6-luna(?:$|[-:])/i.test(m));
+    if(nonLuna.length) console.warn('[ITBMO MODEL] NON-LUNA MODEL DETECTED',nonLuna,{configured:snapshot.configuredModels});
+    else console.info('[ITBMO MODEL] Luna validation: PASS',{configured:snapshot.configuredModels});
+  }else console.warn('[ITBMO MODEL] Actual model metadata unavailable from /api/chat usage payload.');
   if(snapshot.cities.length) console.table(snapshot.cities);
 
   if(tokenUsageAvailable){
@@ -7684,6 +7701,26 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       }else kept.push(candidate);
     }
 
+    // V109: exact adjacent semantic duplicates are arithmetic/content noise, not
+    // a reason to regenerate a healthy day. Remove only a later immediately
+    // adjacent row when its normalized activity is identical and it is at the
+    // same physical place (or both are meal/rest utility rows). This deliberately
+    // narrow guard catches duplicate lunches/rest blocks without merging distinct visits.
+    const adjacent=[...out].sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    for(let i=1;i<adjacent.length;i++){
+      const prior=adjacent[i-1],current=adjacent[i];
+      if(Number(prior.day)!==Number(current.day)||_isPureTransportRow_(prior)||_isPureTransportRow_(current))continue;
+      const sameActivity=_canonicalText_(prior.activity||'')&&_canonicalText_(prior.activity||'')===_canonicalText_(current.activity||'');
+      const samePlace=_arePoiAliases_(prior.to||prior.from||'',current.to||current.from||'');
+      const utilityPair=_isUtilityRow_(prior)&&_isUtilityRow_(current);
+      const pe=_hhmmToMinutes_(prior.end),cs=_hhmmToMinutes_(current.start);
+      const adjacentClock=pe!=null&&cs!=null&&cs>=pe&&cs-pe<=15;
+      if(sameActivity&&adjacentClock&&(samePlace||utilityPair)){
+        const idx=out.indexOf(current);
+        if(idx>=0){out.splice(idx,1);removed.push({day:Number(current.day),poi:current.to||current.activity,reason:'adjacent_semantic_duplicate'});changed=true;}
+      }
+    }
+
     // Remove a second end-of-day lodging return only when the traveler is
     // already at that same lodging and no intervening activity took place.
     // This avoids paying for another model repair to erase a duplicate rest row.
@@ -7889,7 +7926,7 @@ async function _tieCallStructure_(request){
     if(!validation.ok)throw new Error(`TIE_BROWSER_VALIDATION:${validation.errors.join(',')}`);
     const value={plan:data.plan,fingerprint,duration_ms:Math.round(performance.now()-started)};
     _tieStructureCache_.set(fingerprint,value);
-    console.info('[ITBMO TIE] structure accepted',{base:request.stay?.base_destination,days:request.stay?.days,confidence:data.plan.confidence,duration_ms:value.duration_ms,units:data.plan.units.map(u=>({day:u.day,type:u.type,identity:u.identity,microstops:(u.route_manifest||[]).length})),overlays:(data.plan.night_overlays||[]).length});
+    console.info('[ITBMO TIE] structure accepted',{base:request.stay?.base_destination,days:request.stay?.days,confidence:data.plan.confidence,duration_ms:value.duration_ms,units:data.plan.units.map(u=>({day:u.day,type:u.type,identity:u.identity,microstops:(u.route_manifest||[]).length})),overlays:(data.plan.night_overlays||[]).length,inventory:(data.plan.experience_inventory||[]).map(x=>({experience:x.experience,significance:x.significance,selected:Boolean(x.selected),owner_day:x.owner_day||null,guided_tour_value:x.guided_tour_value||null})),coverage:data.plan.coverage_summary||null});
     return value;
   }catch(error){
     console.warn('[ITBMO TIE] safe fallback to V98 physical structure',error);
@@ -7934,7 +7971,7 @@ function _tieApplyPlanToBaseUnit_(baseUnit,plan){
   const out=[];
   if(baseWindows.length){
     const days=[...new Set(baseWindows.map(w=>Number(w.day)))].sort((a,b)=>a-b);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>(o.eligible_days||[]).some(d=>days.includes(Number(d)))),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>(o.eligible_days||[]).some(d=>days.includes(Number(d)))),verification_needs:plan.verification_needs||[]}});
   }
   (plan.units||[]).filter(u=>String(u.type||'').startsWith('REGIONAL')).forEach((directive,index)=>{
     let windows=(baseUnit.windows||[]).filter(w=>Number(w.day)===Number(directive.day));
@@ -7942,7 +7979,7 @@ function _tieApplyPlanToBaseUnit_(baseUnit,plan){
     if(night){windows=_tieReserveNightBoundary_(windows,[night]);windows=[...windows,night];}
     if(!windows.length)return;
     const manifest=(directive.route_manifest||[]).map(x=>x.name).filter(Boolean);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>(o.eligible_days||[]).includes(Number(directive.day))),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>(o.eligible_days||[]).includes(Number(directive.day))),verification_needs:plan.verification_needs||[]}});
   });
   return out.length?out:[baseUnit];
 }
@@ -8365,10 +8402,10 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - Every row must remain inside one supplied planning_window and use that window's original global day number. For ordinary BASE/DAY_TRIP units, respect the window physical location. For a TIE REGIONAL unit, the window is the authoritative clock boundary anchored to the base and the supplied route_manifest/allowed_physical_locations define the regional corridor inside it.
 - If unit_type is DAY_TRIP, maximize a coherent, traveler-friendly visit inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it.
 - If unit_type is BASE_STAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
-- If tie_structure is supplied, it is the authoritative strategic brief for this unit. Protect its day identity, experience cluster, CORE/HIGH route_manifest stops, structural slack, night overlays and verification needs. OPTIONAL/DROP_FIRST micro-stops may be omitted when physical feasibility, daylight, fatigue or a stronger anchor requires it. Do not invent live confirmation for verification_required items.
+- If tie_structure is supplied, it is the authoritative strategic brief for this unit. Protect its day identity, experience cluster, selected defining/major experience_inventory anchors owned by this day, CORE/HIGH route_manifest stops, structural slack, night overlays and verification needs. OPTIONAL/DROP_FIRST micro-stops may be omitted when physical feasibility, daylight, fatigue or a stronger anchor requires it. Do not invent live confirmation for verification_required items. Do not spend long blocks on supporting filler while an owned defining/major anchor remains unrealized.
 - TIE NIGHT OVERLAY EXECUTION: when tie_structure.night_overlays contains an overlay whose preferred_day belongs to this unit, materialize that preferred overlay as REAL chronological itinerary row(s) inside the supplied NIGHT_OVERLAY planning window. Include realistic movement when needed, the actual named night experience, duration and return/safety logic. Weather-dependent natural phenomena are opportunities, never guarantees; state verification requirements in Notes. Do not reduce a preferred TIE overlay to preparation/checking text only. Eligible non-preferred days remain alternatives, not duplicate mandatory rows.
 - AURORA EXECUTION: if the preferred overlay is an aurora/northern-lights opportunity, preserve the TIE strategy. A guided mobile aurora hunt is a genuine TOUR_EXPERIENCE: explain that the route/location may change to seek better sky conditions, recommend the guided hunt when TIE marks guided_hunt, and mention self-drive/local dark-sky observation as an alternative when supplied. Use the full extended NIGHT_OVERLAY window rather than collapsing it to a short fixed viewpoint visit. Set commerce_context.guided_tour_value=high and commercial_eligible=true for the hunt so Context Intelligence can surface distinct guided-tour options without inventing an operator. If conditions are poor, state that the opportunity may be moved to another eligible night subject to fatigue and itinerary constraints; never promise a sighting.
-- For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler.
+- For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler. Build chronology sequentially: each next row starts only after the previous row ends plus any required movement; never independently assign overlapping clocks. If the corridor cannot fit, drop OPTIONAL then DROP_FIRST stops before compressing CORE/HIGH anchors or overlapping rows.
 - First identify and protect the physical destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
 - When a planning window has no explicit start, choose a traveler-friendly start time appropriate to the destination (normally around 08:00–09:00). Do not invent extreme starts such as 05:30 unless a supplied fixed boundary, reservation, special condition or genuinely time-critical experience requires it.
 - Do not assume that Day 1 of the parent destination is Day 1 here. Preserve the supplied global day numbers exactly.
@@ -11315,6 +11352,26 @@ function _exportPhysicalDestinationBlocks_(){
   return blocks.map(b=>({...b,source_units:[...b.source_units]}));
 }
 
+function _itbmoSafeFilenameToken_(value=''){
+  return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[<>:"/\\|?*\x00-\x1F]/g,'-').replace(/\s+/g,'-').replace(/-+/g,'-').replace(/^[.-]+|[.-]+$/g,'').slice(0,42);
+}
+function _itbmoTripIdentityFilename_(kind='Itinerario',ext='pdf'){
+  const days=_chronologicalExportDays_();
+  const destinations=[];
+  const storyCandidates=(_travelV2()?.state?.tripStory?.stays||[]).filter(st=>st?.place&&!st?.transitOnly).map(st=>String(st.place).trim()).filter(Boolean);
+  const savedCandidates=(Array.isArray(savedDestinations)?savedDestinations:[]).map(d=>String(d?.city||d?.place||'').trim()).filter(Boolean);
+  const baseCandidates=storyCandidates.length?storyCandidates:savedCandidates;
+  const source=baseCandidates.length?baseCandidates:_exportPhysicalDestinationBlocks_().map(b=>String(b?.destination||'').trim()).filter(Boolean);
+  source.forEach(n=>{if(n&&!destinations.some(x=>_arePoiAliases_(x,n)))destinations.push(n);});
+  const shown=destinations.slice(0,3).map(_itbmoSafeFilenameToken_).filter(Boolean);
+  const route=shown.join('-')+(destinations.length>3?`-Mas${destinations.length-3}`:'');
+  const parsed=days.map(d=>parseDMY(d.date||'')).filter(Boolean);
+  const fmt=d=>d?`${String(d.getDate()).padStart(2,'0')}${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][d.getMonth()]}${d.getFullYear()}`:'';
+  const range=parsed.length?`${fmt(parsed[0])}-${fmt(parsed.at(-1))}`:'';
+  const stem=['ITBMO',route||'Viaje',range,_itbmoSafeFilenameToken_(kind)].filter(Boolean).join('-');
+  return `${stem.slice(0,150)}.${ext}`;
+}
+
 function exportItineraryToCSV(){
   const blocks=_exportPhysicalDestinationBlocks_();
   if(!blocks.length){alert(getLang()==='es'?'No hay itinerarios generados todavía para exportar.':'There are no generated itineraries to export yet.');return;}
@@ -11330,7 +11387,7 @@ function exportItineraryToCSV(){
   ]))));
   const csv='\uFEFF'+lines.join('\r\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
   trackITBMOEvent('export_csv',{file_type:'csv',layout:'continuous_physical_timeline_v6',destinations:blocks.length});
-  return deliverGeneratedFile(blob,`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`);
+  return deliverGeneratedFile(blob,_itbmoTripIdentityFilename_('Itinerario','csv'));
 }
 
 function _exportBlockType_(row={},outLang='es'){
@@ -11459,7 +11516,7 @@ async function exportItineraryToXLSX(options={}){
   const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
   trackITBMOEvent('export_csv',{file_type:'xlsx',layout:'premium_editable_workbook_v2',destinations:blocks.length,days:uniqueDates.length});
-  const filename=`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.xlsx`;
+  const filename=_itbmoTripIdentityFilename_('Plan','xlsx');
   if(options.download!==false) await deliverGeneratedFile(blob,filename);
   return {blob,filename,kind:'itinerary_xlsx'};
 }
@@ -11539,7 +11596,7 @@ async function exportItineraryToPDF(options={}){
   const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:'portrait',unit:'pt',format:'a4'}),es=_plannerOutputLang_()==='es';
   _itbmoPdfRegisterFonts_(doc);
   const logo=await _itbmoPdfLogoDataUrl_();
-  const today=new Date(),filename=`ITBMO-Itinerary-${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}.pdf`;
+  const filename=_itbmoTripIdentityFilename_('Itinerario','pdf');
   const days=[],byDate=new Map();
   blocks.forEach(block=>(block.days||[]).forEach(day=>{
     const key=day.date||`day-${day.globalDay}`;
@@ -14606,6 +14663,7 @@ async function _v71FetchRouteResolver_(movements=[]){
     try{
       const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'route_resolver',lang:getLang(),movements})});
       const data=await response.json().catch(()=>({}));
+      if(data?.usage)_captureExactUsage_(data);
       if(response.ok&&Array.isArray(data?.routes))return data;
       const err=new Error(data?.code||`ROUTE_RESOLVER_HTTP_${response.status||0}`);
       err.status=response.status;err.code=data?.code||`ROUTE_RESOLVER_HTTP_${response.status||0}`;
