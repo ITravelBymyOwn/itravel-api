@@ -9230,3 +9230,6 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 #planner-post-generation .new-planning-button:focus,
 #planner-post-generation .new-planning-button:focus-visible,
 #planner-post-generation .new-planning-button:active{color:#fff!important;-webkit-text-fill-color:#fff!important;text-shadow:0 1px 1px rgba(0,35,80,.20)!important;background:linear-gradient(115deg,#087BFA,#13A9B5)!important;border:0!important;opacity:1!important}
+
+/* V92 — minimized route builder must leave the Planner fully interactive. */
+.trip-story-overlay.is-minimized{display:none!important;pointer-events:none!important;visibility:hidden!important}
