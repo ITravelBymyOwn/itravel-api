@@ -6528,11 +6528,11 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         }
       }
 
-      if(_isAuroraActivityRow_(r) && !_explicitlyRequestedFixedAurora_()){
+      if(_isAuroraActivityRow_(r) && !_explicitlyRequestedFixedAurora_() && !r?._tie_aurora_row_authorized){
         errors.push({
           code:'RIGID_AURORA_ROW',
           day,row,
-          instruction:'Remove the standalone aurora row. Even when auroras or an aurora tour were explicitly requested in Preferences, aurora guidance belongs as an ADDITIONAL note in the FINAL row of EVERY plausible day. Only a genuinely confirmed fixed-time booking may remain as a row.'
+          instruction:'Remove the standalone aurora row unless it is explicitly authorized by the TIE night-overlay contract or is a genuinely confirmed fixed-time booking.'
         });
       }
     }
@@ -6568,12 +6568,12 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
     // An explicit aurora preference still remains a note; it does not become a row.
     if(dayRows.length && _isHighLatitudeWinterContext_(city,baseDate)){
       const lastRow=dayRows[dayRows.length-1] || {};
-      if(!_isAuroraRow_({notes:lastRow.notes||''})){
+      if(!dayRows.some(r=>_isAuroraActivityRow_(r)&&r?._tie_aurora_row_authorized) && !_isAuroraRow_({notes:lastRow.notes||''})){
         errors.push({
           code:'MISSING_AURORA_FINAL_NOTE',
           day,
           row:dayRows.length,
-          instruction:'Add an aurora opportunity as an ADDITIONAL note in the Notes field of this day\'s FINAL row. Do this for every day in this city when latitude/season/darkness make auroras plausible, even if the user explicitly requested auroras in Preferences. Mention clear/cloud conditions, geomagnetic conditions, no guarantee, and guided-tour option. Do not create a standalone aurora row.'
+          instruction:'Add an aurora opportunity as an ADDITIONAL note in the Notes field of this day\'s FINAL row unless this day already contains a TIE-authorized real aurora activity. Mention clear/cloud conditions, geomagnetic conditions, no guarantee, and guided-tour option.'
         });
       }
     }
@@ -7687,7 +7687,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v6-tie-structure';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v7-tie-semantic-night';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -7869,19 +7869,51 @@ async function _tieCallStructure_(request){
   }
 }
 
+function _tieAuroraOverlay_(overlay={}){
+  return /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(`${overlay?.type||''} ${overlay?.identity||''}`);
+}
+function _tieOverlayWindow_(baseUnit,overlay={}){
+  const day=Number(overlay?.preferred_day); if(!day) return null;
+  const source=(baseUnit.windows||[]).find(w=>Number(w.day)===day); if(!source) return null;
+  const match=String(overlay?.start_window||'').match(/(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/);
+  if(!match) return null;
+  const start=match[1]; const startMin=_hhmmToMinutes_(start); const latestStartMin=_hhmmToMinutes_(match[2]); if(startMin==null||latestStartMin==null) return null;
+  const duration=Math.max(30,Math.min(480,Number(overlay?.duration_minutes)||120));
+  const latestAbsolute=latestStartMin<startMin?latestStartMin+1440:latestStartMin;
+  const windowEndAbsolute=latestAbsolute+duration;
+  const end=_minutesToHHMM_(windowEndAbsolute%1440);
+  return {window_id:`${source.window_id||`day-${day}`}-tie-night`,day,date:source.date||null,location:baseUnit.base_destination||source.location,start,end,open_end:false,minimum_useful_target:duration,role:'NIGHT_OVERLAY',crosses_midnight:windowEndAbsolute>=1440};
+}
+function _tieReserveNightBoundary_(windows=[],nightWindows=[]){
+  const nightByDay=new Map((nightWindows||[]).map(w=>[Number(w.day),w]));
+  return (windows||[]).map(w=>{
+    const night=nightByDay.get(Number(w.day)); if(!night)return w;
+    const ns=_hhmmToMinutes_(night.start),we=_hhmmToMinutes_(w.end);
+    if(ns==null)return w;
+    if(w.open_end||we==null||we>ns)return {...w,end:night.start,open_end:false};
+    return w;
+  });
+}
 function _tieApplyPlanToBaseUnit_(baseUnit,plan){
   const byDay=new Map((plan.units||[]).map(u=>[Number(u.day),u]));
-  const baseWindows=(baseUnit.windows||[]).filter(w=>{const p=byDay.get(Number(w.day));return p&&!String(p.type||'').startsWith('REGIONAL');});
+  const overlays=Array.isArray(plan.night_overlays)?plan.night_overlays:[];
+  const preferredOverlayByDay=new Map();
+  overlays.forEach(o=>{const d=Number(o?.preferred_day);if(d&&!preferredOverlayByDay.has(d))preferredOverlayByDay.set(d,o);});
+  let baseWindows=(baseUnit.windows||[]).filter(w=>{const p=byDay.get(Number(w.day));return p&&!String(p.type||'').startsWith('REGIONAL');});
+  const baseNightWindows=overlays.map(o=>_tieOverlayWindow_(baseUnit,o)).filter(Boolean).filter(w=>baseWindows.some(b=>Number(b.day)===Number(w.day)));
+  baseWindows=_tieReserveNightBoundary_(baseWindows,baseNightWindows);
   const out=[];
   if(baseWindows.length){
     const days=[...new Set(baseWindows.map(w=>Number(w.day)))].sort((a,b)=>a-b);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:baseWindows,days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:(plan.night_overlays||[]).filter(o=>(o.eligible_days||[]).some(d=>days.includes(Number(d)))),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>(o.eligible_days||[]).some(d=>days.includes(Number(d)))),verification_needs:plan.verification_needs||[]}});
   }
   (plan.units||[]).filter(u=>String(u.type||'').startsWith('REGIONAL')).forEach((directive,index)=>{
-    const windows=(baseUnit.windows||[]).filter(w=>Number(w.day)===Number(directive.day));
+    let windows=(baseUnit.windows||[]).filter(w=>Number(w.day)===Number(directive.day));
+    const overlay=preferredOverlayByDay.get(Number(directive.day)); const night=_tieOverlayWindow_(baseUnit,overlay);
+    if(night){windows=_tieReserveNightBoundary_(windows,[night]);windows=[...windows,night];}
     if(!windows.length)return;
     const manifest=(directive.route_manifest||[]).map(x=>x.name).filter(Boolean);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:(plan.night_overlays||[]).filter(o=>(o.eligible_days||[]).includes(Number(directive.day))),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>(o.eligible_days||[]).includes(Number(directive.day))),verification_needs:plan.verification_needs||[]}});
   });
   return out.length?out:[baseUnit];
 }
@@ -8184,10 +8216,14 @@ function _v3StampStayRows_(rows=[],unit={}){
     const candidates=windows.filter(w=>{
       if(Number(w.day)!==day) return false;
       const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
-      if(start==null||end==null||end<=start) return false;
+      if(start==null||end==null) return false;
+      const nightCross=Boolean(w?.crosses_midnight)&&String(w?.role||'')==='NIGHT_OVERLAY';
+      const rowEnd=nightCross&&end<=start?end+1440:end;
+      const windowEnd=nightCross&&we!=null&&we<=ws?we+1440:we;
+      if(rowEnd<=start) return false;
       // Half-open interval semantics: [start,end). Touching a boundary is valid.
       if(ws!=null&&start<ws) return false;
-      return we==null||end<=we;
+      return windowEnd==null||rowEnd<=windowEnd;
     }).sort((a,b)=>{
       const as=_hhmmToMinutes_(a.start)??-1,bs=_hhmmToMinutes_(b.start)??-1;
       return Math.abs(start-bs)-Math.abs(start-as);
@@ -8195,7 +8231,10 @@ function _v3StampStayRows_(rows=[],unit={}){
     const window=candidates[0];
     if(!window) return [];
     const physical=window.location||unit.base_destination||unit.physical_destination;
-    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null}}];
+    const directive=(unit.tie_structure?.day_directives||[]).find(d=>Number(d?.day)===day)||null;
+    const overlays=(unit.tie_structure?.night_overlays||[]).filter(o=>(o?.eligible_days||[]).map(Number).includes(day));
+    const auroraAuthorized=overlays.some(o=>_tieAuroraOverlay_(o));
+    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null}}];
   });
   // V71 · if ITBMO had to move an estimated full-day excursion away from an
   // impossible transition day, explain the adjustment once in traveler-facing
@@ -8298,6 +8337,7 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - If unit_type is DAY_TRIP, maximize a coherent, traveler-friendly visit inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it.
 - If unit_type is BASE_STAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
 - If tie_structure is supplied, it is the authoritative strategic brief for this unit. Protect its day identity, experience cluster, CORE/HIGH route_manifest stops, structural slack, night overlays and verification needs. OPTIONAL/DROP_FIRST micro-stops may be omitted when physical feasibility, daylight, fatigue or a stronger anchor requires it. Do not invent live confirmation for verification_required items.
+- TIE NIGHT OVERLAY EXECUTION: when tie_structure.night_overlays contains an overlay whose preferred_day belongs to this unit, materialize that preferred overlay as REAL chronological itinerary row(s) inside the supplied NIGHT_OVERLAY planning window. Include realistic movement when needed, the actual named night experience, duration and return/safety logic. Weather-dependent natural phenomena are opportunities, never guarantees; state verification requirements in Notes. Do not reduce a preferred TIE overlay to preparation/checking text only. Eligible non-preferred days remain alternatives, not duplicate mandatory rows.
 - For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler.
 - First identify and protect the physical destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
 - When a planning window has no explicit start, choose a traveler-friendly start time appropriate to the destination (normally around 08:00–09:00). Do not invent extreme starts such as 05:30 unless a supplied fixed boundary, reservation, special condition or genuinely time-critical experience requires it.
@@ -11452,6 +11492,14 @@ function _itbmoPdfSafeText_(value){
   return String(value??'').replace(/\r?\n/g,' ').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g,'').replace(/[\u2010-\u2015\u2212]/g,'-').replace(/\s+/g,' ').trim();
 }
 
+function _v104PdfSemanticDayTitle_(day={}){
+  const regional=(day.rows||[]).find(r=>/^REGIONAL_/i.test(String(r?._tie_unit_type||''))&&String(r?._tie_day_identity||'').trim());
+  if(regional)return String(regional._tie_day_identity).trim();
+  return '';
+}
+function _v104PdfAuroraContext_(day={}){
+  return (day.rows||[]).some(r=>Boolean(r?._tie_aurora_context));
+}
 async function exportItineraryToPDF(options={}){
   if(!window.jspdf?.jsPDF){alert('jsPDF no está disponible.');return;}
   const blocks=_exportPhysicalDestinationBlocks_();
@@ -11505,13 +11553,16 @@ async function exportItineraryToPDF(options={}){
     font('normal',7.5);doc.text(_itbmoPdfSafeText_(day.date),W-74,52,{align:'center'});
     if(dayTrip && !continued){
       doc.setFillColor(246,250,255);doc.roundedRect(34,114,W-68,57,9,9,'F');
-      font('bold',14);doc.text(_itbmoPdfSafeText_(dayTrip.base),48,139,{maxWidth:155});
-      doc.text(_itbmoPdfSafeText_(dayTrip.destination),W-48,139,{align:'right',maxWidth:155});
-      doc.setDrawColor(8,123,250);doc.setLineWidth(1.6);doc.line(W/2-42,136,W/2+42,136);
-      font('bold',7);doc.setTextColor(32,122,145);doc.text(es?'IDA Y VUELTA · EXCURSIÓN':'ROUND TRIP · DAY TRIP',W/2,160,{align:'center'});
+      const semantic=_v104PdfSemanticDayTitle_(day);
+      if(semantic){font('bold',14);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(semantic),W/2,132,{align:'center',maxWidth:260});}
+      font('bold',10.5);doc.setTextColor(8,35,65);doc.text(_itbmoPdfSafeText_(dayTrip.base),48,148,{maxWidth:145});
+      doc.text(_itbmoPdfSafeText_(dayTrip.destination),W-48,148,{align:'right',maxWidth:145});
+      doc.setDrawColor(8,123,250);doc.setLineWidth(1.4);doc.line(W/2-36,146,W/2+36,146);
+      font('bold',6.6);doc.setTextColor(32,122,145);doc.text(es?'IDA Y VUELTA · EXCURSIÓN':'ROUND TRIP · DAY TRIP',W/2,162,{align:'center'});
     }else{
-      font('bold',15);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(route),34,135,{maxWidth:W-68});
+      font('bold',15);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(_v104PdfSemanticDayTitle_(day)||route),34,135,{maxWidth:W-68});
     }
+    if(_v104PdfAuroraContext_(day)){doc.setFillColor(249,252,255);doc.rect(W-225,76,191,20,'F');font('bold',7.2);doc.setTextColor(32,122,145);doc.text(es?'ZONA Y ÉPOCA DE AURORAS BOREALES':'NORTHERN LIGHTS AREA & SEASON',W-34,88,{align:'right',maxWidth:185});}
     if(continued){font('normal',7);doc.text(es?'Continuación':'Continued',W-34,154,{align:'right'});}
   };
   const paint=(card,x,y)=>{
