@@ -3523,29 +3523,12 @@ async function saveDestinations({showReadyModal=true,fromTripStory=false}={}){
     if(showReadyModal){
       const continueNow=await showRouteReadyModal();
       if(continueNow){
-        // V101: this handoff must not depend on the DOM button's transient disabled
-        // state. The guided route save can legitimately re-render/update #start-planning
-        // while the confirmation layer is leaving; HTMLElement.click() on a disabled
-        // button is a silent no-op, which made the UI appear to fall back to Planner.
-        // Wait until THIS decision layer has physically left the DOM, then invoke the
-        // canonical planning-start controller directly. This preserves the exact payment /
-        // entitlement / personalization path without duplicating any of its logic.
-        const continueAfterDecisionExit=()=>{
-          const startedAt=Date.now();
-          const resume=()=>{
-            const outgoing=document.querySelector('.itbmo-decision-overlay');
-            if(!outgoing || Date.now()-startedAt>900){
-              Promise.resolve(requestPlanningStart()).catch(err=>{
-                console.error('[ITBMO ROUTE READY HANDOFF]',err);
-                try{smoothAdvanceTo($start,{gap:132,center:true});}catch(_){ }
-              });
-              return;
-            }
-            requestAnimationFrame(resume);
-          };
-          requestAnimationFrame(resume);
-        };
-        continueAfterDecisionExit();
+        // V102: restore the exact V86 handoff sequence proven to work.
+        // Important: do NOT wait for the route-ready decision overlay to leave the DOM.
+        // requestPlanningStart() can open the next canonical decision immediately; its own
+        // showPlannerDecision() removes the outgoing overlay before mounting the next one.
+        // Delaying this handoff changed the lifecycle and caused the UI to fall back to Planner.
+        requestAnimationFrame(()=>{ try{$start.click();}catch(_){ smoothAdvanceTo($start,{gap:132,center:true}); } });
       }else{
         requestAnimationFrame(()=>smoothAdvanceTo($start,{gap:132,center:true}));
       }
