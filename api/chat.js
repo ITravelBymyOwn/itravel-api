@@ -2276,6 +2276,8 @@ FORMAT:
 function _newUsageCollector_() {
   return {
     model: MODEL,
+    models: {},
+    configured_models: {default:MODEL,planner:PLANNER_MODEL,repair:REPAIR_MODEL},
     model_calls: 0,
     input_tokens: 0,
     output_tokens: 0,
@@ -2291,6 +2293,7 @@ function _accumulateUsage_(collector, resp) {
   const total = Number(usage?.total_tokens || (input + output)) || (input + output);
 
   collector.model = String(resp?.model || collector.model || MODEL);
+  collector.models[collector.model] = Number(collector.models[collector.model] || 0) + 1;
   collector.model_calls += 1;
   collector.input_tokens += input;
   collector.output_tokens += output;
@@ -2301,6 +2304,8 @@ function _usagePayload_(collector) {
   if (!collector) return null;
   return {
     model: String(collector.model || MODEL),
+    models: {...(collector.models || {})},
+    configured_models: {...(collector.configured_models || {})},
     model_calls: Number(collector.model_calls || 0),
     input_tokens: Number(collector.input_tokens || 0),
     output_tokens: Number(collector.output_tokens || 0),
@@ -2391,6 +2396,7 @@ export default async function handler(req, res) {
        It estimates a physically plausible chain when the traveler has not
        supplied transport/arrival. It never claims live schedules or bookings. */
     if (mode === "route_resolver") {
+      const routeUsage = _newUsageCollector_();
       const movements = Array.isArray(body.movements) ? body.movements.slice(0, 40) : [];
       if (!movements.length) return res.status(200).json({ok:true,routes:[]});
       const resolverLang = String(body.lang || lang || "en").toLowerCase().startsWith("es") ? "es" : "en";
@@ -2407,7 +2413,7 @@ export default async function handler(req, res) {
           const ids=new Set(batch.map(item=>String(item?.movement_id||'')));
           const input=resolverPrompt.replace(JSON.stringify(movements),JSON.stringify(batch));
           for(let attempt=0;attempt<2;attempt++){
-            const raw=await callStructured([{role:"user",content:input}],0.1,5000,120000,null,PLANNER_MODEL,"low");
+            const raw=await callStructured([{role:"user",content:input}],0.1,5000,120000,routeUsage,PLANNER_MODEL,"low");
             let parsed=null;
             try{parsed=JSON.parse(String(raw||'').replace(/^```json\s*/i,'').replace(/```$/,'').trim());}catch{}
             const routes=parsed?.routes;
@@ -2421,7 +2427,7 @@ export default async function handler(req, res) {
         if(results.some(routes=>!routes)) return res.status(502).json({ok:false,code:"ROUTE_RESOLVER_INVALID_RESPONSE"});
         results.forEach(routes=>resolved.push(...routes));
       }
-      return res.status(200).json({ok:true,routes:resolved});
+      return res.status(200).json({ok:true,routes:resolved,usage:_usagePayload_(routeUsage)});
     }
 
     /* CITY NORMALIZATION · isolated pre-save validation.
