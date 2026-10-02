@@ -13987,6 +13987,7 @@ function openTripStoryBuilder(){
     if(!overlay.isConnected)return;
     minimized=false;
     overlay.hidden=false;
+    overlay.style.removeProperty('display');
     overlay.classList.remove('is-minimized');
     removeMinimizedFab();
     document.body.classList.add('trip-story-open');
@@ -13998,6 +13999,10 @@ function openTripStoryBuilder(){
     minimized=true;
     overlay.hidden=true;
     overlay.classList.add('is-minimized');
+    // V92: trip-story-overlay has an explicit author-level display:flex.
+    // Force the live overlay out of layout while minimized; hidden alone can be
+    // overridden by that rule in the deployed stylesheet.
+    overlay.style.setProperty('display','none','important');
     document.body.classList.remove('trip-story-open');
     removeMinimizedFab();
     minimizedFab=document.createElement('button');
