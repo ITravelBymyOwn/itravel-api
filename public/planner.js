@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V107';
-const ITBMO_RUNTIME_ASSET='planner.js?v=224';
+const ITBMO_RUNTIME_BUILD='V108';
+const ITBMO_RUNTIME_ASSET='planner.js?v=225';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -7849,6 +7849,10 @@ function _tieStableRequest_(contract={},unit={}){
   const neighboring=(contract.trip_story_stays||[]).map(st=>({place:st.place,startDate:st.startDate,days:st.days,transitOnly:Boolean(st.transitOnly),explicit_day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place}))}));
   return {
     schema:'ITBMO_TIE_REQUEST_V1',
+    // V108 · LANGUAGE CONTRACT: the itinerary language selected by the traveler
+    // is authoritative for every user-facing semantic string produced by TIE.
+    // This is intentionally independent from the ES/EN interface language.
+    itinerary_language:String(contract.itinerary_language||plannerState?.itineraryLang||'').trim() || null,
     stay:{id:unit.id,base_destination:unit.base_destination||unit.physical_destination,days:unit.days,previous_destination:unit.previous_destination||null,next_destination:unit.next_destination||null},
     open_days:openDays,
     immutable:{fixed_units:fixedUnits,fixed_movements:(contract.movement_ledger||[]),neighboring_stays:neighboring},
