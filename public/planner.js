@@ -13844,22 +13844,42 @@ const ITBMO_TRIP_STORY_MINIMIZED_UI_KEY='itbmo_trip_story_minimized_ui_v1';
 // V96 · durable Route Builder session snapshot. This is deliberately isolated
 // from itinerary generation: it only preserves the in-progress guided-builder
 // data + exact UI screen/field values while the user visits other workspaces.
-const ITBMO_TRIP_STORY_SESSION_KEY='itbmo_trip_story_builder_session_v96';
-function _tripStorySaveBuilderSession_(payload){try{if(payload&&typeof payload==='object')localStorage.setItem(ITBMO_TRIP_STORY_SESSION_KEY,JSON.stringify(payload));}catch(_){}}
-function _tripStoryLoadBuilderSession_(){try{const raw=localStorage.getItem(ITBMO_TRIP_STORY_SESSION_KEY)||'';return raw?JSON.parse(raw):null;}catch(_){return null;}}
-function _tripStoryClearBuilderSession_(){try{localStorage.removeItem(ITBMO_TRIP_STORY_SESSION_KEY);}catch(_){}}
+const ITBMO_TRIP_STORY_SESSION_KEY='itbmo_trip_story_builder_session_v97';
+const ITBMO_TRIP_STORY_SESSION_KEY_V96='itbmo_trip_story_builder_session_v96';
+function _tripStorySaveBuilderSession_(payload){try{if(payload&&typeof payload==='object')localStorage.setItem(ITBMO_TRIP_STORY_SESSION_KEY,JSON.stringify(payload));}catch(_){} }
+function _tripStoryLoadBuilderSession_(){try{
+  const raw=localStorage.getItem(ITBMO_TRIP_STORY_SESSION_KEY)||localStorage.getItem(ITBMO_TRIP_STORY_SESSION_KEY_V96)||'';
+  if(!raw)return null;const parsed=JSON.parse(raw);
+  if(!localStorage.getItem(ITBMO_TRIP_STORY_SESSION_KEY)){try{localStorage.setItem(ITBMO_TRIP_STORY_SESSION_KEY,raw);}catch(_){} }
+  return parsed;
+}catch(_){return null;}}
+function _tripStoryClearBuilderSession_(){try{localStorage.removeItem(ITBMO_TRIP_STORY_SESSION_KEY);localStorage.removeItem(ITBMO_TRIP_STORY_SESSION_KEY_V96);}catch(_){} }
+function _tripStoryFieldIdentity_(el,index){
+  const d=el?.dataset||{};
+  const dataKey=['start','stayCountry','stayPlace','stayStart','stayDays','move','ret','dt','compGender','compAge'].find(k=>d[k]!=null);
+  return {index,tag:el.tagName,type:String(el.type||''),id:el.id||'',name:el.name||'',dataKey:dataKey||'',dataValue:dataKey?String(d[dataKey]):''};
+}
 function _tripStoryCaptureVisibleFields_(root){
   if(!root)return[];
   return Array.from(root.querySelectorAll('input,select,textarea')).filter(el=>!['button','submit','reset'].includes(String(el.type||'').toLowerCase())).map((el,index)=>({
-    index,tag:el.tagName,type:String(el.type||''),name:el.name||'',id:el.id||'',
-    data:Object.fromEntries(Object.entries(el.dataset||{})),value:el.value,checked:Boolean(el.checked)
+    ..._tripStoryFieldIdentity_(el,index),value:el.value,checked:Boolean(el.checked)
   }));
 }
 function _tripStoryRestoreVisibleFields_(root,fields){
   if(!root||!Array.isArray(fields)||!fields.length)return;
   const els=Array.from(root.querySelectorAll('input,select,textarea')).filter(el=>!['button','submit','reset'].includes(String(el.type||'').toLowerCase()));
-  fields.forEach(f=>{const el=els[f.index];if(!el||el.tagName!==f.tag)return;if(['checkbox','radio'].includes(String(el.type||'').toLowerCase()))el.checked=Boolean(f.checked);else el.value=f.value??'';});
+  const used=new Set();
+  const findEl=f=>{
+    let el=null;
+    if(f.id)el=els.find((x,i)=>!used.has(i)&&x.id===f.id);
+    if(!el&&f.dataKey)el=els.find((x,i)=>!used.has(i)&&x.tagName===f.tag&&String((x.dataset||{})[f.dataKey]??'')===String(f.dataValue??''));
+    if(!el&&f.name)el=els.find((x,i)=>!used.has(i)&&x.tagName===f.tag&&x.name===f.name);
+    if(!el&&Number.isInteger(f.index)&&els[f.index]?.tagName===f.tag)el=els[f.index];
+    if(el)used.add(els.indexOf(el));return el;
+  };
+  fields.forEach(f=>{const el=findEl(f);if(!el)return;if(['checkbox','radio'].includes(String(el.type||'').toLowerCase()))el.checked=Boolean(f.checked);else el.value=f.value??'';});
 }
+function _tripStoryRecoveryIsUsable_(session){return Boolean(session&&typeof session==='object'&&session.story&&typeof session.story==='object'&&session.ui&&typeof session.ui==='object');}
 function _tripStorySetMinimizedState_(value,ui=null){try{if(value)localStorage.setItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY,JSON.stringify({draftKey:_tripStoryDraftKey_(),ui:ui&&typeof ui==='object'?ui:null}));else{localStorage.removeItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);sessionStorage.removeItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);}}catch(_){}}
 function _tripStoryMinimizedState_(){try{const raw=localStorage.getItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY)||sessionStorage.getItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);if(!raw)return null;const x=JSON.parse(raw);if(x&&typeof x.draftKey==='string'){try{localStorage.setItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY,raw);sessionStorage.removeItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);}catch(_){}return x;}return null;}catch(_){return null;}}
 function _tripStoryDraftIsRecoverableByKey_(key){try{const d=_tripStoryLoadDraftByKey_(key);return Boolean(d&&typeof d==='object'&&(Array.isArray(d.stays)||d.start||d.returnTrip));}catch(_){return false;}}
@@ -13872,7 +13892,12 @@ function _tripStoryCreateResumeFab_(onResume){
   fab.onclick=()=>onResume?.();document.body.appendChild(fab);return fab;
 }
 function _tripStoryRestoreMinimizedFabAfterNavigation_(){
-  const state=_tripStoryMinimizedState_();
+  const session=_tripStoryLoadBuilderSession_(),state=_tripStoryMinimizedState_();
+  // V97: the durable builder checkpoint is authoritative for UI recovery. Do not
+  // reject it because account hydration temporarily changes the legacy draft key.
+  if(_tripStoryRecoveryIsUsable_(session) && (session.status==='minimized'||state)){
+    _tripStoryCreateResumeFab_(()=>{openTripStoryBuilder();});return;
+  }
   if(!state)return;
   if(!_tripStoryDraftIsRecoverableByKey_(state.draftKey)){_tripStorySetMinimizedState_(false);return;}
   _tripStoryCreateResumeFab_(()=>{openTripStoryBuilder();});
@@ -14020,10 +14045,10 @@ function openTripStoryBuilder(){
   // minimize time. This avoids depending on asynchronous account hydration.
   const minimizedResumeState=_tripStoryMinimizedState_();
   const builderSession=_tripStoryLoadBuilderSession_();
-  const sessionMatches=Boolean(builderSession&&builderSession.draftKey&&(!minimizedResumeState?.draftKey||builderSession.draftKey===minimizedResumeState.draftKey));
+  // V97: recovery no longer depends on currentUser/draft-key equality. The account
+  // can hydrate after DOMContentLoaded, which made V94-V96 reject a valid snapshot.
+  const sessionMatches=_tripStoryRecoveryIsUsable_(builderSession);
   const minimizedResumeDraft=minimizedResumeState&&_tripStoryDraftIsRecoverableByKey_(minimizedResumeState.draftKey)?_tripStoryLoadDraftByKey_(minimizedResumeState.draftKey):null;
-  // V96: prefer the atomic builder-session story. It contains edits that may
-  // still be visible in the form but had not yet fired a legacy change event.
   let story=JSON.parse(JSON.stringify((sessionMatches&&builderSession.story) || minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryCurrent_()));
   story.start=story.start||{date:'',transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:''};
   story.returnTrip=story.returnTrip||{enabled:false,transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:''};
@@ -14071,7 +14096,7 @@ function openTripStoryBuilder(){
   });
   const saveBuilderSession=()=>{
     persist();
-    _tripStorySaveBuilderSession_({version:96,draftKey:_tripStoryDraftKey_(),savedAt:Date.now(),story:JSON.parse(JSON.stringify(story)),ui:captureUIState(),fields:_tripStoryCaptureVisibleFields_(active)});
+    _tripStorySaveBuilderSession_({version:97,status:minimized?'minimized':'open',draftKey:_tripStoryDraftKey_(),savedAt:Date.now(),story:JSON.parse(JSON.stringify(story)),ui:captureUIState(),fields:_tripStoryCaptureVisibleFields_(active)});
   };
   let minimized=false, minimizedFab=null;
   const removeMinimizedFab=()=>{if(minimizedFab?.isConnected)minimizedFab.remove();document.querySelectorAll('.trip-story-minimized-fab').forEach(x=>x.remove());minimizedFab=null;};
@@ -14088,8 +14113,8 @@ function openTripStoryBuilder(){
   };
   const minimize=()=>{
     if(minimized||!overlay.isConnected)return;
-    saveBuilderSession();
     minimized=true;
+    saveBuilderSession();
     overlay.hidden=true;
     overlay.classList.add('is-minimized');
     // V92: trip-story-overlay has an explicit author-level display:flex.
@@ -14101,8 +14126,11 @@ function openTripStoryBuilder(){
     _tripStorySetMinimizedState_(true,captureUIState());
     minimizedFab=_tripStoryCreateResumeFab_(restore);
   };
-  const close=()=>{saveBuilderSession();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;};
+  const close=()=>{minimized=false;saveBuilderSession();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;};
   _tripStoryBuilderSession_={overlay,restore,minimize,close,get minimized(){return minimized;}};
+  // V97: last-chance checkpoint before any full-page workspace navigation.
+  const checkpointBeforeNavigation=()=>{try{if(overlay.isConnected)saveBuilderSession();}catch(_){}};
+  window.addEventListener('pagehide',checkpointBeforeNavigation,{once:true});
   // The resumed builder is now live; stale cross-page UI state must not survive a
   // normal close/reload. Same-page minimize will write a fresh snapshot again.
   // V96: keep the durable checkpoint while the builder is open; it is refreshed
@@ -14216,6 +14244,8 @@ function openTripStoryBuilder(){
       try{if(typeof el.oninput==='function')el.dispatchEvent(new Event('input',{bubbles:true}));else if(typeof el.onchange==='function')el.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}
     });
   }
+  // Persist the reconstructed screen immediately so a second navigation cannot fall back.
+  saveBuilderSession();
   let v96SnapshotTimer=null;
   const queueBuilderSnapshot=()=>{clearTimeout(v96SnapshotTimer);v96SnapshotTimer=setTimeout(()=>{if(overlay.isConnected)saveBuilderSession();},120);};
   active.addEventListener('input',queueBuilderSnapshot,true);
