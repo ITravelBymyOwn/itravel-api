@@ -3523,17 +3523,22 @@ async function saveDestinations({showReadyModal=true,fromTripStory=false}={}){
     if(showReadyModal){
       const continueNow=await showRouteReadyModal();
       if(continueNow){
-        // V100: showPlannerDecision resolves before its 220 ms exit animation removes
-        // the confirmation overlay. Starting the next guided stage in that same frame
-        // creates it correctly but leaves it visually underneath the outgoing overlay,
-        // which looks like a return to Planner. Wait for the outgoing decision layer to
-        // be physically removed, then reuse the exact existing Start Planning click path.
+        // V101: this handoff must not depend on the DOM button's transient disabled
+        // state. The guided route save can legitimately re-render/update #start-planning
+        // while the confirmation layer is leaving; HTMLElement.click() on a disabled
+        // button is a silent no-op, which made the UI appear to fall back to Planner.
+        // Wait until THIS decision layer has physically left the DOM, then invoke the
+        // canonical planning-start controller directly. This preserves the exact payment /
+        // entitlement / personalization path without duplicating any of its logic.
         const continueAfterDecisionExit=()=>{
           const startedAt=Date.now();
           const resume=()=>{
             const outgoing=document.querySelector('.itbmo-decision-overlay');
             if(!outgoing || Date.now()-startedAt>900){
-              try{$start.click();}catch(_){smoothAdvanceTo($start,{gap:132,center:true});}
+              Promise.resolve(requestPlanningStart()).catch(err=>{
+                console.error('[ITBMO ROUTE READY HANDOFF]',err);
+                try{smoothAdvanceTo($start,{gap:132,center:true});}catch(_){ }
+              });
               return;
             }
             requestAnimationFrame(resume);
