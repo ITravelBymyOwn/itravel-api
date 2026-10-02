@@ -3523,7 +3523,24 @@ async function saveDestinations({showReadyModal=true,fromTripStory=false}={}){
     if(showReadyModal){
       const continueNow=await showRouteReadyModal();
       if(continueNow){
-        requestAnimationFrame(()=>{ try{$start.click();}catch(_){ smoothAdvanceTo($start,{gap:132,center:true}); } });
+        // V100: showPlannerDecision resolves before its 220 ms exit animation removes
+        // the confirmation overlay. Starting the next guided stage in that same frame
+        // creates it correctly but leaves it visually underneath the outgoing overlay,
+        // which looks like a return to Planner. Wait for the outgoing decision layer to
+        // be physically removed, then reuse the exact existing Start Planning click path.
+        const continueAfterDecisionExit=()=>{
+          const startedAt=Date.now();
+          const resume=()=>{
+            const outgoing=document.querySelector('.itbmo-decision-overlay');
+            if(!outgoing || Date.now()-startedAt>900){
+              try{$start.click();}catch(_){smoothAdvanceTo($start,{gap:132,center:true});}
+              return;
+            }
+            requestAnimationFrame(resume);
+          };
+          requestAnimationFrame(resume);
+        };
+        continueAfterDecisionExit();
       }else{
         requestAnimationFrame(()=>smoothAdvanceTo($start,{gap:132,center:true}));
       }
