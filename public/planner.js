@@ -13831,6 +13831,7 @@ function _tripStoryLoadDraft_(){return _tripStoryLoadDraftByKey_(_tripStoryDraft
 function _tripStorySaveDraft_(story){try{localStorage.setItem(_tripStoryDraftKey_(),JSON.stringify(story));}catch(_){}}
 function _tripStoryClearDraft_(){try{localStorage.removeItem(_tripStoryDraftKey_());sessionStorage.removeItem(_tripStoryDraftKey_());}catch(_){}
   _tripStorySetMinimizedState_(false);
+  _tripStoryClearBuilderSession_();
 }
 // V95 · cross-workspace persistence. The route draft is stored in localStorage so
 // destroying/recreating the planner iframe or navigating through workspaces cannot
@@ -13840,6 +13841,25 @@ function _tripStoryClearDraft_(){try{localStorage.removeItem(_tripStoryDraftKey_
 // so cross-page navigation can restore the same screen without creating a second
 // source of truth for the journey itself.
 const ITBMO_TRIP_STORY_MINIMIZED_UI_KEY='itbmo_trip_story_minimized_ui_v1';
+// V96 · durable Route Builder session snapshot. This is deliberately isolated
+// from itinerary generation: it only preserves the in-progress guided-builder
+// data + exact UI screen/field values while the user visits other workspaces.
+const ITBMO_TRIP_STORY_SESSION_KEY='itbmo_trip_story_builder_session_v96';
+function _tripStorySaveBuilderSession_(payload){try{if(payload&&typeof payload==='object')localStorage.setItem(ITBMO_TRIP_STORY_SESSION_KEY,JSON.stringify(payload));}catch(_){}}
+function _tripStoryLoadBuilderSession_(){try{const raw=localStorage.getItem(ITBMO_TRIP_STORY_SESSION_KEY)||'';return raw?JSON.parse(raw):null;}catch(_){return null;}}
+function _tripStoryClearBuilderSession_(){try{localStorage.removeItem(ITBMO_TRIP_STORY_SESSION_KEY);}catch(_){}}
+function _tripStoryCaptureVisibleFields_(root){
+  if(!root)return[];
+  return Array.from(root.querySelectorAll('input,select,textarea')).filter(el=>!['button','submit','reset'].includes(String(el.type||'').toLowerCase())).map((el,index)=>({
+    index,tag:el.tagName,type:String(el.type||''),name:el.name||'',id:el.id||'',
+    data:Object.fromEntries(Object.entries(el.dataset||{})),value:el.value,checked:Boolean(el.checked)
+  }));
+}
+function _tripStoryRestoreVisibleFields_(root,fields){
+  if(!root||!Array.isArray(fields)||!fields.length)return;
+  const els=Array.from(root.querySelectorAll('input,select,textarea')).filter(el=>!['button','submit','reset'].includes(String(el.type||'').toLowerCase()));
+  fields.forEach(f=>{const el=els[f.index];if(!el||el.tagName!==f.tag)return;if(['checkbox','radio'].includes(String(el.type||'').toLowerCase()))el.checked=Boolean(f.checked);else el.value=f.value??'';});
+}
 function _tripStorySetMinimizedState_(value,ui=null){try{if(value)localStorage.setItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY,JSON.stringify({draftKey:_tripStoryDraftKey_(),ui:ui&&typeof ui==='object'?ui:null}));else{localStorage.removeItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);sessionStorage.removeItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);}}catch(_){}}
 function _tripStoryMinimizedState_(){try{const raw=localStorage.getItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY)||sessionStorage.getItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);if(!raw)return null;const x=JSON.parse(raw);if(x&&typeof x.draftKey==='string'){try{localStorage.setItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY,raw);sessionStorage.removeItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);}catch(_){}return x;}return null;}catch(_){return null;}}
 function _tripStoryDraftIsRecoverableByKey_(key){try{const d=_tripStoryLoadDraftByKey_(key);return Boolean(d&&typeof d==='object'&&(Array.isArray(d.stays)||d.start||d.returnTrip));}catch(_){return false;}}
@@ -13999,8 +14019,12 @@ function openTripStoryBuilder(){
   // V94: when returning from another page, use the exact draft key captured at
   // minimize time. This avoids depending on asynchronous account hydration.
   const minimizedResumeState=_tripStoryMinimizedState_();
+  const builderSession=_tripStoryLoadBuilderSession_();
+  const sessionMatches=Boolean(builderSession&&builderSession.draftKey&&(!minimizedResumeState?.draftKey||builderSession.draftKey===minimizedResumeState.draftKey));
   const minimizedResumeDraft=minimizedResumeState&&_tripStoryDraftIsRecoverableByKey_(minimizedResumeState.draftKey)?_tripStoryLoadDraftByKey_(minimizedResumeState.draftKey):null;
-  let story=JSON.parse(JSON.stringify(minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryCurrent_()));
+  // V96: prefer the atomic builder-session story. It contains edits that may
+  // still be visible in the form but had not yet fired a legacy change event.
+  let story=JSON.parse(JSON.stringify((sessionMatches&&builderSession.story) || minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryCurrent_()));
   story.start=story.start||{date:'',transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:''};
   story.returnTrip=story.returnTrip||{enabled:false,transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:''};
   story.stays=(story.stays||[]).map(_tripStoryEnsureStay_);
@@ -14008,7 +14032,8 @@ function openTripStoryBuilder(){
   let phase='travelers', activeStay=0, pendingNextStay=null, editReturnPhase=null, editReturnStay=null, dayTripDraft=null, dayTripEditIndex=null, resumeTravelerDraft=null;
   // Restore only validated UI/navigation context. The journey itself was already
   // loaded from the canonical session draft above.
-  const resumeUI=minimizedResumeState?.ui&&typeof minimizedResumeState.ui==='object'?minimizedResumeState.ui:null;
+  const resumeUI=(sessionMatches&&builderSession.ui&&typeof builderSession.ui==='object')?builderSession.ui:(minimizedResumeState?.ui&&typeof minimizedResumeState.ui==='object'?minimizedResumeState.ui:null);
+  const resumeFields=(sessionMatches&&Array.isArray(builderSession.fields))?builderSession.fields:null;
   if(resumeUI){
     const allowedPhases=new Set(['travelers','start','stay','decision','daytrip','movement','return','review']);
     if(allowedPhases.has(resumeUI.phase))phase=resumeUI.phase;
@@ -14042,8 +14067,12 @@ function openTripStoryBuilder(){
     editReturnPhase,editReturnStay,editReturnStayId:Number.isInteger(editReturnStay)?(story.stays[editReturnStay]?.id||''):'',
     dayTripDraft:dayTripDraft?JSON.parse(JSON.stringify(dayTripDraft)):null,
     dayTripEditIndex:Number.isInteger(dayTripEditIndex)?dayTripEditIndex:null,
-    travelerDraft:travelerDraft?JSON.parse(JSON.stringify(travelerDraft)):null
+    travelerDraft:(typeof travelerDraft!=='undefined'&&travelerDraft)?JSON.parse(JSON.stringify(travelerDraft)):null
   });
+  const saveBuilderSession=()=>{
+    persist();
+    _tripStorySaveBuilderSession_({version:96,draftKey:_tripStoryDraftKey_(),savedAt:Date.now(),story:JSON.parse(JSON.stringify(story)),ui:captureUIState(),fields:_tripStoryCaptureVisibleFields_(active)});
+  };
   let minimized=false, minimizedFab=null;
   const removeMinimizedFab=()=>{if(minimizedFab?.isConnected)minimizedFab.remove();document.querySelectorAll('.trip-story-minimized-fab').forEach(x=>x.remove());minimizedFab=null;};
   const restore=()=>{
@@ -14059,7 +14088,7 @@ function openTripStoryBuilder(){
   };
   const minimize=()=>{
     if(minimized||!overlay.isConnected)return;
-    persist();
+    saveBuilderSession();
     minimized=true;
     overlay.hidden=true;
     overlay.classList.add('is-minimized');
@@ -14072,11 +14101,12 @@ function openTripStoryBuilder(){
     _tripStorySetMinimizedState_(true,captureUIState());
     minimizedFab=_tripStoryCreateResumeFab_(restore);
   };
-  const close=()=>{persist();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;};
+  const close=()=>{saveBuilderSession();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;};
   _tripStoryBuilderSession_={overlay,restore,minimize,close,get minimized(){return minimized;}};
   // The resumed builder is now live; stale cross-page UI state must not survive a
   // normal close/reload. Same-page minimize will write a fresh snapshot again.
-  if(minimizedResumeState)_tripStorySetMinimizedState_(false);
+  // V96: keep the durable checkpoint while the builder is open; it is refreshed
+  // continuously and is only cleared when the route is completed/reset explicitly.
   overlay.querySelector('[data-gj-minimize]').onclick=minimize;
   overlay.querySelector('[data-gj-close]').onclick=close;
   const countryField=(value,code,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" data-country-code="${_tripStoryEsc_(code||'')}" placeholder="${es?'Escribe el país…':'Type country…'}"><div class="trip-story-suggestions" hidden></div></div>`;
@@ -14167,7 +14197,7 @@ function openTripStoryBuilder(){
     if(phase==='review'){
       const effectiveDates=new Set();story.stays.filter(st=>!st.transitOnly).forEach(st=>{for(let d=0;d<Number(st.days||1);d++){const date=_tripStoryAddDays_(st.startDate,d);if(date)effectiveDates.add(date);}});const tooLong=effectiveDates.size>MAX_TRIP_STORY_DAYS;
       active.innerHTML=shell(es?'REVISA TU RECORRIDO':'REVIEW YOUR JOURNEY',es?'Tu viaje está tomando forma':'Your trip is taking shape',es?'Revisa la historia completa. Puedes volver a editar cualquier estancia antes de continuar al pago.':'Review the complete story. You can edit any stay before continuing to payment.',`<div class="gj-review-stats"><div><b>${story.stays.length}</b><span>${es?'destinos':'destinations'}</span></div><div><b>${effectiveDates.size}</b><span>${es?'días efectivos':'effective days'}</span></div><div><b>${story.stays.reduce((n,s)=>n+(s.dayTrips||[]).length,0)}</b><span>${es?'excursiones':'day trips'}</span></div></div>${tooLong?`<div class="gj-warning">${es?`El recorrido supera el máximo de ${MAX_TRIP_STORY_DAYS} días efectivos.`:`The route exceeds the ${MAX_TRIP_STORY_DAYS}-effective-day maximum.`}</div>`:''}<div class="gj-review-list">${story.stays.map((st,i)=>`<div class="gj-review-row"><div><b>${i+1}. ${_tripStoryEsc_(st.place||'—')}</b><small>${_tripStoryDMY_(st.startDate)} · ${st.transitOnly?(es?'Sólo tránsito':'Transit only'):`${st.days} ${st.days===1?(es?'día':'day'):(es?'días':'days')}`}</small></div><div>${i?`<button type="button" data-review-move="${i}:-1">↑</button>`:''}${i<story.stays.length-1?`<button type="button" data-review-move="${i}:1">↓</button>`:''}<button type="button" data-review-edit="${i}">${es?'Editar':'Edit'}</button><button type="button" class="gj-review-delete" data-review-delete="${i}">${es?'Eliminar':'Delete'}</button></div></div>`).join('')}</div><div class="gj-review-actions"><button type="button" data-edit-route>${es?'Volver a la última parada':'Back to last stop'}</button></div>`,tooLong?'':nextButton(es?'Guardar recorrido y continuar':'Save journey and continue','data-gj-save'));
-      active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true)_tripStoryClearDraft_();});return;
+      active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true){_tripStoryClearDraft_();_tripStoryClearBuilderSession_();}});return;
     }
   };
   overlay.querySelector('[data-gj-reset]').onclick=()=>{_tripStorySetMinimizedState_(false);if(!confirm(es?'¿Quieres reiniciar el recorrido? Se eliminarán los destinos, excursiones y traslados que has configurado. Los viajeros se conservarán.':'Reset the route? Destinations, day trips and transfers will be deleted. Travelers will be kept.'))return;_tripStoryResetRoute_(story);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;dayTripDraft=null;dayTripEditIndex=null;activeStay=0;phase='start';persist();try{engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));}catch(_){};render();};
@@ -14176,6 +14206,20 @@ function openTripStoryBuilder(){
   overlay.querySelector('[data-stage="travelers"]').onclick=()=>{travelerDraft=travelerSnapshot();phase='travelers';render();};
   overlay.querySelector('[data-stage="route"]').onclick=()=>{if(overlay.querySelector('[data-stage="route"]').disabled)return;activeStay=Math.min(Math.max(0,activeStay),story.stays.length-1);phase=story.stays[activeStay]?.place?'decision':'stay';render();};
   render();
+  // V96: restore literal visible values after the correct phase has rendered.
+  // This preserves text/select edits that had not yet committed to the legacy model.
+  if(resumeFields){
+    _tripStoryRestoreVisibleFields_(active,resumeFields);
+    // Commit restored values through the screen's existing handlers so the
+    // canonical story catches up without introducing a parallel data model.
+    Array.from(active.querySelectorAll('input,select,textarea')).forEach(el=>{
+      try{if(typeof el.oninput==='function')el.dispatchEvent(new Event('input',{bubbles:true}));else if(typeof el.onchange==='function')el.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}
+    });
+  }
+  let v96SnapshotTimer=null;
+  const queueBuilderSnapshot=()=>{clearTimeout(v96SnapshotTimer);v96SnapshotTimer=setTimeout(()=>{if(overlay.isConnected)saveBuilderSession();},120);};
+  active.addEventListener('input',queueBuilderSnapshot,true);
+  active.addEventListener('change',queueBuilderSnapshot,true);
 }
 function _routeResolvedPrincipalMode_(legs=[],direction='',fallback='other'){
   const dir=String(direction||'').toLowerCase();
