@@ -13826,17 +13826,18 @@ function _tripStoryDaysOptions_(selected=1,transitOnly=false){
 }
 function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};}
 function _tripStoryDraftKey_(){const who=String(currentUser?.id||currentUser?.email||'guest').replace(/[^a-z0-9_.@-]/gi,'_');return `itbmo_trip_story_draft_v1_${who}`;}
-function _tripStoryLoadDraft_(){try{const raw=sessionStorage.getItem(_tripStoryDraftKey_());return raw?JSON.parse(raw):null;}catch(_){return null;}}
+function _tripStoryLoadDraftByKey_(key){try{const raw=key?sessionStorage.getItem(key):'';return raw?JSON.parse(raw):null;}catch(_){return null;}}
+function _tripStoryLoadDraft_(){return _tripStoryLoadDraftByKey_(_tripStoryDraftKey_());}
 function _tripStorySaveDraft_(story){try{sessionStorage.setItem(_tripStoryDraftKey_(),JSON.stringify(story));}catch(_){}}
 function _tripStoryClearDraft_(){try{sessionStorage.removeItem(_tripStoryDraftKey_());}catch(_){}
   _tripStorySetMinimizedState_(false);
 }
-// V93 · UI-only persistence. This flag never stores or mutates route data; it only
-// remembers that the route builder was intentionally minimized before navigation.
-// The payload stores the exact draft key so restoration also works before the async
-// account/session hydration has rebuilt currentUser on the returning Planner page.
+// V94 · UI-only persistence. Route data remains exclusively in the existing draft.
+// This payload remembers only where the guided builder was when it was minimized,
+// so cross-page navigation can restore the same screen without creating a second
+// source of truth for the journey itself.
 const ITBMO_TRIP_STORY_MINIMIZED_UI_KEY='itbmo_trip_story_minimized_ui_v1';
-function _tripStorySetMinimizedState_(value){try{if(value)sessionStorage.setItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY,JSON.stringify({draftKey:_tripStoryDraftKey_()}));else sessionStorage.removeItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);}catch(_){}}
+function _tripStorySetMinimizedState_(value,ui=null){try{if(value)sessionStorage.setItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY,JSON.stringify({draftKey:_tripStoryDraftKey_(),ui:ui&&typeof ui==='object'?ui:null}));else sessionStorage.removeItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);}catch(_){}}
 function _tripStoryMinimizedState_(){try{const raw=sessionStorage.getItem(ITBMO_TRIP_STORY_MINIMIZED_UI_KEY);if(!raw)return null;const x=JSON.parse(raw);return x&&typeof x.draftKey==='string'?x:null;}catch(_){return null;}}
 function _tripStoryDraftIsRecoverableByKey_(key){try{const raw=key?sessionStorage.getItem(key):'';if(!raw)return false;const d=JSON.parse(raw);return Boolean(d&&typeof d==='object'&&(Array.isArray(d.stays)||d.start||d.returnTrip));}catch(_){return false;}}
 function _tripStoryCreateResumeFab_(onResume){
@@ -13851,7 +13852,7 @@ function _tripStoryRestoreMinimizedFabAfterNavigation_(){
   const state=_tripStoryMinimizedState_();
   if(!state)return;
   if(!_tripStoryDraftIsRecoverableByKey_(state.draftKey)){_tripStorySetMinimizedState_(false);return;}
-  _tripStoryCreateResumeFab_(()=>{_tripStorySetMinimizedState_(false);openTripStoryBuilder();});
+  _tripStoryCreateResumeFab_(()=>{openTripStoryBuilder();});
 }
 function _tripStoryClampDepartureEnd_(prev,departureTime){if(!prev?.perDay?.length||!departureTime)return;const last=prev.perDay[prev.perDay.length-1],dep=_tripStoryTimeMinutes_(departureTime),cur=_tripStoryTimeMinutes_(last.end);if(dep!=null&&(cur==null||cur>dep))last.end=departureTime;}
 function _tripStoryApplyBoundaryHours_(story){const stays=story?.stays||[];if(!stays.length)return story;const first=stays[0],last=stays.at(-1);if(story.start?.arrivalTime&&(!story.start.arrivalDate||story.start.arrivalDate===first.startDate)){_tripStoryClampArrivalStart_(Object.assign(first,{arrivalTime:story.start.arrivalTime}));}for(let i=1;i<stays.length;i++){const st=stays[i],prev=stays[i-1],prevEnd=_tripStoryStayEnd_(prev);if(st.arrivalTime&&(!st.arrivalDate||st.arrivalDate===st.startDate))_tripStoryClampArrivalStart_(st);if(st.departureTime&&st.departureDate===prevEnd)_tripStoryClampDepartureEnd_(prev,st.departureTime);}if(story.returnTrip?.enabled&&story.returnTrip?.departureTime&&(!story.returnTrip.departureDate||story.returnTrip.departureDate===_tripStoryStayEnd_(last)))_tripStoryClampDepartureEnd_(last,story.returnTrip.departureTime);return story;}
@@ -13989,12 +13990,35 @@ function openTripStoryBuilder(){
   }
   const es=getLang()==='es';
   const engine=_travelV2();
-  let story=JSON.parse(JSON.stringify(_tripStoryLoadDraft_() || _tripStoryCurrent_()));
+  // V94: when returning from another page, use the exact draft key captured at
+  // minimize time. This avoids depending on asynchronous account hydration.
+  const minimizedResumeState=_tripStoryMinimizedState_();
+  const minimizedResumeDraft=minimizedResumeState&&_tripStoryDraftIsRecoverableByKey_(minimizedResumeState.draftKey)?_tripStoryLoadDraftByKey_(minimizedResumeState.draftKey):null;
+  let story=JSON.parse(JSON.stringify(minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryCurrent_()));
   story.start=story.start||{date:'',transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:''};
   story.returnTrip=story.returnTrip||{enabled:false,transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:''};
   story.stays=(story.stays||[]).map(_tripStoryEnsureStay_);
   if(!story.stays.length) story.stays=[_tripStoryEnsureStay_({days:1})];
   let phase='travelers', activeStay=0, pendingNextStay=null, editReturnPhase=null, editReturnStay=null, dayTripDraft=null, dayTripEditIndex=null;
+  // Restore only validated UI/navigation context. The journey itself was already
+  // loaded from the canonical session draft above.
+  const resumeUI=minimizedResumeState?.ui&&typeof minimizedResumeState.ui==='object'?minimizedResumeState.ui:null;
+  if(resumeUI){
+    const allowedPhases=new Set(['travelers','start','stay','decision','daytrip','movement','return','review']);
+    if(allowedPhases.has(resumeUI.phase))phase=resumeUI.phase;
+    const byId=id=>story.stays.findIndex(st=>st?.id===id);
+    const restoredActive=byId(resumeUI.activeStayId);
+    activeStay=restoredActive>=0?restoredActive:Math.min(Math.max(0,Number(resumeUI.activeStay)||0),story.stays.length-1);
+    const pendingIndex=byId(resumeUI.pendingNextStayId);
+    pendingNextStay=pendingIndex>=0?story.stays[pendingIndex]:null;
+    editReturnPhase=allowedPhases.has(resumeUI.editReturnPhase)?resumeUI.editReturnPhase:null;
+    const editIndex=byId(resumeUI.editReturnStayId);
+    editReturnStay=editIndex>=0?editIndex:(Number.isInteger(resumeUI.editReturnStay)&&resumeUI.editReturnStay>=0&&resumeUI.editReturnStay<story.stays.length?resumeUI.editReturnStay:null);
+    if(resumeUI.dayTripDraft&&typeof resumeUI.dayTripDraft==='object')dayTripDraft=_tripStoryEnsureDayTrip_(JSON.parse(JSON.stringify(resumeUI.dayTripDraft)));
+    dayTripEditIndex=Number.isInteger(resumeUI.dayTripEditIndex)?resumeUI.dayTripEditIndex:null;
+    if(phase==='daytrip'&&!dayTripDraft)phase='decision';
+    if((phase==='stay'||phase==='decision'||phase==='movement'||phase==='daytrip')&&!story.stays[activeStay]){activeStay=0;phase=story.stays[0]?.place?'decision':'stay';}
+  }
   const overlay=document.createElement('div'); overlay.className='trip-story-overlay guided-journey-overlay';
   overlay.innerHTML=`<div class="guided-journey" role="dialog" aria-modal="true" aria-label="${es?'Crea tu viaje':'Build your trip'}">
     <header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'No estás llenando un formulario. Estás viendo cómo tu viaje toma forma.':'You are not filling out a form. You are watching your trip take shape.'}</p></div><div class="guided-journey__window-actions"><button type="button" data-gj-minimize aria-label="${es?'Minimizar recorrido':'Minimize journey'}" title="${es?'Minimizar':'Minimize'}">−</button><button type="button" data-gj-close aria-label="${es?'Cerrar':'Close'}" title="${es?'Cerrar':'Close'}">×</button></div></header>
@@ -14005,6 +14029,13 @@ function openTripStoryBuilder(){
   document.body.appendChild(overlay); document.body.classList.add('trip-story-open');
   const active=overlay.querySelector('[data-gj-active]'), storyHost=overlay.querySelector('[data-gj-story]');
   const persist=()=>_tripStorySaveDraft_(story);
+  const captureUIState=()=>({
+    phase,activeStay,activeStayId:story.stays[activeStay]?.id||'',
+    pendingNextStayId:pendingNextStay?.id||'',
+    editReturnPhase,editReturnStay,editReturnStayId:Number.isInteger(editReturnStay)?(story.stays[editReturnStay]?.id||''):'',
+    dayTripDraft:dayTripDraft?JSON.parse(JSON.stringify(dayTripDraft)):null,
+    dayTripEditIndex:Number.isInteger(dayTripEditIndex)?dayTripEditIndex:null
+  });
   let minimized=false, minimizedFab=null;
   const removeMinimizedFab=()=>{if(minimizedFab?.isConnected)minimizedFab.remove();minimizedFab=null;};
   const restore=()=>{
@@ -14030,11 +14061,14 @@ function openTripStoryBuilder(){
     overlay.style.setProperty('display','none','important');
     document.body.classList.remove('trip-story-open');
     removeMinimizedFab();
-    _tripStorySetMinimizedState_(true);
+    _tripStorySetMinimizedState_(true,captureUIState());
     minimizedFab=_tripStoryCreateResumeFab_(restore);
   };
   const close=()=>{persist();_tripStorySetMinimizedState_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;};
   _tripStoryBuilderSession_={overlay,restore,minimize,close,get minimized(){return minimized;}};
+  // The resumed builder is now live; stale cross-page UI state must not survive a
+  // normal close/reload. Same-page minimize will write a fresh snapshot again.
+  if(minimizedResumeState)_tripStorySetMinimizedState_(false);
   overlay.querySelector('[data-gj-minimize]').onclick=minimize;
   overlay.querySelector('[data-gj-close]').onclick=close;
   const countryField=(value,code,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" data-country-code="${_tripStoryEsc_(code||'')}" placeholder="${es?'Escribe el país…':'Type country…'}"><div class="trip-story-suggestions" hidden></div></div>`;
