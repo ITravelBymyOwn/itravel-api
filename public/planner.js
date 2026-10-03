@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V112';
-const ITBMO_RUNTIME_ASSET='planner.js?v=230';
+const ITBMO_RUNTIME_BUILD='V113';
+const ITBMO_RUNTIME_ASSET='planner.js?v=231';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -4036,7 +4036,7 @@ function buildIntake(){
 const FORMAT = `
 Return ONLY valid JSON, without markdown, using one of these schemas:
 
-A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"...","from":"...","to":"...","transport":"...","duration":"...","notes":"..."}]}],"followup":"Short question"}
+A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"...","from":"...","to":"...","transport":"...","duration":"...","notes":"...","plan_status":"planned"}]}],"followup":"Short question"}
 
 B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Short question"}
 
@@ -4049,6 +4049,7 @@ Mandatory rules:
 - Use the explicitly selected itinerary language. If none was selected, use the dominant language of the user's natural-language content.
 - Return at least one renderable row whenever itinerary rows are requested.
 - Return no more than 20 rows per day.
+- Set plan_status on every row: planned for the actual itinerary; conditional only when the row should occur if a stated condition is met; fallback only as a true substitute; optional only for a genuinely optional scheduled add-on. Do not place a fallback/alternative as a second primary timed row when the equivalent planned experience already exists; keep that alternative in the relevant notes instead.
 - Optimize affected days globally: minimize unnecessary transfers, group logical zones, respect all daily windows and preserve continuity.
 - Before finalizing each day, compare plausible sequences and choose the geographically strongest order: minimize door-to-door travel, avoid backtracking, cluster nearby areas, respect the natural direction of the route, and avoid returning to a previously completed district unless operationally necessary.
 - Validate every row mathematically: pure movement rows equal their transport time; visit rows equal transport plus activity time. Correct any significant unexplained difference.
@@ -4985,6 +4986,12 @@ function normalizeRow(r = {}, fallbackDay = 1){
     _tie_unit_type:String(r._tie_unit_type ?? r.tie_unit_type ?? '').trim() || null,
     _tie_aurora_context:Boolean(r._tie_aurora_context ?? r.tie_aurora_context),
     _tie_aurora_row_authorized:Boolean(r._tie_aurora_row_authorized ?? r.tie_aurora_row_authorized),
+    plan_status:String(r.plan_status ?? r.planStatus ?? '').trim().toLowerCase() || null,
+    fallback_role:String(r.fallback_role ?? r.fallbackRole ?? '').trim() || null,
+    reservation_rigidity:String(r.reservation_rigidity ?? commerceContext?.reservation_rigidity ?? '').trim() || null,
+    calendar_sensitivity:String(r.calendar_sensitivity ?? commerceContext?.calendar_sensitivity ?? '').trim() || null,
+    _itbmo_semantics:(r._itbmo_semantics&&typeof r._itbmo_semantics==='object')?{...r._itbmo_semantics}:null,
+    _source_duration:r._source_duration||null,
     commerce_context:safeCommerce
   }));
 }
@@ -6332,10 +6339,45 @@ function _v110SemanticRole_(row={}){
   if(/\b(cooking class|clase de cocina|food tour|tour gastronomico|tasting experience|experiencia gastronomica)\b/.test(t)) return 'experience';
   if(/\b(lunch|almuerzo|dinner|cena|breakfast|desayuno|meal|comida|brunch)\b/.test(t)) return 'meal';
   if(/\b(rest|descanso|recovery|recuperacion|pausa|break)\b/.test(t)) return 'recovery';
-  if(/\b(buffer|margen|access|acceso|check in|control|queue|fila|security)\b/.test(t)) return 'buffer';
   if(/\b(return|regreso|retorno|back to|vuelta).*(hotel|alojamiento|base|lodging|accommodation)\b/.test(t)) return 'return';
+  if(/^(transfer|traslado|transporte|transport|regreso|retorno|return|walk to|caminar hacia|paseo hacia|drive to|conducir hacia|train to|tren hacia|bus to|autobus hacia)\b/.test(t)) return 'transfer';
+  if(/\b(buffer|margen|access|acceso|check in|control|queue|fila|security)\b/.test(t)) return 'buffer';
   if(/\b(free time|tiempo libre|flexible|flexibilidad)\b/.test(t)) return 'free_time';
   return 'experience';
+}
+
+// V113 canonical row semantics. Generated prose is never the source of truth for
+// physical duration. The compiler derives a compact typed contract from the row
+// interval and movement data; exports consume that contract without model calls.
+function _v113PlanStatus_(row={}){
+  const explicit=String(row?.plan_status||row?.planStatus||'').toLowerCase();
+  if(['planned','conditional','fallback','optional'].includes(explicit))return explicit;
+  if(row?.conditional===true)return 'conditional';
+  if(row?.optional===true)return 'optional';
+  const fallback=String(row?.fallback_role||'').trim().toLowerCase();
+  if(fallback&&fallback!=='none')return 'fallback';
+  return 'planned';
+}
+function _v113CanonicalizeRowSemantics_(row={}){
+  const out={...row};
+  const role=_v110SemanticRole_(out),span=_v110RowSpan_(out);
+  const movement=_transportBoundsFromField_(out.transport||'')||_durationBoundsMinutes_(_extractDurationPart_(out.duration||'','transport'));
+  const declared=_durationBoundsMinutes_(_extractDurationPart_(out.duration||'','activity'));
+  const moveMax=Math.max(0,Math.min(span,Number(movement?.max||0)));
+  const experience=Math.max(0,span-moveMax);
+  const status=_v113PlanStatus_(out);
+  out.plan_status=status;
+  out._itbmo_semantics={role,span_minutes:span,movement_minutes:moveMax,experience_minutes:experience,fixedness:(out.user_fixed||out.fixed||String(out.kind||'').toLowerCase()==='fixed_transfer')?'HARD_FIXED':'FLEXIBLE',plan_status:status};
+  if(['transfer','return'].includes(role)){
+    // Movement rows may keep a useful transport estimate, but never inherit the
+    // dwell time of the attraction they lead to/from.
+    out.duration='';
+  }else if(span>0&&declared&&Math.abs(Number(declared.max||0)-experience)>25){
+    const [,activityLabel]=_durationLabels_();
+    out._source_duration=out._source_duration||out.duration||null;
+    out.duration=`${activityLabel}: ${_minutesToHuman_(Math.max(1,experience))}`;
+  }
+  return out;
 }
 function _v110RowSpan_(row={}){
   const s=_hhmmToMinutes_(row.start),e=_hhmmToMinutes_(row.end);if(s==null||e==null)return 0;
@@ -6430,6 +6472,27 @@ function _v111LocationsCompatible_(a='',b='',city=''){
   if(cc&&(ca===cc||cb===cc))return true;
   return false;
 }
+function _v113TransitionReachesOrigin_(previousRow={},currentFrom=''){
+  if(!currentFrom)return true;
+  if(_v111LocationsCompatible_(previousRow?.to||'',currentFrom,''))return true;
+  const target=_canonicalText_(currentFrom);
+  if(!target)return true;
+  const text=_canonicalText_(`${previousRow?.activity||''} ${previousRow?.notes||''} ${previousRow?.to||''}`);
+  // A transition row can legitimately update location state even when its To
+  // field remained at POI granularity. Require the concrete next origin to be
+  // explicitly named; never infer a hidden visit.
+  return ['transfer','return','buffer'].includes(_v110SemanticRole_(previousRow)) && text.includes(target);
+}
+function _v113SemanticShiftRisk_(rows=[],delta=0){
+  const sensitive=[];
+  for(const r of rows||[]){
+    const rigidity=String(r?.reservation_rigidity||r?.commerce_context?.reservation_rigidity||'').toLowerCase();
+    const calendar=String(r?.calendar_sensitivity||r?.commerce_context?.calendar_sensitivity||'').toLowerCase();
+    const fixed=r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer';
+    if(fixed||rigidity==='high'||calendar==='high')sensitive.push(r);
+  }
+  return {blocked:delta>30&&sensitive.length>0,sensitive};
+}
 function _v111IssueKey_(e={}){
   const code=String(e?.code||'UNKNOWN');
   if(code==='GLOBAL_DUPLICATE_POI'){
@@ -6483,6 +6546,11 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       }
       if(!affected.length)continue;
       if(affected.some(r=>String(r?.kind||'').toLowerCase()==='fixed_transfer'||r?.user_fixed===true||r?.fixed===true))continue;
+      const semanticRisk=_v113SemanticShiftRisk_(affected,delta);
+      if(semanticRisk.blocked){
+        console.info(`[ITBMO V113 DIC SEMANTIC GUARD] ${city} · day ${day} · held +${delta} min propagation to protect ${semanticRisk.sensitive.length} sensitive row(s)`);
+        continue;
+      }
       let safe=true;
       for(const r of affected){
         const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);if(rs==null||re==null){safe=false;break;}
@@ -6496,7 +6564,7 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
         r.start=_minutesToHHMM_(rs+delta);r.end=_minutesToHHMM_(rend+delta);
       }
       shifts++;
-      console.info(`[ITBMO V112 DIC TIMELINE] ${city} · day ${day} · propagated +${delta} min from row ${i+1}`);
+      console.info(`[ITBMO V113 DIC TIMELINE] ${city} · day ${day} · propagated +${delta} min from row ${i+1}`);
     }
   }
   return {rows:out,shifts};
@@ -6660,7 +6728,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         }
       }
 
-      if(i>0 && priorTo && r.from && !_v111LocationsCompatible_(priorTo,r.from,city)){
+      if(i>0 && priorTo && r.from && !_v111LocationsCompatible_(priorTo,r.from,city) && !_v113TransitionReachesOrigin_(dayRows[i-1]||{},r.from)){
         const previousRow=dayRows[i-1]||{};
         // V110: a transport/return cannot originate from a place the chronology
         // never reached. Do not silently rewrite this away: it may reveal a missing
@@ -7833,7 +7901,7 @@ function _v3FitDurationToInterval_(row={}){
 
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
-  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows; // V110: transport rows cannot leak activity dwell metadata.
+  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113: timeline first, then canonical row semantics.
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
@@ -8168,6 +8236,7 @@ async function _tieCallStructure_(request){
     const value={plan:data.plan,fingerprint,duration_ms:Math.round(performance.now()-started)};
     _tieStructureCache_.set(fingerprint,value);
     console.info('[ITBMO TIE] structure accepted',{base:request.stay?.base_destination,days:request.stay?.days,confidence:data.plan.confidence,duration_ms:value.duration_ms,units:data.plan.units.map(u=>({day:u.day,type:u.type,identity:u.identity,microstops:(u.route_manifest||[]).length})),overlays:(data.plan.night_overlays||[]).length,inventory:(data.plan.experience_inventory||[]).map(x=>({experience:x.experience,significance:x.significance,selected:Boolean(x.selected),owner_day:x.owner_day||null,guided_tour_value:x.guided_tour_value||null})),coverage:data.plan.coverage_summary||null});
+    console.info('[ITBMO V113 TIE EXPERIENCE DECISIONS]',{base:request.stay?.base_destination,selected:(data.plan.experience_inventory||[]).filter(x=>x.selected).map(x=>({experience:x.experience,significance:x.significance,owner_day:x.owner_day||null,best_mode:x.best_mode||null})),omitted:(data.plan.experience_inventory||[]).filter(x=>!x.selected).map(x=>({experience:x.experience,significance:x.significance,reason:x.omission_reason||null,fallback_role:x.fallback_role||null,verification_required:Boolean(x.verification_required)})),coverage:data.plan.coverage_summary||null});
     return value;
   }catch(error){
     console.warn('[ITBMO TIE] safe fallback to V98 physical structure',error);
@@ -8541,7 +8610,9 @@ function _v3StampStayRows_(rows=[],unit={}){
     const directive=(unit.tie_structure?.day_directives||[]).find(d=>Number(d?.day)===day)||null;
     const overlays=(unit.tie_structure?.night_overlays||[]).filter(o=>(o?.eligible_days||[]).map(Number).includes(day));
     const auroraAuthorized=overlays.some(o=>_tieAuroraOverlay_(o));
-    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null}}];
+    const inventory=(unit.tie_structure?.experience_inventory||[]).filter(x=>x?.selected&&Number(x?.owner_day||0)===day);
+    const inventoryMatch=inventory.find(x=>_arePoiAliases_(x?.experience||'',row?.to||'')||_arePoiAliases_(x?.experience||'',row?.activity||''))||null;
+    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
   });
   // V71 · if ITBMO had to move an estimated full-day excursion away from an
   // impossible transition day, explain the adjustment once in traveler-facing
@@ -11534,12 +11605,13 @@ function normalizeCellText(v){
 }
 
 function _v39VisibleDuration_(row={}){
+  const semantic=row?._itbmo_semantics;
+  if(semantic&&['transfer','return'].includes(String(semantic.role||'')))return '';
   const raw=String(row?.duration||'').trim();
   if(!raw)return '';
   const activity=_durationBoundsMinutes_(_extractDurationPart_(raw,'activity'));
   const movement=_transportBoundsFromField_(row?.transport||'');
-  const from=String(row?.from||'').trim(),to=String(row?.to||'').trim();
-  // Presentation/export only. Never mutate the canonical V34 itinerary row.
+  // V113: canonical semantics, when available, are authoritative for display.
   if(activity && activity.max<=1 && movement)return '';
   return _sanitizeDurationLines_(raw,row?.transport||'');
 }
@@ -11942,13 +12014,41 @@ async function exportItineraryToPDF(options={}){
       let y=start;choice.cards.slice(0,choice.split).forEach(c=>{paint(c,left,y);y+=c.height+4;});
       y=start;choice.cards.slice(choice.split).forEach(c=>{paint(c,left+width+gap,y);y+=c.height+4;});
     }else{
-      // Never clip or silently discard text. Extremely verbose days receive a
-      // continuation page; ordinary days remain one calendar day per page.
-      const cards=layout(rows,8.1).cards;let column=0,y=start;
-      for(const card of cards){
-        if(y+card.height>footer){column++;y=start;}
-        if(column>=2){doc.addPage('a4','portrait');header(day,null,route,true);column=0;y=165;}
-        paint(card,left+column*(width+gap),y);y+=card.height+4;
+      // V113 day-first adaptive pagination. Content is authoritative: a day may
+      // use multiple pages, but continuation pages are balanced and we avoid a
+      // one-card orphan whenever a clean two-card continuation is possible.
+      const cards=layout(rows,8.1).cards;let offset=0,pageIndex=0;
+      while(offset<cards.length){
+        const pageStart=pageIndex===0?start:165;
+        const pageAvailable=footer-pageStart;
+        let take=0,best=null;
+        for(let n=1;n<=cards.length-offset;n++){
+          const subset=cards.slice(offset,offset+n);
+          let localBest=null;
+          for(let split=0;split<=subset.length;split++){
+            const a=subset.slice(0,split).reduce((sum,c)=>sum+c.height+4,0);
+            const b=subset.slice(split).reduce((sum,c)=>sum+c.height+4,0);
+            const max=Math.max(a,b);
+            if(!localBest||max<localBest.max)localBest={split,max};
+          }
+          if(localBest.max<=pageAvailable){take=n;best=localBest;}else break;
+        }
+        if(!take){take=1;best={split:1,max:cards[offset].height+4};}
+        const remaining=cards.length-(offset+take);
+        if(remaining===1&&take>2){
+          take--;
+          const subset=cards.slice(offset,offset+take);best=null;
+          for(let split=0;split<=subset.length;split++){
+            const a=subset.slice(0,split).reduce((sum,c)=>sum+c.height+4,0);
+            const b=subset.slice(split).reduce((sum,c)=>sum+c.height+4,0);
+            const max=Math.max(a,b);if(!best||max<best.max)best={split,max};
+          }
+        }
+        if(pageIndex>0){doc.addPage('a4','portrait');header(day,null,route,true);}
+        const subset=cards.slice(offset,offset+take);
+        let y=pageStart;subset.slice(0,best.split).forEach(c=>{paint(c,left,y);y+=c.height+4;});
+        y=pageStart;subset.slice(best.split).forEach(c=>{paint(c,left+width+gap,y);y+=c.height+4;});
+        offset+=take;pageIndex++;
       }
     }
   }
@@ -11959,7 +12059,7 @@ async function exportItineraryToPDF(options={}){
     doc.text(es?'I Travel By My Own · Itinerario personal':'I Travel By My Own · Personal itinerary',34,H-14);
   }
   const blob=doc.output('blob');if(options.download!==false)await deliverGeneratedFile(blob,filename);
-  trackITBMOEvent('export_pdf',{file_type:'pdf',layout:'compact_two_column_calendar_v10',destinations:blocks.length,days:days.length,pages:total});
+  trackITBMOEvent('export_pdf',{file_type:'pdf',layout:'day_first_adaptive_calendar_v11',destinations:blocks.length,days:days.length,pages:total});
   return {blob,filename,kind:'itinerary_pdf'};
 }
 
