@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V110';
-const ITBMO_RUNTIME_ASSET='planner.js?v=228';
+const ITBMO_RUNTIME_BUILD='V111';
+const ITBMO_RUNTIME_ASSET='planner.js?v=229';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -142,8 +142,8 @@ const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
 const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,12000];
 // V2.10.66: quality convergence happens internally and Day Trips are isolated physical units. A traveler-facing retry is
 // reserved for genuinely interrupted/technical runs, not normal QA convergence.
-const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 5;
-const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 6;
+const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 2; // V111 convergence budget: one primary generation + at most one structural regeneration
+const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 1; // V111: one localized semantic repair after deterministic compilation
 const ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS = 3;
 let paidGenerationRunning = false;
 let generationRecoveryState = null;
@@ -6405,6 +6405,93 @@ function _v40DistinctPoiExperience_(a={},b={}){
   return (exterior(at)&&interior(bt))||(interior(at)&&exterior(bt));
 }
 
+// V111 Deterministic Itinerary Compiler (DIC). Luna owns travel intelligence;
+// code owns arithmetic, identity, continuity and convergence. These helpers are
+// intentionally destination-agnostic and run without model/API calls.
+function _v111BroadPlace_(value=''){
+  const t=_canonicalText_(value);
+  if(!t)return true;
+  return /\b(centro historico|historic center|historical center|city center|downtown|old town|casco historico|barrio|neighborhood|district|distrito|quarter|zona|area|entorno|waterfront|riverside|riverfront|seafront|centro de|center of)\b/.test(t);
+}
+function _v111ExperienceVisitRow_(row={}){
+  if(_isUtilityRow_(row)||_isPureTransportRow_(row))return false;
+  if(_v110SemanticRole_(row)!=='experience')return false;
+  const place=String(row?.to||row?.activity||'').trim();
+  return Boolean(place)&&!_v111BroadPlace_(place);
+}
+function _v111LocationsCompatible_(a='',b='',city=''){
+  if(!a||!b)return true;
+  if(_arePoiAliases_(a,b))return true;
+  const ca=_canonicalText_(a),cb=_canonicalText_(b),cc=_canonicalText_(city);
+  if(!ca||!cb)return true;
+  // POI -> containing district/city references are physically compatible. The
+  // compiler only raises an orphan when BOTH endpoints look concrete and distinct.
+  if(_v111BroadPlace_(a)||_v111BroadPlace_(b))return true;
+  if(cc&&(ca===cc||cb===cc))return true;
+  return false;
+}
+function _v111IssueKey_(e={}){
+  const code=String(e?.code||'UNKNOWN');
+  if(code==='GLOBAL_DUPLICATE_POI'){
+    const days=(e?.days||[]).map(Number).filter(Boolean).sort((a,b)=>a-b).join(',');
+    return `${code}|${days}|${_canonicalText_(e?.first||'')}|${_canonicalText_(e?.second||'')}`;
+  }
+  if(code==='OVERLAP')return `${code}|${Number(e?.day||0)}|${Number(e?.row||0)}|${_canonicalText_(e?.activity||'')}`;
+  if(code==='ORPHAN_TRANSFER_ORIGIN'||code==='CONTINUITY')return `${code}|${Number(e?.day||0)}|${Number(e?.row||0)}|${_canonicalText_(e?.previous_to||'')}|${_canonicalText_(e?.current_from||'')}`;
+  return `${code}|${Number(e?.day||0)}|${Number(e?.row||0)}|${JSON.stringify(e?.days||[])}|${String(e?.window_id||'')}`;
+}
+function _v111DedupeAuditErrors_(errors=[]){
+  const seen=new Set(),out=[];
+  for(const e of errors||[]){const k=_v111IssueKey_(e);if(seen.has(k))continue;seen.add(k);out.push(e);}
+  return out;
+}
+function _v111WindowForRow_(row={},contract={}){
+  const day=Number(row?.day||0),id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
+  const routeDay=(contract?.route_days||[]).find(d=>Number(d?.day)===day);
+  const windows=routeDay?.location_windows||[];
+  return windows.find(w=>id&&String(w?.window_id||'')===id) || windows.find(w=>!w?.start||(_hhmmToMinutes_(row.start)>=_hhmmToMinutes_(w.start)&&(!w?.end||_hhmmToMinutes_(row.end)<=_hhmmToMinutes_(w.end)))) || null;
+}
+function _v111CompileTimeline_(city,rows=[],contract={}){
+  let out=JSON.parse(JSON.stringify(rows||[]));
+  let shifts=0;
+  const byDay=_rowsByDayObject_(out);
+  for(const [dayKey,dayRowsRaw] of Object.entries(byDay)){
+    const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')));
+    for(let i=1;i<dayRows.length;i++){
+      const prev=dayRows[i-1],cur=dayRows[i];
+      const ps=_hhmmToMinutes_(prev.start),pe=_hhmmToMinutes_(prev.end),cs=_hhmmToMinutes_(cur.start),ce=_hhmmToMinutes_(cur.end);
+      if(ps==null||pe==null||cs==null||ce==null)continue;
+      let prevEnd=pe;if(prevEnd<=ps)prevEnd+=1440;
+      let curStart=cs,curEnd=ce;if(curEnd<=curStart)curEnd+=1440;
+      if(curStart>=prevEnd)continue;
+      const delta=prevEnd-curStart;
+      // Pure arithmetic overlap: shift this row and the following flexible chain.
+      // Never move user-fixed/fixed-transfer rows; never push beyond a closed
+      // authoritative planning window. Large contradictions remain for semantic repair.
+      if(delta<=0||delta>180)continue;
+      const affected=dayRows.slice(i);
+      if(affected.some(r=>String(r?.kind||'').toLowerCase()==='fixed_transfer'||r?.user_fixed===true||r?.fixed===true))continue;
+      let safe=true;
+      for(const r of affected){
+        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);if(rs==null||re==null){safe=false;break;}
+        let rend=re;if(rend<=rs)rend+=1440;
+        const w=_v111WindowForRow_(r,contract),wend=_hhmmToMinutes_(w?.end);
+        if(wend!=null&&rend+delta>wend){safe=false;break;}
+      }
+      if(!safe)continue;
+      for(const r of affected){
+        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);let rend=re;if(rend<=rs)rend+=1440;
+        r.start=_minutesToHHMM_(rs+delta);r.end=_minutesToHHMM_(rend+delta);
+      }
+      shifts++;
+      console.info(`[ITBMO V111 DIC TIMELINE] ${city} · day ${day} · propagated +${delta} min from row ${i+1}`);
+    }
+  }
+  return {rows:out,shifts};
+}
+function _v111CompileAuditReport_(report={}){
+  return {...report,errors:_v111DedupeAuditErrors_(report?.errors||[])};
+}
 function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',routeContextOverride=undefined,expectedDaysOverride=undefined){
   const errors=[];
   const byDay=_rowsByDayObject_(rows);
@@ -6486,7 +6573,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         }
       }
 
-      if(i>0 && priorTo && r.from && !_arePoiAliases_(priorTo,r.from)){
+      if(i>0 && priorTo && r.from && !_v111LocationsCompatible_(priorTo,r.from,city)){
         const previousRow=dayRows[i-1]||{};
         // V110: a transport/return cannot originate from a place the chronology
         // never reached. Do not silently rewrite this away: it may reveal a missing
@@ -6509,11 +6596,11 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       }
       priorTo=r.to;
 
-      if(!_isUtilityRow_(r)){
+      if(_v111ExperienceVisitRow_(r)){
         const poi=_poiKeyFromRow_(r);
         const physicalKey=_canonicalText_(r?.physical_location||r?.commerce_context?.physical_destination||city);
         for(const prior of seenPois){
-          if(prior.day!==day && prior.physicalKey===physicalKey && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
+          if(prior.day!==day && _v111ExperienceVisitRow_(prior.row) && prior.physicalKey===physicalKey && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
             errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],first:prior.label,second:r.to||r.activity,physical_location:physicalKey});
             break;
           }
@@ -7433,26 +7520,23 @@ function _v3AuditSummary_(report={}){
 }
 
 function _v3HardBlockingCodes_(){
+  // V111: HARD means physically impossible, missing authoritative structure, or
+  // direct user-constraint violation. Quality/opportunity findings never trigger
+  // regeneration by themselves.
   return new Set([
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','WRONG_OVERNIGHT_BASE',
-    'INVENTED_DEPARTURE_LOGISTICS',
-    'ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','REGIONAL_DAY_TOO_THIN','UNEXPLAINED_GAP',
-    'GLOBAL_DUPLICATE_POI','CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP',
-    'GENERIC_TO','AMBIGUOUS_TO','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','DURATION_UNPARSEABLE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
+    'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT'
   ]);
 }
 
 function _v3RepairableCodes_(){
   return new Set([
     ..._v3HardBlockingCodes_(),
-    'GLOBAL_DUPLICATE_POI','GENERIC_TO','AMBIGUOUS_TO',
-    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','REGIONAL_DAY_TOO_THIN','UNEXPLAINED_GAP',
-    'ROUTE_WINDOW_TOO_THIN',
-    'OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
-    'MISSING_AURORA_FINAL_NOTE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
-    'DURATION_UNPARSEABLE','REPETITIVE_NOTE_TEMPLATE','UNJUSTIFIED_EXTREME_START','WEEKDAY_DATE_MISMATCH'
+    'GENERIC_TO','AMBIGUOUS_TO','CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP',
+    'OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW','MISSING_AURORA_FINAL_NOTE',
+    'DURATION_UNPARSEABLE','WEEKDAY_DATE_MISMATCH'
   ]);
 }
 
@@ -7661,7 +7745,8 @@ function _v3FitDurationToInterval_(row={}){
 }
 
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
-  let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r); // V110: transport rows cannot leak activity dwell metadata.
+  let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
+  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows; // V110: transport rows cannot leak activity dwell metadata.
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
@@ -7809,7 +7894,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     out=_v3EnforceHardRouteFacts_(out,contract);
     if(!changed) break;
   }
-  const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride);
+  const report=_v111CompileAuditReport_(_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride));
   if(removed.length) console.info(`[ITBMO V3 NORMALIZE] ${city}: deterministic duplicate cleanup`,removed);
   console.info(`[ITBMO V3 NORMALIZE] ${city}`,_v3AuditSummary_(report));
   return {rows:out,report};
@@ -8541,7 +8626,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // windows instead of discovering them only after the deterministic trip merge.
     const physical=_v3PhysicalWindowCoverage_(rows,[unit]);
     const missing=physical.missing.map(w=>({code:'MISSING_PHYSICAL_WINDOW',day:w.day,stay_unit_id:w.stay_unit_id,window_id:w.window_id,location:w.location,window:`${w.start||''}-${w.end||'open'}`,instruction:'Plan useful, coherent content inside this authoritative physical window; do not alter fixed transfers.'}));
-    return {...base,errors:[...(base.errors||[]),...missing]};
+    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing]});
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
@@ -8551,7 +8636,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
   rows=_v3StampStayRows_(normalized.rows,unit);
   let report=audit(rows);
   let material=_v3MaterialAuditErrors_(report);
-  const repairBudget=Math.max(2,Math.min(ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS,_v3AdaptiveRepairBudget_(scopedContract,Math.max(1,unitDays.length))+1));
+  const repairBudget=ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS;
   let attempt=0,previousFingerprint='',stagnant=0;
 
   while(material.length && attempt<repairBudget){
@@ -8628,7 +8713,11 @@ Repair ONLY the supplied scope. Preserve all valid content you can. Keep every r
     const afterBlocking=_v3BlockingAuditErrors_(nextReport).length;
     const improved=afterBlocking<beforeBlocking || (afterBlocking===beforeBlocking && (after<before || (after===before && (nextReport.errors||[]).length<(report.errors||[]).length)));
     if(improved){rows=nextRows;report=nextReport;material=_v3MaterialAuditErrors_(report);stagnant=0;}
-    else{stagnant+=1;}
+    else{
+      stagnant+=1;
+      console.warn(`[ITBMO V111 PROGRESS GATE] ${unitCity} · ${unit.id}: repair produced no objective reduction in blocking/weighted issues; candidate rejected and no identical repair will be repeated.`);
+      break;
+    }
   }
 
   // A Stay may never be accepted with a missing global day when that day owns a
