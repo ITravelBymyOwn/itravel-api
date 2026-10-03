@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V111';
-const ITBMO_RUNTIME_ASSET='planner.js?v=229';
+const ITBMO_RUNTIME_BUILD='V112';
+const ITBMO_RUNTIME_ASSET='planner.js?v=230';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6469,7 +6469,19 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       // Never move user-fixed/fixed-transfer rows; never push beyond a closed
       // authoritative planning window. Large contradictions remain for semantic repair.
       if(delta<=0||delta>180)continue;
-      const affected=dayRows.slice(i);
+      // V112: propagate only inside the SAME authoritative planning window. A
+      // daytime arithmetic collision must never push a later night overlay (or a
+      // separate post-return window) and thereby make an otherwise solvable shift
+      // look unsafe. This is the Moray/Maras edge exposed by the V111 Cusco PDF.
+      const curWindow=String(cur?.planning_window_id||cur?.commerce_context?.planning_window_id||'');
+      const affected=[];
+      for(const r of dayRows.slice(i)){
+        const rowWindow=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'');
+        if(curWindow && rowWindow && rowWindow!==curWindow) break;
+        if(curWindow && !rowWindow) break;
+        affected.push(r);
+      }
+      if(!affected.length)continue;
       if(affected.some(r=>String(r?.kind||'').toLowerCase()==='fixed_transfer'||r?.user_fixed===true||r?.fixed===true))continue;
       let safe=true;
       for(const r of affected){
@@ -6484,11 +6496,86 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
         r.start=_minutesToHHMM_(rs+delta);r.end=_minutesToHHMM_(rend+delta);
       }
       shifts++;
-      console.info(`[ITBMO V111 DIC TIMELINE] ${city} · day ${day} · propagated +${delta} min from row ${i+1}`);
+      console.info(`[ITBMO V112 DIC TIMELINE] ${city} · day ${day} · propagated +${delta} min from row ${i+1}`);
     }
   }
   return {rows:out,shifts};
 }
+
+// V112 semantic conservation gate. Local repair is allowed to change the rows
+// implicated by a validator finding, but it is never allowed to erase a healthy
+// experience anchor elsewhere in the affected day. This is deliberately based on
+// the pre-repair itinerary rather than destination names, so it remains global.
+function _v112ProtectedAnchorManifest_(rows=[],findings=[]){
+  const implicated=new Set();
+  for(const f of findings||[]){
+    const day=Number(f?.day||0); if(!day)continue;
+    for(const n of [f?.row,f?.previous_row].map(Number).filter(Boolean)) implicated.add(`${day}|${n}`);
+  }
+  const manifest=[];
+  const byDay=_rowsByDayObject_(rows);
+  for(const [dayKey,arr] of Object.entries(byDay)){
+    const day=Number(dayKey);
+    arr.forEach((r,index)=>{
+      const row=index+1;
+      if(implicated.has(`${day}|${row}`))return;
+      if(!_v111ExperienceVisitRow_(r))return;
+      const key=_poiKeyFromRow_(r)||_canonicalText_(r?.to||r?.activity||'');
+      if(key)manifest.push({day,key,label:r?.to||r?.activity||key});
+    });
+  }
+  return manifest;
+}
+function _v112MissingProtectedAnchors_(manifest=[],rows=[]){
+  const byDay=_rowsByDayObject_(rows),missing=[];
+  for(const a of manifest||[]){
+    const found=(byDay[a.day]||[]).some(r=>{
+      if(!_v111ExperienceVisitRow_(r))return false;
+      const key=_poiKeyFromRow_(r)||_canonicalText_(r?.to||r?.activity||'');
+      return key&&_arePoiAliases_(key,a.key);
+    });
+    if(!found)missing.push(a);
+  }
+  return missing;
+}
+
+function _v112RepairBlockRows_(rows=[],findings=[],scopeDays=[]){
+  const fullDayCodes=new Set(['MISSING_DAY','MISSING_PHYSICAL_WINDOW','WRONG_OVERNIGHT_BASE']);
+  if((findings||[]).some(f=>fullDayCodes.has(String(f?.code||'')))){
+    const set=new Set((scopeDays||[]).map(Number));
+    return (rows||[]).filter(r=>set.has(Number(r?.day)));
+  }
+  const byDay=_rowsByDayObject_(rows),selected=[];
+  const seen=new Set();
+  const add=(r)=>{if(!r)return;const k=`${r.day}|${r.start}|${r.end}|${r.activity||''}|${r.to||''}`;if(seen.has(k))return;seen.add(k);selected.push(r);};
+  for(const f of findings||[]){
+    const day=Number(f?.day||0),arr=byDay[day]||[];if(!day||!arr.length)continue;
+    const indexes=new Set();
+    for(const n of [f?.previous_row,f?.row].map(Number).filter(Boolean)){
+      indexes.add(n-1);
+      // Give the model one row of local context on either side, but never the
+      // entire day. Healthy rows outside this block remain immutable at merge.
+      indexes.add(n-2);indexes.add(n);
+    }
+    [...indexes].filter(i=>i>=0&&i<arr.length).sort((a,b)=>a-b).forEach(i=>add(arr[i]));
+  }
+  return selected.length?selected:(rows||[]).filter(r=>new Set((scopeDays||[]).map(Number)).has(Number(r?.day)));
+}
+
+function _v112GenerationCoverage_(rows=[],unit={}){
+  const expected=[...new Set((unit?.days||[]).map(Number).filter(Boolean))];
+  const received=new Set((rows||[]).map(r=>Number(r?.day)).filter(Boolean));
+  const covered=expected.filter(d=>received.has(d));
+  return {expected,covered,missing:expected.filter(d=>!received.has(d)),ratio:expected.length?covered.length/expected.length:1,rowCount:(rows||[]).length};
+}
+function _v112GenerationStructurallyInvalid_(rows=[],unit={}){
+  const c=_v112GenerationCoverage_(rows,unit);
+  // Zero output or less than half of a multi-day Stay is a failed generation,
+  // not fourteen independent QA defects. Retry generation directly; do not pay
+  // Luna to "repair" an absent itinerary.
+  return {invalid:c.rowCount===0 || (c.expected.length>=3 && c.ratio<0.5),coverage:c};
+}
+
 function _v111CompileAuditReport_(report={}){
   return {...report,errors:_v111DedupeAuditErrors_(report?.errors||[])};
 }
@@ -8653,13 +8740,15 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     const repairScope=naturalScope; // V110: never broaden a local defect into a whole-Stay rewrite just because the retry budget is ending.
     const scopeDays=repairScope.type==='stay'?unitDays:repairScope.days;
     const scopeDaySet=new Set(scopeDays.map(Number));
-    const repairRows=repairScope.type==='stay'?rows:rows.filter(r=>scopeDaySet.has(Number(r.day)));
-    const repairWindows=repairScope.type==='stay'?(stayContract.windows||[]):(stayContract.windows||[]).filter(w=>scopeDaySet.has(Number(w.day)));
     const repairFindings=repairScope.type==='stay'?material:material.filter(e=>{
       const days=[e?.day,...(Array.isArray(e?.days)?e.days:[])].map(Number).filter(Boolean);
       return !days.length||days.some(d=>scopeDaySet.has(d));
     });
-    console.info(`[ITBMO V3 REPAIR SCOPE] ${unitCity} · ${unit.id} · ${repairScope.type}${scopeDays.length?` · day(s) ${scopeDays.join(',')}`:''} · full Stay QA after merge`);
+    const repairRows=_v112RepairBlockRows_(rows,repairFindings,scopeDays);
+    const repairWindows=repairScope.type==='stay'?(stayContract.windows||[]):(stayContract.windows||[]).filter(w=>scopeDaySet.has(Number(w.day)));
+    // V112 repairRows are a local block whenever the itinerary exists; missing
+    // day/window findings intentionally expose the whole affected day.
+    console.info(`[ITBMO V3 REPAIR SCOPE] ${unitCity} · ${unit.id} · ${repairScope.type}${scopeDays.length?` · day(s) ${scopeDays.join(',')}`:''} · block rows ${repairRows.length} · full Stay QA after merge`);
     const prompt=`
 PHYSICAL STAY LOCAL QA REPAIR CONTRACT — authoritative JSON:
 ${JSON.stringify({...stayContract,windows:repairWindows})}
@@ -8667,13 +8756,13 @@ ${JSON.stringify({...stayContract,windows:repairWindows})}
 REPAIR SCOPE:
 ${JSON.stringify({type:repairScope.type,days:scopeDays})}
 
-CURRENT ROWS INSIDE THE REPAIR SCOPE ONLY:
+CURRENT LOCAL ROW BLOCK(S) INSIDE THE REPAIR SCOPE ONLY:
 ${JSON.stringify(repairRows)}
 
 LOCAL VALIDATOR FINDINGS TO CORRECT:
 ${JSON.stringify(repairFindings)}
 
-Repair ONLY the supplied scope. Preserve all valid content you can. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
+Repair ONLY the supplied local row block(s). Rows not supplied are immutable and must not be recreated, summarized or deleted. Preserve the semantic identity of every healthy experience anchor. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
 `.trim();
     const raw=await _v3Call_(prompt);
     const parsed=parseJSON(raw);
@@ -8707,6 +8796,13 @@ Repair ONLY the supplied scope. Preserve all valid content you can. Keep every r
       .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
     normalized=_v3DeterministicQualityCleanup_(unitCity,mergedCandidate,scopedContract,totalDays,scopedPerDay,unitAuditBaseDate,false,unitDays);
     const nextRows=_v3StampStayRows_(normalized.rows,unit);
+    const protectedAnchors=_v112ProtectedAnchorManifest_(rows,repairFindings);
+    const missingProtected=_v112MissingProtectedAnchors_(protectedAnchors,nextRows);
+    if(missingProtected.length){
+      stagnant+=1;
+      console.warn(`[ITBMO V112 PATCH INTEGRITY] ${unitCity} · ${unit.id}: repair candidate rejected because it removed protected experience anchor(s)`,missingProtected);
+      break;
+    }
     const nextReport=audit(nextRows);
     const before=_auditScore_(report),after=_auditScore_(nextReport);
     const beforeBlocking=_v3BlockingAuditErrors_(report).length;
@@ -8715,7 +8811,7 @@ Repair ONLY the supplied scope. Preserve all valid content you can. Keep every r
     if(improved){rows=nextRows;report=nextReport;material=_v3MaterialAuditErrors_(report);stagnant=0;}
     else{
       stagnant+=1;
-      console.warn(`[ITBMO V111 PROGRESS GATE] ${unitCity} · ${unit.id}: repair produced no objective reduction in blocking/weighted issues; candidate rejected and no identical repair will be repeated.`);
+      console.warn(`[ITBMO V112 PROGRESS GATE] ${unitCity} · ${unit.id}: repair produced no objective reduction in blocking/weighted issues; candidate rejected and no identical repair will be repeated.`);
       break;
     }
   }
@@ -8805,14 +8901,23 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
         try{
           console.log(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · isolated attempt ${stayAttempt}/${ITBMO_STAY_GENERATION_MAX_ATTEMPTS}`);
           const generated=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
+          const generationGate=_v112GenerationStructurallyInvalid_(generated,unit);
+          if(generationGate.invalid){
+            const structuralError=new Error(`V3_STAY_GENERATION_INVALID:${unit.id}:${label}`);
+            structuralError.v3StructuralGenerationFailure=true;
+            structuralError.v3BlockingErrors=[{code:'STRUCTURAL_GENERATION_FAILURE',...generationGate.coverage}];
+            console.warn(`[ITBMO V112 GENERATION GATE] ${label}: structurally incomplete model output; skipping QA repair and retrying generation directly`,generationGate.coverage);
+            throw structuralError;
+          }
           const audited=await _v3AuditAndRepairPhysicalStay_(contract,unit,generated,dest.days,perDay,baseDate);
           accepted={unit,rows:audited.rows,audit:audited.report,warnings:audited.warnings,accepted_attempt:stayAttempt};
           await _v3AcceptedStaySet_(contract,unit,{rows:accepted.rows,audit:accepted.audit,warnings:accepted.warnings,accepted_attempt:stayAttempt});
         }catch(error){
           lastError=error;
           const qualityBlock=/V3_STAY_QUALITY_BLOCK/.test(String(error?.message||''));
+          const structuralGenerationFailure=Boolean(error?.v3StructuralGenerationFailure)||/V3_STAY_GENERATION_INVALID/.test(String(error?.message||''));
           console.warn(`[ITBMO V3 STAY RETRY] ${label} · isolated attempt ${stayAttempt} failed`,error?.v3BlockingErrors||error);
-          if(!qualityBlock)break;
+          if(!qualityBlock&&!structuralGenerationFailure)break;
         }
       }
       if(accepted)results[index]=accepted;
