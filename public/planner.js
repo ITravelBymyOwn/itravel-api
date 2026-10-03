@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V114.1';
-const ITBMO_RUNTIME_ASSET='planner.js?v=233';
+const ITBMO_RUNTIME_BUILD='V115';
+const ITBMO_RUNTIME_ASSET='planner.js?v=234';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6557,6 +6557,104 @@ function _v111WindowForRow_(row={},contract={}){
   const windows=routeDay?.location_windows||[];
   return windows.find(w=>id&&String(w?.window_id||'')===id) || windows.find(w=>!w?.start||(_hhmmToMinutes_(row.start)>=_hhmmToMinutes_(w.start)&&(!w?.end||_hhmmToMinutes_(row.end)<=_hhmmToMinutes_(w.end)))) || null;
 }
+
+// V115 Adaptive Semantic Shield (ASS).
+// This layer is deliberately destination-agnostic and model-free. It does not
+// generate attractions, reorder TIE units, or modify user-fixed facts. Instead it
+// protects the already-generated itinerary from three classes of deterministic
+// post-processing failure: cross-midnight causal inversion, utility-duration
+// outliers, and unsafe cascade shifts. All decisions are derived from row semantics,
+// the itinerary's own peer durations, and authoritative TIE/window metadata.
+function _v115Median_(values=[]){
+  const a=(values||[]).map(Number).filter(Number.isFinite).sort((x,y)=>x-y);
+  if(!a.length)return null; const m=Math.floor(a.length/2);
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+function _v115IsHardRow_(r={}){
+  const rigidity=String(r?.reservation_rigidity||r?.commerce_context?.reservation_rigidity||'').toLowerCase();
+  return r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer'||rigidity==='high';
+}
+function _v115IsCrossMidnightNightRow_(r={}){
+  if(!_v114IsNightOverlayRow_(r))return false;
+  const s=_hhmmToMinutes_(r?.start),e=_hhmmToMinutes_(r?.end);
+  return s!=null&&e!=null&&e<=s;
+}
+function _v115AdaptiveUtilityCeiling_(role,rows=[]){
+  const peers=(rows||[]).filter(r=>_v110SemanticRole_(r)===role&&!_v115IsHardRow_(r)).map(_v110RowSpan_).filter(v=>v>=15&&v<=240);
+  const median=_v115Median_(peers);
+  // The floor/ceiling are category safety rails, not destination knowledge. The
+  // itinerary's own median is authoritative whenever enough peer evidence exists.
+  if(role==='meal') return Math.round(Math.min(120,Math.max(60,(median||60)*1.5)));
+  if(role==='recovery') return Math.round(Math.min(150,Math.max(45,(median||60)*1.75)));
+  if(role==='buffer') return Math.round(Math.min(90,Math.max(20,(median||30)*1.75)));
+  return null;
+}
+function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
+  let out=JSON.parse(JSON.stringify(rows||[])),changed=false;
+  const events=[];
+
+  // 1) Cross-midnight causal ownership. If a generated recovery/return row at
+  // 00:xx follows the raw end of an authoritative night overlay but was stamped
+  // with the overlay's starting day, move only that utility row to the next global
+  // day. This is generic for any NIGHT_OVERLAY (aurora, show, observation, etc.).
+  const byDay=_rowsByDayObject_(out);
+  for(const [dayKey,arrRaw] of Object.entries(byDay)){
+    const day=Number(dayKey),arr=[...arrRaw];
+    const overlays=arr.filter(_v115IsCrossMidnightNightRow_);
+    if(!overlays.length||day>=Number(totalDays||0))continue;
+    for(const overlay of overlays){
+      const rawEnd=_hhmmToMinutes_(overlay.end); if(rawEnd==null)continue;
+      for(const r of arr){
+        if(r===overlay||_v115IsHardRow_(r))continue;
+        const role=_v110SemanticRole_(r); if(!['recovery','return'].includes(role))continue;
+        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end); if(rs==null||re==null||rs>6*60)continue;
+        const distance=Math.abs(rs-rawEnd); if(distance>120)continue;
+        r.day=day+1;
+        // The old planning-window stamp belongs to the starting calendar day and
+        // must not falsely constrain the moved post-midnight utility row.
+        delete r.planning_window_id;
+        if(r.commerce_context&&typeof r.commerce_context==='object')delete r.commerce_context.planning_window_id;
+        r._v115_cross_midnight_continuation=true;
+        changed=true;events.push({type:'cross_midnight_continuation',from_day:day,to_day:day+1,start:r.start,end:r.end,activity:r.activity||null});
+      }
+    }
+  }
+
+  // 2) Adaptive utility-duration sanity. Meals/rest/buffers are logistics and may
+  // not absorb hours merely because an upstream timeline shifted. Learn the normal
+  // duration from this itinerary and cap only extreme flexible outliers. Never
+  // touch experiences, transport, or fixed/reservation-rigid rows.
+  for(const role of ['meal','recovery','buffer']){
+    const ceiling=_v115AdaptiveUtilityCeiling_(role,out); if(!ceiling)continue;
+    for(const r of out){
+      if(_v110SemanticRole_(r)!==role||_v115IsHardRow_(r))continue;
+      const span=_v110RowSpan_(r); if(span<=ceiling+30)continue;
+      const start=_hhmmToMinutes_(r.start); if(start==null)continue;
+      const oldEnd=r.end; r.end=_minutesToHHMM_(start+ceiling);
+      r._v115_semantic_duration_guard=true;changed=true;
+      events.push({type:'utility_duration_outlier',role,day:Number(r.day||0),from_minutes:span,to_minutes:ceiling,old_end:oldEnd,new_end:r.end});
+    }
+  }
+
+  if(events.length)console.info(`[ITBMO V115 SEMANTIC SHIELD] ${city}`,{changed,events});
+  return {rows:out,changed,events};
+}
+
+// A cascade shift is safe only when the shift preserves the semantic shape of the
+// affected chain. This is intentionally conservative: unresolved collisions are
+// left for the existing scoped repair path instead of deterministically degrading
+// an otherwise strong itinerary.
+function _v115CascadeShiftRisk_(affected=[],delta=0){
+  const base=_v113SemanticShiftRisk_(affected,delta);
+  if(base.blocked)return {...base,reason:'rigid_or_calendar_sensitive'};
+  const roles=(affected||[]).map(_v110SemanticRole_);
+  if(delta>45&&roles.some(r=>['meal','recovery','buffer'].includes(r)))return {blocked:true,sensitive:affected.filter(r=>['meal','recovery','buffer'].includes(_v110SemanticRole_(r))),reason:'utility_cascade'};
+  const starts=(affected||[]).map(r=>_hhmmToMinutes_(r.start)).filter(v=>v!=null);
+  const ends=(affected||[]).map(r=>_hhmmToMinutes_(r.end)).filter(v=>v!=null);
+  if(delta>60&&starts.length&&ends.length&&Math.max(...ends)+delta>22*60+30)return {blocked:true,sensitive:affected,reason:'late_day_cascade'};
+  return {blocked:false,sensitive:[],reason:null};
+}
+
 function _v111CompileTimeline_(city,rows=[],contract={}){
   let out=JSON.parse(JSON.stringify(rows||[]));
   let shifts=0;
@@ -6589,9 +6687,9 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       }
       if(!affected.length)continue;
       if(affected.some(r=>String(r?.kind||'').toLowerCase()==='fixed_transfer'||r?.user_fixed===true||r?.fixed===true))continue;
-      const semanticRisk=_v113SemanticShiftRisk_(affected,delta);
+      const semanticRisk=_v115CascadeShiftRisk_(affected,delta);
       if(semanticRisk.blocked){
-        console.info(`[ITBMO V113 DIC SEMANTIC GUARD] ${city} · day ${day} · held +${delta} min propagation to protect ${semanticRisk.sensitive.length} sensitive row(s)`);
+        console.info(`[ITBMO V115 DIC SEMANTIC GUARD] ${city} · day ${day} · held +${delta} min propagation · ${semanticRisk.reason||'semantic_risk'} · protected ${semanticRisk.sensitive.length} row(s)`);
         continue;
       }
       let safe=true;
@@ -6911,7 +7009,15 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       // experientially sufficient, a moderate gap may be legitimate breathing room.
       // Never invite the model to manufacture a second lunch/dinner/rest merely to
       // satisfy chronology. Only material gaps in an insufficient day remain repairable.
-      const materialGap=gap>90 || (!_v110DayIsSufficient_(dayRows)&&gap>60);
+      // V115 semantic gap classifier. A long clock gap is not automatically a
+      // defect when a sufficiently rich day deliberately pauses before a later
+      // optional/conditional evening experience. This avoids wasting a repair call
+      // on valid free/recovery time while preserving true sparse-day gaps.
+      const daySufficient=_v110DayIsSufficient_(dayRows);
+      const nextStatus=_v113PlanStatus_(next);
+      const eveningResume=pe>=14*60&&ns>=18*60;
+      const deliberateBreathing=daySufficient&&eveningResume&&['optional','conditional','fallback'].includes(nextStatus);
+      const materialGap=!deliberateBreathing && (gap>90 || (!daySufficient&&gap>60));
       if(!_isPureTransportRow_(prev)&&!_isPureTransportRow_(next)&&!explained&&materialGap){
         errors.push({code:'UNEXPLAINED_GAP',day,previous_row:i,next_row:i+1,gap_minutes:gap,previous_end:prev.end,next_start:next.start,day_experience_minutes:load.experience,meal_already_planned:mealAlreadyPlanned,instruction:midday&&!mealAlreadyPlanned?'Classify this interval before changing the itinerary. If a meal is genuinely missing, add ONE realistic meal; otherwise tighten the chronology or leave justified free/recovery time. Never duplicate a meal/rest to fill time.':'Classify this interval before changing the itinerary. Prefer chronology correction or justified free/recovery time; do not invent meals, rests, buffers or attractions merely to fill a clock.'});
       }
@@ -7944,7 +8050,10 @@ function _v3FitDurationToInterval_(row={}){
 
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
-  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113: timeline first, then canonical row semantics.
+  // V115: semantic shield runs before arithmetic compilation so DIC receives a
+  // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
+  const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
+  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115: timeline first, then canonical row semantics.
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
@@ -8100,7 +8209,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v8-tie-metadata-persist';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v9-v115-semantic-shield';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
