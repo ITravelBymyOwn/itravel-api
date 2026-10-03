@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V113';
-const ITBMO_RUNTIME_ASSET='planner.js?v=231';
+const ITBMO_RUNTIME_BUILD='V114';
+const ITBMO_RUNTIME_ASSET='planner.js?v=232';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6195,13 +6195,39 @@ function _dedupeRows_(rows=[]){
     seen.add(exact);
     out.push(r);
   }
-  return out.sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start).localeCompare(String(b.start)));
+  return out.sort((a,b)=>_v114LogicalRowCompare_(a,b));
 }
 
 function _rowsCoverAllDays_(rows=[],totalDays=1){
   const set=new Set((rows||[]).map(r=>Number(r?.day)));
   for(let d=1;d<=totalDays;d++) if(!set.has(d)) return false;
   return true;
+}
+
+// V114 logical-day clock. Rows belonging to a TIE NIGHT_OVERLAY keep the
+// itinerary day that owns the experience even when their visible clock rolls past
+// 00:00. One shared ordering function prevents canonical storage, QA and exports
+// from re-sorting 01:30 before the daytime rows of that same logical day.
+function _v114IsNightOverlayRow_(row={}){
+  const id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'').toLowerCase();
+  return id.includes('-tie-night');
+}
+function _v114LogicalStartMinutes_(row={}){
+  const start=_hhmmToMinutes_(row?.start);
+  if(start==null)return null;
+  return _v114IsNightOverlayRow_(row)&&start<12*60?start+1440:start;
+}
+function _v114LogicalEndMinutes_(row={}){
+  const start=_v114LogicalStartMinutes_(row),rawStart=_hhmmToMinutes_(row?.start),rawEnd=_hhmmToMinutes_(row?.end);
+  if(start==null||rawStart==null||rawEnd==null)return null;
+  let span=rawEnd-rawStart;if(span<=0)span+=1440;
+  return start+span;
+}
+function _v114LogicalRowCompare_(a={},b={}){
+  const ad=Number(a?.day||0),bd=Number(b?.day||0);if(ad!==bd)return ad-bd;
+  const as=_v114LogicalStartMinutes_(a),bs=_v114LogicalStartMinutes_(b);
+  if(as==null&&bs==null)return 0;if(as==null)return 1;if(bs==null)return -1;
+  return as-bs;
 }
 
 function _rowsByDayObject_(rows=[]){
@@ -6211,7 +6237,7 @@ function _rowsByDayObject_(rows=[]){
     if(!out[day]) out[day]=[];
     out[day].push(row);
   }
-  Object.values(out).forEach(arr=>arr.sort((a,b)=>String(a.start).localeCompare(String(b.start))));
+  Object.values(out).forEach(arr=>arr.sort(_v114LogicalRowCompare_));
   return out;
 }
 
@@ -6372,10 +6398,19 @@ function _v113CanonicalizeRowSemantics_(row={}){
     // Movement rows may keep a useful transport estimate, but never inherit the
     // dwell time of the attraction they lead to/from.
     out.duration='';
-  }else if(span>0&&declared&&Math.abs(Number(declared.max||0)-experience)>25){
-    const [,activityLabel]=_durationLabels_();
-    out._source_duration=out._source_duration||out.duration||null;
-    out.duration=`${activityLabel}: ${_minutesToHuman_(Math.max(1,experience))}`;
+  }else if(span>0&&declared){
+    const declaredMax=Number(declared.max||0);
+    const pureExperience=role==='experience'&&!movement;
+    // V114: after DIC moves a pure experience, its displayed activity duration
+    // must follow the canonical interval. Keep V113's wider tolerance for mixed
+    // movement+experience rows so valid component math (e.g. Pompeii) and
+    // alternative transport estimates are never flattened into one duration.
+    const tolerance=pureExperience?5:25;
+    if(Math.abs(declaredMax-experience)>tolerance){
+      const [,activityLabel]=_durationLabels_();
+      out._source_duration=out._source_duration||out.duration||null;
+      out.duration=`${activityLabel}: ${_minutesToHuman_(Math.max(1,experience))}`;
+    }
   }
   return out;
 }
@@ -6385,7 +6420,7 @@ function _v110RowSpan_(row={}){
 }
 function _v110DayLoad_(rows=[]){
   const stats={experience:0,utility:0,experience_rows:0,meal_rows:0,recovery_rows:0,first:null,last:null};
-  (rows||[]).forEach(r=>{const role=_v110SemanticRole_(r),span=_v110RowSpan_(r);const st=_hhmmToMinutes_(r.start),en=_hhmmToMinutes_(r.end);if(st!=null)stats.first=stats.first==null?st:Math.min(stats.first,st);if(en!=null){let x=en;if(st!=null&&x<=st)x+=1440;stats.last=stats.last==null?x:Math.max(stats.last,x);}if(role==='experience'){stats.experience+=span;stats.experience_rows++;}else{stats.utility+=span;if(role==='meal')stats.meal_rows++;if(role==='recovery')stats.recovery_rows++;}});
+  (rows||[]).forEach(r=>{const role=_v110SemanticRole_(r),span=_v110RowSpan_(r);const st=_v114LogicalStartMinutes_(r),en=_v114LogicalEndMinutes_(r);if(st!=null)stats.first=stats.first==null?st:Math.min(stats.first,st);if(en!=null)stats.last=stats.last==null?en:Math.max(stats.last,en);if(role==='experience'){stats.experience+=span;stats.experience_rows++;}else{stats.utility+=span;if(role==='meal')stats.meal_rows++;if(role==='recovery')stats.recovery_rows++;}});
   stats.total_span=stats.first!=null&&stats.last!=null?Math.max(0,stats.last-stats.first):0;return stats;
 }
 function _v110DayIsSufficient_(rows=[]){
@@ -6396,10 +6431,18 @@ function _v110DayIsSufficient_(rows=[]){
 }
 function _regionalDayLooksThin_(rows=[]){
   const meaningful=(rows||[]).filter(r=>_v110SemanticRole_(r)==='experience');
-  const regionalSignal=(rows||[]).some(r=>
-    /\b(route|ruta|circle|c[ií]rculo|peninsula|pen[ií]nsula|coast|costa|day trip|excursi[oó]n|region|regional)\b/i.test(`${r?.activity||''} ${r?.notes||''}`) || (_transportBoundsFromField_(r?.transport||'')?.max||0)>=75
+  // V114: authoritative physical/TIE identity outranks prose. V113 could label an
+  // ordinary urban day as regional merely because Notes contained words such as
+  // "route/ruta". When stamped unit metadata exists, only an actual REGIONAL unit
+  // or explicit day-trip unit may enter this diagnostic.
+  const typed=(rows||[]).map(r=>String(r?._tie_unit_type||'').toUpperCase()).filter(Boolean);
+  const stamped=(rows||[]).some(r=>String(r?.stay_unit_id||'').trim()||String(r?.planning_window_id||'').trim());
+  const authoritativeRegional=typed.some(t=>t.startsWith('REGIONAL_')) || (rows||[]).some(r=>/\bdaytrip\b/i.test(String(r?.stay_unit_id||'')));
+  if(stamped&&!authoritativeRegional)return false;
+  const legacyRegionalSignal=(rows||[]).some(r=>
+    /\b(day trip|excursi[oó]n|peninsula|pen[ií]nsula|coast|costa|regional)\b/i.test(`${r?.activity||''} ${r?.notes||''}`) || (_transportBoundsFromField_(r?.transport||'')?.max||0)>=75
   );
-  if(!regionalSignal)return false;
+  if(!authoritativeRegional&&!legacyRegionalSignal)return false;
   const load=_v110DayLoad_(rows);
   // Row count alone is not quality. A destination-defining anchor plus necessary
   // regional logistics can be a premium full day with only 3–5 rows.
@@ -6519,7 +6562,7 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
   let shifts=0;
   const byDay=_rowsByDayObject_(out);
   for(const [dayKey,dayRowsRaw] of Object.entries(byDay)){
-    const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')));
+    const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort(_v114LogicalRowCompare_);
     for(let i=1;i<dayRows.length;i++){
       const prev=dayRows[i-1],cur=dayRows[i];
       const ps=_hhmmToMinutes_(prev.start),pe=_hhmmToMinutes_(prev.end),cs=_hhmmToMinutes_(cur.start),ce=_hhmmToMinutes_(cur.end);
@@ -6680,8 +6723,8 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
     for(let i=0;i<dayRows.length;i++){
       const r=dayRows[i];
       const row=i+1;
-      const start=_hhmmToMinutes_(r.start);
-      const end=_hhmmToMinutes_(r.end);
+      const start=_v114LogicalStartMinutes_(r);
+      const end=_v114LogicalEndMinutes_(r);
 
       if(start==null||end==null){
         errors.push({code:'INVALID_TIME',day,row,start:r.start,end:r.end});
@@ -6826,7 +6869,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       }
 
       if(profile && i<dayRows.length-1){
-        const nextStart=_hhmmToMinutes_(dayRows[i+1]?.start);
+        const nextStart=_v114LogicalStartMinutes_(dayRows[i+1]);
         if(end!=null && nextStart!=null){
           let gap=nextStart-end;
           if(gap<0) gap+=1440;
@@ -6855,7 +6898,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
     // untouched. This applies to every day, including open-ended windows.
     for(let i=1;i<dayRows.length;i++){
       const prev=dayRows[i-1]||{},next=dayRows[i]||{};
-      const pe=_hhmmToMinutes_(prev.end),ns=_hhmmToMinutes_(next.start);
+      const pe=_v114LogicalEndMinutes_(prev),ns=_v114LogicalStartMinutes_(next);
       if(pe==null||ns==null||ns<=pe)continue;
       const gap=ns-pe;if(gap<=45)continue;
       const explicit=`${prev.notes||''} ${next.notes||''}`;
@@ -7641,7 +7684,7 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
       }
     });
   });
-  out=_dedupeRows_(out).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  out=_dedupeRows_(out).sort((a,b)=>_v114LogicalRowCompare_(a,b));
   // A canonical movement resets physical continuity. The first activity after
   // a protected transfer starts from the transfer destination, never from a POI
   // that belonged to the location before that movement. This changes only the
@@ -7775,7 +7818,7 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   windowCoverage.missing.forEach(w=>errors.push({code:'MISSING_PHYSICAL_WINDOW',day:w.day,stay_unit_id:w.stay_unit_id,window_id:w.window_id,location:w.location,window:`${w.start||''}-${w.end||'open'}`}));
 
   for(let day=1;day<=maxDay;day++){
-    const dayRows=[...(byDay[day]||[])].sort((a,b)=>(_hhmmToMinutes_(a.start)??99999)-(_hhmmToMinutes_(b.start)??99999));
+    const dayRows=[...(byDay[day]||[])].sort(_v114LogicalRowCompare_);
     const routeDay=routeDays.get(day)||{};
     const transfers=(routeDay.fixed_transfers||[]).filter(t=>t?.departure&&t?.arrival&&Boolean(t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')));
 
@@ -7973,7 +8016,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     // Global, city-agnostic duplicate sweep. The auditor can report aliases with
     // different surface text; compare every concrete POI against all earlier rows
     // and deterministically keep the first chronological occurrence.
-    const chronological=[...out].sort((a,b)=>Number(a?.day||0)-Number(b?.day||0)||String(a?.start||'').localeCompare(String(b?.start||'')));
+    const chronological=[...out].sort((a,b)=>_v114LogicalRowCompare_(a,b));
     const kept=[];
     for(const candidate of chronological){
       if(_isUtilityRow_(candidate)||_isPureTransportRow_(candidate)){ kept.push(candidate); continue; }
@@ -7998,7 +8041,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     // adjacent row when its normalized activity is identical and it is at the
     // same physical place (or both are meal/rest utility rows). This deliberately
     // narrow guard catches duplicate lunches/rest blocks without merging distinct visits.
-    const adjacent=[...out].sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    const adjacent=[...out].sort((a,b)=>_v114LogicalRowCompare_(a,b));
     for(let i=1;i<adjacent.length;i++){
       const prior=adjacent[i-1],current=adjacent[i];
       if(Number(prior.day)!==Number(current.day)||_isPureTransportRow_(prior)||_isPureTransportRow_(current))continue;
@@ -8017,7 +8060,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     // richness. Remove a later near-duplicate utility row of the same role when the
     // first already satisfies that need. This catches differently worded double
     // lunches/dinners/rest blocks that exact-text dedupe cannot see.
-    const semanticOrdered=[...out].sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    const semanticOrdered=[...out].sort((a,b)=>_v114LogicalRowCompare_(a,b));
     for(let i=1;i<semanticOrdered.length;i++){
       const a=semanticOrdered[i-1],b=semanticOrdered[i];if(Number(a.day)!==Number(b.day))continue;
       const ra=_v110SemanticRole_(a),rb=_v110SemanticRole_(b);if(ra!==rb||!['meal','recovery','return'].includes(ra))continue;
@@ -8033,7 +8076,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     // Remove a second end-of-day lodging return only when the traveler is
     // already at that same lodging and no intervening activity took place.
     // This avoids paying for another model repair to erase a duplicate rest row.
-    const ordered=[...out].sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    const ordered=[...out].sort((a,b)=>_v114LogicalRowCompare_(a,b));
     for(let i=1;i<ordered.length;i++){
       const prior=ordered[i-1],current=ordered[i];
       if(Number(prior.day)!==Number(current.day)||_isPureTransportRow_(current))continue;
@@ -8428,7 +8471,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     const planningUnits=[];
     descriptors.forEach(d=>{
       const {st,index,dayTrips}=d;
-      const allWindows=(ownedWindows.get(index)||[]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+      const allWindows=(ownedWindows.get(index)||[]).sort((a,b)=>_v114LogicalRowCompare_(a,b));
       const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
       const parentId=st.id||`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(index+1).padStart(2,'0')}`;
 
@@ -8687,7 +8730,7 @@ function _v70AdditivePhysicalMerge_(stayResults=[],contract={}){
   // inserter with an empty activity set cannot delete or mutate accepted rows.
   const fixedRows=_v3EnforceHardRouteFacts_([],contract).filter(_isPureTransportRow_);
   return _v3DedupeMergedStayRows_([...accepted,...fixedRows])
-    .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    .sort((a,b)=>_v114LogicalRowCompare_(a,b));
 }
 
 function _v70ExactPhysicalUnitConservation_(mergedRows=[],stayResults=[]){
@@ -8864,7 +8907,7 @@ Repair ONLY the supplied local row block(s). Rows not supplied are immutable and
       });
     });
     const mergedCandidate=[...rows.filter(r=>!returnedDaySet.has(Number(r.day))),...preservedReturnedDayRows,...candidate]
-      .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+      .sort((a,b)=>_v114LogicalRowCompare_(a,b));
     normalized=_v3DeterministicQualityCleanup_(unitCity,mergedCandidate,scopedContract,totalDays,scopedPerDay,unitAuditBaseDate,false,unitDays);
     const nextRows=_v3StampStayRows_(normalized.rows,unit);
     const protectedAnchors=_v112ProtectedAnchorManifest_(rows,repairFindings);
@@ -9034,7 +9077,7 @@ function _v3DedupeMergedStayRows_(rows=[]){
     if(seen.has(exact)) continue;
     seen.add(exact);out.push(r);
   }
-  return out.sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  return out.sort((a,b)=>_v114LogicalRowCompare_(a,b));
 }
 
 function _v3CoverageForDays_(rows=[],expectedDays=[],totalDays=1){
@@ -9076,7 +9119,7 @@ The previous response omitted day(s) ${coverage.missing.join(', ')}. Generate ON
   const raw=await _v3Call_(prompt);
   const parsed=parseJSON(raw);
   const repaired=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,city,totalDays)).filter(r=>coverage.missing.includes(Number(r?.day)));
-  const merged=_dedupeRows_([...rows,...repaired]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  const merged=_dedupeRows_([...rows,...repaired]).sort((a,b)=>_v114LogicalRowCompare_(a,b));
   const next=_v3Coverage_(merged,totalDays);
   console.info(`[ITBMO V3 COVERAGE] ${city}: after scoped missing-day repair`,next);
   return {rows:merged,coverage:next,repaired:next.missing.length<coverage.missing.length};
@@ -9115,7 +9158,7 @@ Rebuild ONLY this Trip Story stay card, including any Day Trips listed in its co
   }
   if(!changed) return {rows,report,repaired:false};
   candidateRows=_v3AnnotatePhysicalRows_(_v3EnforceHardRouteFacts_(_dedupeRows_(candidateRows),contract),contract,units)
-    .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    .sort((a,b)=>_v114LogicalRowCompare_(a,b));
   const nextReport=_localGlobalAudit_(city,candidateRows,totalDays,_v3SyntheticMaster_(totalDays),perDay,baseDate);
   return _auditScore_(nextReport)<_auditScore_(report)
     ? {rows:candidateRows,report:nextReport,repaired:true}
@@ -9155,7 +9198,7 @@ Rebuild ONLY days ${affected.join(', ')}. Correct every validator error while pr
   const merged=_dedupeRows_([
     ...rows.filter(r=>!affected.includes(Number(r?.day))),
     ...repaired
-  ]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  ]).sort((a,b)=>_v114LogicalRowCompare_(a,b));
   const nextReport=_localGlobalAudit_(city,merged,totalDays,_v3SyntheticMaster_(totalDays),perDay,baseDate);
   return _auditScore_(nextReport)<_auditScore_(report)
     ? {rows:merged,report:nextReport,repaired:true}
@@ -9266,7 +9309,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     });
     for(let d=1;d<=Math.max(1,Number(dest.days)||1);d++){
       if(!canonicalByDay[d]) canonicalByDay[d]=[];
-      canonicalByDay[d].sort((a,b)=>(_hhmmToMinutes_(a?.start)??99999)-(_hhmmToMinutes_(b?.start)??99999));
+      canonicalByDay[d].sort(_v114LogicalRowCompare_);
     }
     itineraries[city].byDay=canonicalByDay;
 
@@ -9292,7 +9335,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       });
       for(let d=1;d<=Math.max(1,Number(dest.days)||1);d++){
         if(!healedByDay[d]) healedByDay[d]=[];
-        healedByDay[d].sort((a,b)=>(_hhmmToMinutes_(a?.start)??99999)-(_hhmmToMinutes_(b?.start)??99999));
+        healedByDay[d].sort(_v114LogicalRowCompare_);
       }
       itineraries[city].byDay=healedByDay;
       storedRows=Object.values(healedByDay).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
@@ -11649,7 +11692,7 @@ function _chronologicalExportDays_(){
         const end=_tripStoryAddDays_(st.startDate,Math.max(0,Number(st.days||1)-1));
         return iso>=st.startDate&&iso<=end;
       });
-      out.push({sourceUnit,dayNum,date,stayBase:stay?.place||sourceUnit,rows:[...(byDay[dayNum]||[])].sort((a,b)=>String(a.start||'').localeCompare(String(b.start||''))),context:contexts.get(dayNum)||{}});
+      out.push({sourceUnit,dayNum,date,stayBase:stay?.place||sourceUnit,rows:[...(byDay[dayNum]||[])].sort(_v114LogicalRowCompare_),context:contexts.get(dayNum)||{}});
     });
   });
   return out.sort((a,b)=>{const da=parseDMY(a.date||''),db=parseDMY(b.date||'');return (da?.getTime?.()||0)-(db?.getTime?.()||0)||a.dayNum-b.dayNum;});
@@ -12004,7 +12047,7 @@ async function exportItineraryToPDF(options={}){
   };
   for(let i=0;i<days.length;i++){
     if(i)doc.addPage('a4','portrait');
-    const day=days[i],rows=day.rows.slice().sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')));
+    const day=days[i],rows=day.rows.slice().sort(_v114LogicalRowCompare_);
     const dayTrip=_v69PdfDayTripMeta_(day),route=_v67PdfDayTripLabel_(day,day.destinations.join('  →  '));
     let start=dayTrip?178:150,available=footer-start;
     let choice=null;
