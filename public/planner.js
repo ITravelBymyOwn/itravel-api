@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V114';
-const ITBMO_RUNTIME_ASSET='planner.js?v=232';
+const ITBMO_RUNTIME_BUILD='V114.1';
+const ITBMO_RUNTIME_ASSET='planner.js?v=233';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -11552,16 +11552,21 @@ async function deliverGeneratedFile(blob, filename){
     return;
   }
 
+  // V114.1 export hotfix: keep the object URL alive long enough for the
+  // browser download/navigation pipeline to consume it. Revoking it on the same
+  // event-loop turn can silently cancel direct PDF/XLSX/receipt downloads in
+  // some Chromium/browser contexts, while email still works because it uses
+  // download:false and never enters this delivery path.
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.rel = 'noopener';
+  a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
-  setTimeout(()=>{
-    URL.revokeObjectURL(url);
-    a.remove();
-  }, 0);
+  setTimeout(()=>a.remove(),1000);
+  setTimeout(()=>URL.revokeObjectURL(url),120000);
 }
 
 function detectCsvDelimiter(){
@@ -12131,7 +12136,7 @@ function openItineraryEmailModal(){
   $itineraryEmailRecipient.value=String(currentUser?.email||'');setEmailDeliveryStatus('');
   $itineraryEmailModal.classList.add('active');$itineraryEmailModal.setAttribute('aria-hidden','false');setTimeout(()=>$itineraryEmailRecipient.focus(),60);
 }
-function closeItineraryEmailModal({restoreDownloads=true}={}){if(!$itineraryEmailModal)return;$itineraryEmailModal.classList.remove('active');$itineraryEmailModal.setAttribute('aria-hidden','true');if(restoreDownloads && hasGeneratedItineraryRows())setTimeout(()=>showFinalDownloadModal(),80);}
+function closeItineraryEmailModal({restoreDownloads=false}={}){if(!$itineraryEmailModal)return;$itineraryEmailModal.classList.remove('active');$itineraryEmailModal.setAttribute('aria-hidden','true');if(restoreDownloads && hasGeneratedItineraryRows())setTimeout(()=>showFinalDownloadModal(),80);}
 async function sendItineraryByEmail(event){
   event?.preventDefault();const copy=emailSendCopy(),recipient=String($itineraryEmailRecipient?.value||'').trim();
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)){setEmailDeliveryStatus(copy.invalid,'error');return;}
@@ -12145,7 +12150,7 @@ async function sendItineraryByEmail(event){
     setEmailDeliveryStatus(copy.sending);const attachments=[];
     for(const item of generated)attachments.push({kind:item.kind,name:item.filename,type:item.blob.type,content:await blobToBase64(item.blob)});
     await emailApi({action:'send_itinerary',session_token:token,trip_id:currentTripId,recipient_email:recipient,lang:getLang(),attachments});
-    setEmailDeliveryStatus(copy.sent,'success');trackITBMOEvent('trip_shared',{channel:'email',file_type:'pdf_xlsx_receipt'});setTimeout(()=>closeItineraryEmailModal({restoreDownloads:true}),900);
+    setEmailDeliveryStatus(copy.sent,'success');trackITBMOEvent('trip_shared',{channel:'email',file_type:'pdf_xlsx_receipt'});setTimeout(()=>closeItineraryEmailModal({restoreDownloads:false}),900);
   }catch(error){const key=error?.code==='RECEIPT_REQUIRED'?'receipt':error?.code==='ATTACHMENTS_TOO_LARGE'?'large':error?.code==='EMAIL_NOT_CONFIGURED'?'config':'error';setEmailDeliveryStatus(copy[key],'error');}
   finally{$itineraryEmailSubmit.disabled=false;}
 }
