@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V126';
-const ITBMO_RUNTIME_ASSET='planner.js?v=245';
+const ITBMO_RUNTIME_BUILD='V127';
+const ITBMO_RUNTIME_ASSET='planner.js?v=246';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6678,6 +6678,39 @@ function _v115AdaptiveUtilityCeiling_(role,rows=[]){
   if(role==='buffer') return Math.round(Math.min(90,Math.max(20,(median||30)*1.75)));
   return null;
 }
+// V127 owner-day seal. V126 did not modify night ownership; however, a model/local
+// repair can still emit a 00:xx return as ordinary day content while the same logical
+// owner day contains a later authoritative NIGHT_OVERLAY chain. That shape is a
+// calendar-day leak: the return belongs to the preceding owner-day night chain, not
+// to the morning of the itinerary day. Detect only this unambiguous contradiction;
+// never rewrite rows here. Local repair remains responsible for rebuilding the full
+// access -> experience -> return chain, and final hard audit prevents publication if
+// the leak somehow survives. Destination/activity names are intentionally irrelevant.
+function _v127NightOwnerDayLeakErrors_(rows=[]){
+  const errors=[];
+  const byDay=_rowsByDayObject_(rows||[]);
+  for(const [dayKey,dayRows] of Object.entries(byDay)){
+    const day=Number(dayKey);
+    const nightRows=dayRows.filter(_v114IsNightOverlayRow_);
+    if(!nightRows.length)continue;
+    const hasEveningNight=nightRows.some(r=>{
+      const s=_hhmmToMinutes_(r?.start); return s!=null&&s>=18*60;
+    });
+    if(!hasEveningNight)continue;
+    for(let i=0;i<dayRows.length;i++){
+      const r=dayRows[i]; if(_v114IsNightOverlayRow_(r)||_v115IsHardRow_(r))continue;
+      const start=_hhmmToMinutes_(r?.start); if(start==null||start>=6*60)continue;
+      const role=_v110SemanticRole_(r);
+      if(!['return','transfer'].includes(role))continue;
+      const text=_canonicalText_(`${r?.activity||''} ${r?.notes||''}`);
+      const returnLike=role==='return'||/\b(return|regreso|retorno|back|vuelta|after|tras|despues)\b/.test(text);
+      if(!returnLike)continue;
+      errors.push({code:'NIGHT_OWNER_DAY_LEAK',day,row:i+1,start:r.start,end:r.end,activity:r.activity||null,instruction:'This early-morning return/transfer conflicts with a later authoritative NIGHT_OVERLAY on the same itinerary owner day. Rebuild the nocturnal chain so access, night experience and every post-midnight continuation/return remain together on the day where the night outing starts. Do not duplicate the night experience and do not move ordinary daytime content.'});
+    }
+  }
+  return errors;
+}
+
 function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
   let out=JSON.parse(JSON.stringify(rows||[])),changed=false;
   const events=[];
@@ -8107,6 +8140,7 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   const unitById=new Map(units.map(u=>[String(u.id),u]));
   const windowCoverage=_v3PhysicalWindowCoverage_(rows,units);
   windowCoverage.missing.forEach(w=>errors.push({code:'MISSING_PHYSICAL_WINDOW',day:w.day,stay_unit_id:w.stay_unit_id,window_id:w.window_id,location:w.location,window:`${w.start||''}-${w.end||'open'}`}));
+  errors.push(..._v127NightOwnerDayLeakErrors_(rows));
 
   for(let day=1;day<=maxDay;day++){
     const dayRows=[...(byDay[day]||[])].sort(_v114LogicalRowCompare_);
@@ -9178,7 +9212,8 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       const hasExperience=chainRows.some(r=>_v110SemanticRole_(r)==='experience');
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
-    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution]});
+    const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
+    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
