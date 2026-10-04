@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V117';
-const ITBMO_RUNTIME_ASSET='planner.js?v=236';
+const ITBMO_RUNTIME_BUILD='V118';
+const ITBMO_RUNTIME_ASSET='planner.js?v=237';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -4728,6 +4728,17 @@ function _transportBoundsFromField_(raw){
   return candidates.length ? candidates.reduce((a,b)=>b.max>a.max?b:a) : null;
 }
 
+// V118: transport fields often present legitimate alternatives (for example taxi
+// 10–15 min; walking 35–45 min). QA must not require the timeline to fit the
+// slowest alternative. Return the shortest plausible minimum across separately
+// described modes without changing the traveler-facing alternatives.
+function _v118TransportMinimumPlausible_(raw=''){
+  const parts=String(raw||'').split(/(?:\n|;|\balternative\b|\balternativa\b)/i).map(x=>x.trim()).filter(Boolean);
+  const mins=parts.map(part=>_transportBoundsFromField_(part)).filter(Boolean).map(b=>Number(b.min)).filter(Number.isFinite);
+  if(!mins.length){const one=_transportBoundsFromField_(raw);return one?Number(one.min):null;}
+  return Math.min(...mins);
+}
+
 function _sanitizeDurationLines_(raw, transportField=''){
   const [transportLabel, activityLabel] = _durationLabels_();
   const s = (typeof raw === 'number') ? `${raw} min` : String(raw||'').trim();
@@ -6634,7 +6645,28 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
     }
   }
 
-  // 2) Adaptive utility-duration sanity. Meals/rest/buffers are logistics and may
+  // 2) V118: once a nocturnal outing has physically returned to the lodging, sleep
+  // is a consequence for next-day pacing, not a scheduled itinerary activity.
+  // Remove only an unambiguous post-midnight NIGHT_OVERLAY recovery row that stays
+  // at the same lodging/base immediately after a return. The physical end used by
+  // next-day reasoning is the preceding return row; no attraction or movement is
+  // invented and the owner-day cross-midnight contract remains untouched.
+  const beforeSleep=out.length;
+  out=out.filter((r,idx,arr)=>{
+    if(!_v114IsNightOverlayRow_(r)||_v117DayOffset_(r,'start')<=0||_v110SemanticRole_(r)!=='recovery')return true;
+    const text=_canonicalText_(`${r.activity||''} ${r.notes||''}`);
+    if(!/\b(sleep|dormir|descanso|rest|recovery|recuperacion)\b/.test(text))return true;
+    const samePlace=_arePoiAliases_(r.from||'',r.to||'')||_canonicalText_(r.from||'')===_canonicalText_(r.to||'');
+    if(!samePlace)return true;
+    const prior=arr.slice(0,idx).reverse().find(x=>Number(x.day)===Number(r.day));
+    if(!prior||!['return','transfer'].includes(_v110SemanticRole_(prior)))return true;
+    const priorEnd=_v114LogicalEndMinutes_(prior),start=_v114LogicalStartMinutes_(r);
+    if(priorEnd==null||start==null||Math.abs(start-priorEnd)>15)return true;
+    changed=true;events.push({type:'synthetic_post_night_recovery_removed',day:Number(r.day||0),start:r.start,end:r.end});
+    return false;
+  });
+
+  // 3) Adaptive utility-duration sanity. Meals/rest/buffers are logistics and may
   // not absorb hours merely because an upstream timeline shifted. Learn the normal
   // duration from this itinerary and cap only extreme flexible outliers. Never
   // touch experiences, transport, or fixed/reservation-rigid rows.
@@ -6850,9 +6882,11 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
           // displayed interval and a narrative duration must not trigger an expensive
           // model repair. Keep strict QA for materially short visits. Tolerance is
           // capped at 15 min and never exceeds 12% of the declared minimum.
-          const shortTolerance=Math.min(20,Math.max(10,Math.round(total.min*0.20)));
-          if(total.min>span+shortTolerance){
-            errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min,tolerance:shortTolerance});
+          const transportMin=_isPureTransportRow_(r)?_v118TransportMinimumPlausible_(r.transport||''):null;
+          const requiredMin=transportMin!=null?Math.min(Number(total.min),transportMin):Number(total.min);
+          const shortTolerance=Math.min(20,Math.max(10,Math.round(requiredMin*0.20)));
+          if(requiredMin>span+shortTolerance){
+            errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:requiredMin,tolerance:shortTolerance,transport_alternative_aware:transportMin!=null});
           }
           if(span-total.max>25){
             errors.push({
@@ -8478,13 +8512,14 @@ function _tieApplyPlanToBaseUnit_(baseUnit,plan){
   const overlays=Array.isArray(plan.night_overlays)?plan.night_overlays:[];
   const preferredOverlayByDay=new Map();
   overlays.forEach(o=>{const d=Number(o?.preferred_day);if(d&&!preferredOverlayByDay.has(d))preferredOverlayByDay.set(d,o);});
+  const previousNightForDay=(day)=>preferredOverlayByDay.get(Number(day)-1)||null;
   let baseWindows=(baseUnit.windows||[]).filter(w=>{const p=byDay.get(Number(w.day));return p&&!String(p.type||'').startsWith('REGIONAL');});
   const baseNightWindows=overlays.map(o=>_tieOverlayWindow_(baseUnit,o)).filter(Boolean).filter(w=>baseWindows.some(b=>Number(b.day)===Number(w.day)));
   baseWindows=_tieReserveNightBoundary_(baseWindows,baseNightWindows);
   const out=[];
   if(baseWindows.length){
     const days=[...new Set(baseWindows.map(w=>Number(w.day)))].sort((a,b)=>a-b);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>(o.eligible_days||[]).some(d=>days.includes(Number(d)))),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>(o.eligible_days||[]).some(d=>days.includes(Number(d)))),previous_night_overlays:Object.fromEntries(days.map(d=>[d,previousNightForDay(d)]).filter(([,v])=>v)),verification_needs:plan.verification_needs||[]}});
   }
   (plan.units||[]).filter(u=>String(u.type||'').startsWith('REGIONAL')).forEach((directive,index)=>{
     let windows=(baseUnit.windows||[]).filter(w=>Number(w.day)===Number(directive.day));
@@ -8492,7 +8527,7 @@ function _tieApplyPlanToBaseUnit_(baseUnit,plan){
     if(night){windows=_tieReserveNightBoundary_(windows,[night]);windows=[...windows,night];}
     if(!windows.length)return;
     const manifest=(directive.route_manifest||[]).map(x=>x.name).filter(Boolean);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>(o.eligible_days||[]).includes(Number(directive.day))),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>(o.eligible_days||[]).includes(Number(directive.day))),previous_night_overlay:previousNightForDay(Number(directive.day)),verification_needs:plan.verification_needs||[]}});
   });
   return out.length?out:[baseUnit];
 }
@@ -8925,9 +8960,14 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - If unit_type is DAY_TRIP, maximize a coherent, traveler-friendly visit inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it.
 - If unit_type is BASE_STAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
 - If tie_structure is supplied, it is the authoritative strategic brief for this unit. Protect its day identity, experience cluster, selected defining/major experience_inventory anchors owned by this day, CORE/HIGH route_manifest stops, structural slack, night overlays and verification needs. OPTIONAL/DROP_FIRST micro-stops may be omitted when physical feasibility, daylight, fatigue or a stronger anchor requires it. Do not invent live confirmation for verification_required items. Do not spend long blocks on supporting filler while an owned defining/major anchor remains unrealized.
-- TIE NIGHT OVERLAY EXECUTION: when tie_structure.night_overlays contains an overlay whose preferred_day belongs to this unit, materialize that preferred overlay as REAL chronological itinerary row(s) inside the supplied NIGHT_OVERLAY planning window. Include realistic movement when needed, the actual named night experience, duration and return/safety logic. NIGHT_OVERLAY time is a continuous physical clock: if the experience starts late and its honest duration crosses 00:00, KEEP EVERY ROW OF THAT NOCTURNAL CHAIN on the same starting itinerary owner day, including post-midnight experience/return/recovery rows. Use real next-day clock values (for example 20:00-01:00, then 01:00-01:20) but NEVER stamp those continuation rows as itinerary day N+1. Day N+1 starts only with its own later itinerary; it may be paced later because the previous owner day physically ended after midnight. Never truncate, compress or move a valid nocturnal experience merely to make it fit before 24:00. Weather-dependent natural phenomena are opportunities, never guarantees; state verification requirements in Notes. Do not reduce a preferred TIE overlay to preparation/checking text only. Eligible non-preferred days remain alternatives, not duplicate mandatory rows.
+- TIE NIGHT OVERLAY EXECUTION: when tie_structure.night_overlays contains an overlay whose preferred_day belongs to this unit, materialize that preferred overlay as REAL chronological itinerary row(s) inside the supplied NIGHT_OVERLAY planning window. Include realistic movement when needed, the actual named night experience, duration and return/safety logic. NIGHT_OVERLAY time is a continuous physical clock: if the experience starts late and its honest duration crosses 00:00, KEEP EVERY ROW OF THAT NOCTURNAL CHAIN on the same starting itinerary owner day, including post-midnight experience/return rows and any genuine outing component that still occurs before lodging return. Use real next-day clock values (for example 20:00-01:00, then 01:00-01:20) but NEVER stamp those continuation rows as itinerary day N+1. Day N+1 starts only with its own later itinerary; it may be paced later because the previous owner day physically ended after midnight. Never truncate, compress or move a valid nocturnal experience merely to make it fit before 24:00. Weather-dependent natural phenomena are opportunities, never guarantees; state verification requirements in Notes. Do not reduce a preferred TIE overlay to preparation/checking text only. Eligible non-preferred days remain alternatives, not duplicate mandatory rows.
+- V118 INTER-DAY RECOVERY: tie_structure.previous_night_overlay / previous_night_overlays describe a nocturnal experience owned by the previous itinerary day. Do NOT move any of its rows into this day. Use its duration, recovery_cost and likely physical finish only as human pacing context: avoid an implausibly early or high-load start after a late finish unless a user-fixed/reservation-hard fact requires it. Decide the appropriate start/intensity semantically; there is no universal fixed recovery hour.
+- V118 NIGHT END: after the nocturnal chain returns to the lodging/base, END that owner-day chain. Do not create a standalone "sleep", "rest", "hydrate" or "recovery" itinerary row merely to occupy post-return clock time. Recovery belongs in next-day pacing, not as filler.
+- V118 TEMPORAL PROSE: descriptions must agree with owner-day assignment. Never say "before tonight's/later tonight's" experience when the referenced selected experience is owned by another itinerary day.
 - AURORA EXECUTION: if the preferred overlay is an aurora/northern-lights opportunity, preserve the TIE strategy. A guided mobile aurora hunt is a genuine TOUR_EXPERIENCE: explain that the route/location may change to seek better sky conditions, recommend the guided hunt when TIE marks guided_hunt, and mention self-drive/local dark-sky observation as an alternative when supplied. Use the full extended NIGHT_OVERLAY window rather than collapsing it to a short fixed viewpoint visit. Set commerce_context.guided_tour_value=high and commercial_eligible=true for the hunt so Context Intelligence can surface distinct guided-tour options without inventing an operator. If conditions are poor, state that the opportunity may be moved to another eligible night subject to fatigue and itinerary constraints; never promise a sighting.
 - For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler. Build chronology sequentially: each next row starts only after the previous row ends plus any required movement; never independently assign overlapping clocks. If the corridor cannot fit, drop OPTIONAL then DROP_FIRST stops before compressing CORE/HIGH anchors or overlapping rows.
+- V118 REFINEMENT: do not create generic café/shopping/flexible-walk blocks solely to consume remaining window time. If the day's meaningful experience is complete, end naturally. A micro-stop or optional scenic pause is supportive slack and must not masquerade as a selected anchor. Avoid repeating a POI/experience family already meaningfully visited on another day when an equally coherent distinct close exists; if not, prefer ending early over filler.
+- V118 INTERNAL COHERENCE: when a general complex/area block is followed by a dedicated sub-anchor block, do not describe that sub-anchor as already completed inside the earlier general block. Transport alternatives may have different durations; keep the scheduled interval consistent with at least one explicitly offered mode and do not silently use the slowest alternative as mandatory.
 - PREMIUM PACING CONTRACT: empty clock time is not automatically a defect. Meals, rest, access, buffers and hotel returns are logistics, not tourism richness. Use at most one lunch and one dinner unless the traveler explicitly requests otherwise; never add a second meal/rest/buffer merely to fill a gap or satisfy row count. A destination-defining long anchor plus necessary logistics can be a complete premium day with few rows. End naturally when the day is experientially sufficient; preserve recovery after high-fatigue or late-night experiences, including when the previous owner-day NIGHT_OVERLAY physically ended after midnight.
 - DECISIVE MAIN PLAN: an experience_inventory item selected for this owner day is a main-plan commitment, not an A/B choice. Schedule the selected experience as primary. Put alternatives/fallbacks in Notes only. When live opening, show, weather or availability data is genuinely required, keep the selected experience conditional and explicitly ask the traveler to verify rather than inventing confirmation.
 - First identify and protect the physical destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
