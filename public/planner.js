@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V125';
-const ITBMO_RUNTIME_ASSET='planner.js?v=244';
+const ITBMO_RUNTIME_BUILD='V126';
+const ITBMO_RUNTIME_ASSET='planner.js?v=245';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -4908,13 +4908,31 @@ function _reconcileDayRows_(rows=[]){
   return sorted;
 }
 
+// V126 transport presentation guard. Planner rows are contracted to expose transport
+// as text, but a model may occasionally return structured local-mobility data. Never
+// stringify such an object as "[object Object]". Flatten only traveler-facing scalar
+// fields; chronology and commerce_context remain untouched.
+function _v126TransportText_(value){
+  if(value==null)return '';
+  if(typeof value==='string'||typeof value==='number')return String(value).trim();
+  if(Array.isArray(value))return value.map(_v126TransportText_).filter(Boolean).join(' · ');
+  if(typeof value!=='object')return '';
+  const scalar=k=>{const v=value?.[k];return (typeof v==='string'||typeof v==='number')?String(v).trim():'';};
+  const direct=['label','text','summary','description','mode','name','transport_mode','transportMode'].map(scalar).filter(Boolean);
+  const estimate=['estimated_time','estimatedTime','duration','time'].map(scalar).filter(Boolean);
+  const minutes=Number(value?.estimated_minutes??value?.minutes);
+  if(Number.isFinite(minutes)&&minutes>0)estimate.push(`~${_minutesToHuman_(minutes)}`);
+  const alternatives=Array.isArray(value?.alternatives)?value.alternatives.map(_v126TransportText_).filter(Boolean):[];
+  return [...new Set([...direct,...estimate,...alternatives])].join(' · ');
+}
+
 function normalizeRow(r = {}, fallbackDay = 1){
   const startRaw = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
   const endRaw   = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
   const act      = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
   const from     = r.from ?? r.origin ?? r.origen ?? '';
   const to       = r.to   ?? r.destination ?? r.destino ?? '';
-  const trans    = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
+  const trans    = _v126TransportText_(r.transport ?? r.transportMode ?? r.modo_transporte ?? '');
   const durRaw   = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes    = r.notes ?? r.nota ?? r.comentarios ?? '';
   const kindRaw  = r.kind ?? r.type ?? r.tipo ?? '';
@@ -6739,6 +6757,54 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
   let out=JSON.parse(JSON.stringify(rows||[]));
   let shifts=0;
   const byDay=_rowsByDayObject_(out);
+  // V126 Physical Chain Reconciler. V125 already instructs Luna to build every
+  // multi-anchor corridor as one dependency chain. This deterministic pre-pass
+  // closes only the arithmetic gap when a flexible downstream row nevertheless
+  // starts before its physical predecessor has ended. Unlike the legacy uniform
+  // cascade, propagation is slack-aware: each row moves only by the amount still
+  // required after natural gaps absorb the upstream delay. It never crosses an
+  // authoritative planning-window boundary, never touches NIGHT_OVERLAY chains,
+  // and never moves user-fixed/reservation-hard/calendar-hard rows. The existing
+  // DIC + audit/repair path remains the fallback for anything ambiguous.
+  for(const [dayKey,dayRowsRaw] of Object.entries(byDay)){
+    const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort(_v114LogicalRowCompare_);
+    for(let i=1;i<dayRows.length;i++){
+      const prev=dayRows[i-1],cur=dayRows[i];
+      if(_v114IsNightOverlayRow_(prev)||_v114IsNightOverlayRow_(cur))continue;
+      const prevEnd=_v114LogicalEndMinutes_(prev),curStart=_v114LogicalStartMinutes_(cur);
+      if(prevEnd==null||curStart==null||curStart>=prevEnd)continue;
+      const initialDelta=prevEnd-curStart;
+      if(initialDelta<=0||initialDelta>180)continue; // preserve V113's semantic-repair boundary.
+      const windowId=String(cur?.planning_window_id||cur?.commerce_context?.planning_window_id||'');
+      const prevWindowId=String(prev?.planning_window_id||prev?.commerce_context?.planning_window_id||'');
+      if(!windowId||!prevWindowId||windowId!==prevWindowId)continue;
+
+      const proposal=[]; let chainEnd=prevEnd,safe=true,maxShift=0;
+      for(let j=i;j<dayRows.length;j++){
+        const r=dayRows[j];
+        const rowWindow=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'');
+        if(rowWindow!==windowId||_v114IsNightOverlayRow_(r))break;
+        const rs=_v114LogicalStartMinutes_(r),re=_v114LogicalEndMinutes_(r);
+        if(rs==null||re==null||re<=rs){safe=false;break;}
+        if(rs>=chainEnd)break; // natural slack has fully absorbed the upstream delay.
+        const delta=chainEnd-rs;
+        if(delta<=0)break;
+        const calendar=String(r?.calendar_sensitivity||r?.commerce_context?.calendar_sensitivity||'').toLowerCase();
+        if(_v115IsHardRow_(r)||calendar==='high'){safe=false;break;}
+        const w=_v111WindowForRow_(r,contract),wend=_hhmmToMinutes_(w?.end);
+        const newEnd=re+delta;
+        if(wend!=null&&newEnd>wend){safe=false;break;}
+        proposal.push({row:r,start:rs+delta,end:newEnd,delta});
+        maxShift=Math.max(maxShift,delta);chainEnd=newEnd;
+      }
+      if(!safe||!proposal.length)continue;
+      const risk=_v115CascadeShiftRisk_(proposal.map(x=>x.row),maxShift);
+      if(risk.blocked)continue;
+      for(const x of proposal){x.row.start=_minutesToHHMM_(x.start);x.row.end=_minutesToHHMM_(x.end);}
+      shifts+=proposal.length;
+      console.info(`[ITBMO V126 PHYSICAL CHAIN] ${city} · day ${day} · reconciled ${proposal.length} row(s) · initial +${initialDelta} min · max +${maxShift} min`);
+    }
+  }
   for(const [dayKey,dayRowsRaw] of Object.entries(byDay)){
     const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort(_v114LogicalRowCompare_);
     for(let i=1;i<dayRows.length;i++){
