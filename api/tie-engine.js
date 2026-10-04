@@ -1,4 +1,4 @@
-/* ITBMO V116 · Travel Intelligence Engine (TIE)
+/* ITBMO V117 · Travel Intelligence Engine (TIE)
    Strategic travel structure only. No itinerary prose, affiliate logic or live-provider assumptions.
    Web-ready: evidence is provider-neutral and every dynamic claim can carry freshness metadata. */
 
@@ -92,6 +92,7 @@ RULES
 - Do not return units for blocked/user-fixed days.
 - Every REGIONAL unit needs a non-empty route_manifest.
 - Avoid duplicate experiences across units and overlays.
+- NIGHT OVERLAY OWNER-DAY CONTRACT: preferred_day is the itinerary day whose evening/start owns the complete nocturnal experience. If that experience crosses midnight, every continuation row (experience, return, recovery directly belonging to that outing) remains owned by preferred_day even though its physical clock is on D+1. Never reinterpret post-midnight continuation as an itinerary unit/day N+1. The following day may only adapt its own start/pacing to the previous night finish.
 - experience_inventory must be compact and decision-useful, not an exhaustive attraction catalog.
 - Every selected defining/major inventory item needs owner_day matching an open day, a fixed user unit, or a night overlay; otherwise list it in uncovered_high_value with the reason.
 - opportunity_cost_check may be pass only when no feasible defining/major omission is being displaced by lower-value filler.
