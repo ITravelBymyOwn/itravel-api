@@ -1,4 +1,4 @@
-/* ITBMO V99 · Travel Intelligence Engine (TIE)
+/* ITBMO V116 · Travel Intelligence Engine (TIE)
    Strategic travel structure only. No itinerary prose, affiliate logic or live-provider assumptions.
    Web-ready: evidence is provider-neutral and every dynamic claim can carry freshness metadata. */
 
@@ -54,6 +54,8 @@ REGIONAL CLUSTERS AND MICRO-STOPS
 
 NIGHT / SPECIAL MOMENTS
 - Night experiences are overlays, not standalone day units unless the traveler supplied a fixed booking.
+- Night-overlay time is continuous across calendar midnight. A valid experience may start on owner day N and physically finish on calendar day N+1; preserve that duration and owner day instead of truncating it at 24:00. This applies generically to any semantically justified late experience (for example celebrations, performances, astronomy/nature, festivals or nightlife), not only to one named activity.
+- duration_minutes must represent the honest expected experience duration even when start_window + duration crosses midnight. Do not shorten a nocturnal experience merely to avoid a next-day clock time. recovery_cost must reflect the consequence for the following day.
 - Consider culturally iconic night experiences, shows, performances, special dinners, night markets, astronomy/nature opportunities and destination-defining evening experiences.
 - Detect structurally relevant dates from calendar_context and adapt the day around them. Do not invent year-specific events, opening hours or availability.
 - Weather-dependent overlays need alternatives/eligible days and must never be guaranteed.
