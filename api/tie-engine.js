@@ -50,6 +50,7 @@ REGIONAL CLUSTERS AND MICRO-STOPS
 - Every micro-stop has priority CORE, HIGH, OPTIONAL or DROP_FIRST.
 - Consider route fit, marginal detour, dwell, daylight, access, redundancy and traveler pace.
 - Long anchor experiences can displace weaker micro-stops. Never compress a major anchor just to keep more stops.
+- REGIONAL ANCHOR COMPLETENESS: once a regional corridor is selected, explicitly compare the defining/major/characteristic experiences that naturally belong to that corridor against its complementary/supporting micro-stops before finalizing route_manifest. A feasible high-value corridor experience must not be displaced merely to preserve several weaker stops. Omission remains valid when traveler fit, calendar, season, geography, fatigue, reservation rigidity, mobility or honest time capacity makes it the weaker choice; reflect that reason in the inventory/coverage decision. This is semantic and global: never rely on destination-specific examples, fixed attraction lists or venue hardcodes.
 - route_manifest order must itself be geographically plausible at planning-knowledge level. Do not claim live routing.
 
 NIGHT / SPECIAL MOMENTS
