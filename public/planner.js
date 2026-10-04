@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V123';
-const ITBMO_RUNTIME_ASSET='planner.js?v=242';
+const ITBMO_RUNTIME_BUILD='V124';
+const ITBMO_RUNTIME_ASSET='planner.js?v=243';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6370,13 +6370,13 @@ function _isScenicOutdoorRow_(row={}){
 }
 
 function _isAuroraRow_(row={}){
-  return /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(
+  return /\b(auroras?|northern lights|luces del norte|aurores? bor[eé]ales?|nordlichter?)\b/i.test(
     `${row?.activity||''} ${row?.to||''} ${row?.notes||''}`
   );
 }
 
 function _isAuroraActivityRow_(row={}){
-  return /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(
+  return /\b(auroras?|northern lights|luces del norte|aurores? bor[eé]ales?|nordlichter?)\b/i.test(
     `${row?.activity||''} ${row?.to||''}`
   );
 }
@@ -8516,7 +8516,9 @@ async function _tieCallStructure_(request){
 }
 
 function _tieAuroraOverlay_(overlay={}){
-  return /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(`${overlay?.type||''} ${overlay?.identity||''}`);
+  // V124: semantic aurora classification must tolerate natural singular/plural wording
+  // emitted by TIE. This is experience-type recognition, never destination inference.
+  return /\b(auroras?|northern lights|luces del norte|aurores? bor[eé]ales?|nordlichter?)\b/i.test(`${overlay?.type||''} ${overlay?.identity||''}`);
 }
 function _tieOverlayWindow_(baseUnit,overlay={}){
   const day=Number(overlay?.preferred_day); if(!day) return null;
@@ -9014,7 +9016,7 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - V118 NIGHT END: after the nocturnal chain returns to the lodging/base, END that owner-day chain. Do not create a standalone "sleep", "rest", "hydrate" or "recovery" itinerary row merely to occupy post-return clock time. Recovery belongs in next-day pacing, not as filler.
 - V118 TEMPORAL PROSE: descriptions must agree with owner-day assignment. Never say "before tonight's/later tonight's" experience when the referenced selected experience is owned by another itinerary day.
 - AURORA EXECUTION: if the preferred overlay is an aurora/northern-lights opportunity, preserve the TIE strategy. A guided mobile aurora hunt is a genuine TOUR_EXPERIENCE: explain that the route/location may change to seek better sky conditions, recommend the guided hunt when TIE marks guided_hunt, and mention self-drive/local dark-sky observation as an alternative when supplied. Use the full extended NIGHT_OVERLAY window rather than collapsing it to a short fixed viewpoint visit. Set commerce_context.guided_tour_value=high and commercial_eligible=true for the hunt so Context Intelligence can surface distinct guided-tour options without inventing an operator. If conditions are poor, state that the opportunity may be moved to another eligible night subject to fatigue and itinerary constraints; never promise a sighting.
-- For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler. Build chronology sequentially: each next row starts only after the previous row ends plus any required movement; never independently assign overlapping clocks. If the corridor cannot fit, drop OPTIONAL then DROP_FIRST stops before compressing CORE/HIGH anchors or overlapping rows.
+- For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler. Build chronology as ONE dependency chain, not as independently estimated appointments: finish current experience -> add the real movement block -> only then start the next experience. Once a row has an end time, no downstream transfer or experience may retain an earlier pre-imagined clock. Recompute downstream clocks from the chain. If the corridor cannot fit, drop OPTIONAL then DROP_FIRST stops before compressing CORE/HIGH anchors or overlapping rows. This rule is global for every multi-anchor corridor and does not depend on destination identity.
 - V118 REFINEMENT: do not create generic café/shopping/flexible-walk blocks solely to consume remaining window time. If the day's meaningful experience is complete, end naturally. A micro-stop or optional scenic pause is supportive slack and must not masquerade as a selected anchor. Avoid repeating a POI/experience family already meaningfully visited on another day when an equally coherent distinct close exists; if not, prefer ending early over filler.
 - V118 INTERNAL COHERENCE: when a general complex/area block is followed by a dedicated sub-anchor block, do not describe that sub-anchor as already completed inside the earlier general block. Transport alternatives may have different durations; keep the scheduled interval consistent with at least one explicitly offered mode and do not silently use the slowest alternative as mandatory.
 - PREMIUM PACING CONTRACT: empty clock time is not automatically a defect. Meals, rest, access, buffers and hotel returns are logistics, not tourism richness. Use at most one lunch and one dinner unless the traveler explicitly requests otherwise; never add a second meal/rest/buffer merely to fill a gap or satisfy row count. A destination-defining long anchor plus necessary logistics can be a complete premium day with few rows. End naturally when the day is experientially sufficient; preserve recovery after high-fatigue or late-night experiences, including when the previous owner-day NIGHT_OVERLAY physically ended after midnight.
