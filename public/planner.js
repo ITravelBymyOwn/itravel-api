@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V119';
-const ITBMO_RUNTIME_ASSET='planner.js?v=238';
+const ITBMO_RUNTIME_BUILD='V120';
+const ITBMO_RUNTIME_ASSET='planner.js?v=239';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6527,6 +6527,53 @@ function _v40DistinctPoiExperience_(a={},b={}){
   return (exterior(at)&&interior(bt))||(interior(at)&&exterior(bt));
 }
 
+// V120 Deterministic Semantic Integrity. Preserve TIE identity instead of
+// reconstructing strategic decisions from final prose. These helpers are
+// deliberately conservative: missing lineage falls back to V119 behavior.
+function _v120TieExperienceKey_(row={}){
+  return _canonicalText_(row?._tie_experience||row?.commerce_context?._tie_experience||'');
+}
+function _v120TieExperienceFamily_(row={}){
+  return _canonicalText_(row?._tie_experience_family||row?.commerce_context?._tie_experience_family||'');
+}
+function _v120SameSelectedExperience_(a={},b={}){
+  const ak=_v120TieExperienceKey_(a),bk=_v120TieExperienceKey_(b);
+  if(ak&&bk&&_arePoiAliases_(ak,bk))return true;
+  const af=_v120TieExperienceFamily_(a),bf=_v120TieExperienceFamily_(b);
+  if(!af||!bf||af!==bf)return false;
+  const ap=_canonicalText_(a?.physical_location||a?.commerce_context?.physical_destination||'');
+  const bp=_canonicalText_(b?.physical_location||b?.commerce_context?.physical_destination||'');
+  return !ap||!bp||ap===bp||_arePoiAliases_(ap,bp);
+}
+function _v120GapContext_(prev={},next={},gap=0){
+  const prevRole=_v110SemanticRole_(prev),nextRole=_v110SemanticRole_(next);
+  const sameUnit=Boolean(prev?.stay_unit_id&&next?.stay_unit_id&&String(prev.stay_unit_id)===String(next.stay_unit_id));
+  const sameWindow=Boolean(prev?.planning_window_id&&next?.planning_window_id&&String(prev.planning_window_id)===String(next.planning_window_id));
+  const unitType=String(prev?._tie_unit_type||next?._tie_unit_type||'').toUpperCase();
+  const slack=Math.max(Number(prev?._tie_structural_slack_minutes||0),Number(next?._tie_structural_slack_minutes||0));
+  const explicit=_canonicalText_(`${prev?.notes||''} ${next?.notes||''}`);
+  const recovery=/\b(recovery|recover|descanso|recuper|free time|tiempo libre|prepar|break|pausa)\b/i.test(explicit);
+  const logistics=/\b(wait|espera|access|acceso|parking|estacionamiento|queue|fila|embarque|boarding|check.?in|shuttle|traffic|trafico|tr[aá]fico)\b/i.test(explicit);
+  const nightContext=Boolean(prev?._itbmo_night_chain_id||next?._itbmo_night_chain_id)||prevRole==='recovery'||nextRole==='recovery';
+  const criticalChain=sameUnit&&(sameWindow||unitType.startsWith('REGIONAL_'))&&(['transfer','return'].includes(prevRole)||['transfer','return'].includes(nextRole));
+  return {prevRole,nextRole,sameUnit,sameWindow,unitType,slack,recovery,logistics,nightContext,criticalChain,gap};
+}
+function _v120GapClassification_(prev={},next={},gap=0){
+  // 0-30: invisible operational noise. 31-60: normal traveler freedom.
+  // 61-90: inspect only when the physical chain gives enough evidence.
+  // 91-120: always classify. >120 unexplained is material.
+  if(gap<=30)return {level:'IGNORE',explained:true};
+  if(gap<=60)return {level:'TOLERATED',explained:true};
+  const c=_v120GapContext_(prev,next,gap);
+  if(c.recovery||c.logistics||c.nightContext)return {level:'EXPLAINED',explained:true,context:c};
+  // Structural slack is contextual evidence, never a blanket excuse. It may
+  // explain a moderate gap only inside one coherent physical unit/window.
+  if(gap<=90&&c.sameUnit&&(c.sameWindow||c.unitType.startsWith('REGIONAL_'))&&c.slack>=gap)return {level:'STRUCTURAL_SLACK',explained:true,context:c};
+  if(gap<=90&&!c.criticalChain)return {level:'SOFT',explained:true,context:c};
+  if(gap<=120)return {level:'REVIEW',explained:false,context:c};
+  return {level:'MATERIAL',explained:false,context:c};
+}
+
 // V111 Deterministic Itinerary Compiler (DIC). Luna owns travel intelligence;
 // code owns arithmetic, identity, continuity and convergence. These helpers are
 // intentionally destination-agnostic and run without model/API calls.
@@ -6944,9 +6991,18 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         const poi=_poiKeyFromRow_(r);
         const physicalKey=_canonicalText_(r?.physical_location||r?.commerce_context?.physical_destination||city);
         for(const prior of seenPois){
-          if(prior.day!==day && _v111ExperienceVisitRow_(prior.row) && prior.physicalKey===physicalKey && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
-            errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],first:prior.label,second:r.to||r.activity,physical_location:physicalKey});
-            break;
+          if(prior.day!==day && _v111ExperienceVisitRow_(prior.row) && prior.physicalKey===physicalKey){
+            const priorHasLineage=Boolean(_v120TieExperienceKey_(prior.row)||_v120TieExperienceFamily_(prior.row));
+            const currentHasLineage=Boolean(_v120TieExperienceKey_(r)||_v120TieExperienceFamily_(r));
+            const sameSelected=_v120SameSelectedExperience_(prior.row,r);
+            const legacyDuplicate=_arePoiAliases_(poi,prior.poi)&&!_v40DistinctPoiExperience_(prior.row,r);
+            // Authoritative TIE lineage outranks prose when both rows have it.
+            // Otherwise retain V119's conservative alias detector as fallback.
+            const duplicate=(priorHasLineage&&currentHasLineage)?sameSelected:legacyDuplicate;
+            if(duplicate){
+              errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],first:prior.label,second:r.to||r.activity,physical_location:physicalKey,tie_experience_family:_v120TieExperienceFamily_(r)||null,tie_lineage:Boolean(priorHasLineage&&currentHasLineage)});
+              break;
+            }
           }
         }
         if(poi) seenPois.push({day,poi,label:r.to||r.activity,row:r,physicalKey});
@@ -7083,28 +7139,20 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       const prev=dayRows[i-1]||{},next=dayRows[i]||{};
       const pe=_v114LogicalEndMinutes_(prev),ns=_v114LogicalStartMinutes_(next);
       if(pe==null||ns==null||ns<=pe)continue;
-      const gap=ns-pe;if(gap<=45)continue;
+      const gap=ns-pe;if(gap<=30)continue;
       const explicit=`${prev.notes||''} ${next.notes||''}`;
-      const explained=explicit.includes(`${prev.end}-${next.start}`)||explicit.includes(`${prev.end}–${next.start}`);
+      const explicitClock=explicit.includes(`${prev.end}-${next.start}`)||explicit.includes(`${prev.end}–${next.start}`);
       const load=_v110DayLoad_(dayRows);
       const roles=dayRows.map(_v110SemanticRole_);
       const midday=pe<14*60+30&&ns>11*60+30;
       const mealAlreadyPlanned=roles.includes('meal');
-      // V110: blank time is not automatically a defect. Once a day is already
-      // experientially sufficient, a moderate gap may be legitimate breathing room.
-      // Never invite the model to manufacture a second lunch/dinner/rest merely to
-      // satisfy chronology. Only material gaps in an insufficient day remain repairable.
-      // V115 semantic gap classifier. A long clock gap is not automatically a
-      // defect when a sufficiently rich day deliberately pauses before a later
-      // optional/conditional evening experience. This avoids wasting a repair call
-      // on valid free/recovery time while preserving true sparse-day gaps.
-      const daySufficient=_v110DayIsSufficient_(dayRows);
-      const nextStatus=_v113PlanStatus_(next);
-      const eveningResume=pe>=14*60&&ns>=18*60;
-      const deliberateBreathing=daySufficient&&eveningResume&&['optional','conditional','fallback'].includes(nextStatus);
-      const materialGap=!deliberateBreathing && (gap>90 || (!daySufficient&&gap>60));
-      if(!_isPureTransportRow_(prev)&&!_isPureTransportRow_(next)&&!explained&&materialGap){
-        errors.push({code:'UNEXPLAINED_GAP',day,previous_row:i,next_row:i+1,gap_minutes:gap,previous_end:prev.end,next_start:next.start,day_experience_minutes:load.experience,meal_already_planned:mealAlreadyPlanned,instruction:midday&&!mealAlreadyPlanned?'Classify this interval before changing the itinerary. If a meal is genuinely missing, add ONE realistic meal; otherwise tighten the chronology or leave justified free/recovery time. Never duplicate a meal/rest to fill time.':'Classify this interval before changing the itinerary. Prefer chronology correction or justified free/recovery time; do not invent meals, rests, buffers or attractions merely to fill a clock.'});
+      const classification=_v120GapClassification_(prev,next,gap);
+      // V120: richness and temporal coherence are independent. A sparse day is
+      // not automatically wrong, and a rich day does not excuse a material hole.
+      // 31-60 minutes remain normal traveler freedom. 61-90 is contextual;
+      // 91-120 requires an explanation; >120 unexplained is material.
+      if(!explicitClock&&!classification.explained){
+        errors.push({code:'UNEXPLAINED_GAP',day,previous_row:i,next_row:i+1,gap_minutes:gap,gap_level:classification.level,previous_end:prev.end,next_start:next.start,day_experience_minutes:load.experience,meal_already_planned:mealAlreadyPlanned,unit_type:classification.context?.unitType||null,structural_slack_minutes:classification.context?.slack||0,instruction:midday&&!mealAlreadyPlanned?'Classify this interval before changing the itinerary. If a meal is genuinely missing, add ONE realistic meal; otherwise tighten the chronology or leave justified free/recovery time. Never duplicate a meal/rest to fill time.':'Classify this interval before changing the itinerary. Prefer chronology correction or justified free/recovery time; do not invent meals, rests, buffers or attractions merely to fill a clock.'});
       }
     }
 
@@ -8872,7 +8920,7 @@ function _v3StampStayRows_(rows=[],unit={}){
     const inventoryMatch=inventory.find(x=>_arePoiAliases_(x?.experience||'',row?.to||'')||_arePoiAliases_(x?.experience||'',row?.activity||''))||null;
     const windowStart=_hhmmToMinutes_(window.start),rowStartRaw=_hhmmToMinutes_(row.start);
     const dayOffset=(String(window.role||'')==='NIGHT_OVERLAY'&&Boolean(window.crosses_midnight)&&windowStart!=null&&rowStartRaw!=null&&rowStartRaw<windowStart)?1:0;
-    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),_tie_selected_anchor:Boolean(inventoryMatch),_tie_selected_anchor_verification_required:Boolean(inventoryMatch?.verification_required),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
+    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_structural_slack_minutes:Number(directive?.structural_slack_minutes||0)||0,_tie_aurora_context:auroraAuthorized,_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),_tie_selected_anchor:Boolean(inventoryMatch),_tie_experience:inventoryMatch?.experience||null,_tie_experience_family:inventoryMatch?.experience_family||null,_tie_experience_significance:inventoryMatch?.significance||null,_tie_experience_owner_day:Number(inventoryMatch?.owner_day||0)||null,_tie_experience_fallback_role:inventoryMatch?.fallback_role||null,_tie_selected_anchor_verification_required:Boolean(inventoryMatch?.verification_required),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,_tie_structural_slack_minutes:Number(directive?.structural_slack_minutes||0)||0,_tie_experience:inventoryMatch?.experience||null,_tie_experience_family:inventoryMatch?.experience_family||null,_tie_experience_significance:inventoryMatch?.significance||null,_tie_experience_owner_day:Number(inventoryMatch?.owner_day||0)||null,_tie_experience_fallback_role:inventoryMatch?.fallback_role||null,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
   });
   // V71 · if ITBMO had to move an estimated full-day excursion away from an
   // impossible transition day, explain the adjustment once in traveler-facing
