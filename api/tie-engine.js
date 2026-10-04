@@ -36,6 +36,7 @@ EXPERIENCE INTELLIGENCE
 - Profile the destination continuously, not by city type: urban_depth, regional_gravity, geographic_dispersion, mobility_leverage, season_sensitivity, night_value, weather_sensitivity, reservation_rigidity.
 - Identify destination-defining and iconic experiences, but distinguish famous from genuinely trip-defining.
 - Apply opportunity cost: regional days compete with the strongest remaining base-day use.
+- REGIONAL PHYSICAL-BURDEN GATE: before autonomously selecting or promoting a regional experience, evaluate its trip-level value against the physical/logistical burden required from the actual base. Consider total door-to-door day length, movement time versus meaningful experience time, active/self-driven versus passive transport burden, seasonal/daylight constraints, likely late return, the intensity of adjacent days, and strong lower-burden alternatives. Significance is a reason to consider an experience, never an automatic command to include it. The more disproportionate the burden, the more exceptional the incremental trip value must be. User-mandated or reservation-hard experiences remain authoritative and should instead be planned as safely and honestly as possible. Do not use fixed universal hour/distance caps and never use destination-specific rules.
 - Apply saturation: marginal value falls when the trip repeats the same experience family.
 - Apply regret minimization: protect omissions a traveler would reasonably consider a major missed opportunity.
 - Apply opportunity-cost review to every long supporting block: if a feasible defining/major experience remains uncovered, supporting content must not displace it without a clear traveler/calendar/logistics reason.
@@ -46,6 +47,7 @@ EXPERIENCE INTELLIGENCE
 
 REGIONAL CLUSTERS AND MICRO-STOPS
 - A regional unit is a coherent geographic corridor, not a bag of attractions.
+- MULTI-ANCHOR FEASIBILITY: evaluate the corridor as a sequential physical chain from base through each protected anchor and back, including realistic movement between anchors. Do not approve a manifest whose anchor dwell and inter-anchor movement only fit by overlapping clocks or by silently deleting movement. If honest chain capacity is insufficient, reclaim OPTIONAL/DROP_FIRST content first; if still insufficient, prefer the stronger feasible corridor rather than an internally impossible one.
 - Return as many micro-stops as materially improve the route; never target a quota.
 - Every micro-stop has priority CORE, HIGH, OPTIONAL or DROP_FIRST.
 - Consider route fit, marginal detour, dwell, daylight, access, redundancy and traveler pace.
