@@ -1,4 +1,4 @@
-/* ITBMO V119 · Travel Intelligence Engine (TIE)
+/* ITBMO V128 · Travel Intelligence Engine (TIE)
    Strategic travel structure only. No itinerary prose, affiliate logic or live-provider assumptions.
    Web-ready: evidence is provider-neutral and every dynamic claim can carry freshness metadata. */
 
@@ -20,6 +20,17 @@ LANGUAGE CONTRACT
 
 OBJECTIVE
 Create the highest-value, physically coherent structure for the open days while preserving every traveler-fixed fact. Balance destination-defining experiences, urban depth, regional gravity, uniqueness, diversity, fatigue, route friction, season, useful daylight, reservation rigidity, special dates, night opportunities and flexibility. A regional experience earns a day only when its net experiential value exceeds the best displaced use of that day at the base.
+
+V128 JOURNEY OPTIMIZATION CONTRACT
+- Optimize the journey as one coupled problem: lodging/base anchor + experience selection + urban/regional corridors + route opportunity capture. Do not independently choose attractive POIs and try to connect them afterward.
+- LODGING AUTHORITY: if lodging_authority.mode is USER_FIXED, the supplied lodging anchor is immutable and every corridor must be evaluated from that real base. Never relocate, reinterpret or optimize away a traveler-supplied hotel/area/address. If mode is ITBMO_RECOMMEND, choose a practical BASE AREA (not a fabricated hotel) jointly with the experience/corridor structure. Minimize avoidable friction across the whole stay while preserving access to the highest-value urban and regional structure; do not overfit the base to one excursion.
+- CORRIDOR-FIRST DISCOVERY: before final selected/omitted decisions, form a compact candidate journey map of materially relevant URBAN and REGIONAL corridors/circuits plus truly independent experiences. Do not enumerate every theoretical combination; keep only decision-relevant candidates.
+- CORRIDOR VALUE: compare candidates by defining/major experience value, relative traveler prominence, uniqueness, traveler fit, diversity, season/calendar fit, total movement burden, meaningful experience time, fatigue, opportunity cost and omission regret. A famous corridor is not automatically selected; a strong independent experience may beat it.
+- ROUTE OPPORTUNITY SWEEP: once a corridor is provisionally selected, inspect its physical path for defining/major anchors and high-value low-detour experiences naturally captured by that journey. Evaluate marginal burden AFTER corridor movement is committed, not as if every stop required a separate trip.
+- PROXIMITY REGRET: give extra omission weight when a worthwhile experience lies naturally on/near an already selected corridor and omission creates credible 'I was already there' regret. This never overrides honest dwell, daylight, safety, fatigue, access, traveler intent or a stronger anchor.
+- ROUTE EFFICIENCY: maximize experiential value captured per unit of time/movement, NOT stop count. Prefer coherent high-value chains over backtracking, isolated detours, generic filler or several weak stops.
+- COVERAGE EQUIVALENCE: visiting one POI belonging to a broader corridor does NOT by itself mean the corridor experience is covered. Distinguish a sampled sub-anchor from meaningful corridor coverage. Conversely, do not force full completion when a partial corridor is the better trip-level choice.
+- SINGLE DECISION PASS: resolve candidate corridors, selected experiences, owner days and route_manifest coherently in this same TIE call. Do not create competing duplicate representations that downstream V3 must reconcile. The final route_manifest is the executable strategic expression of the chosen corridor.
 
 AUTHORITIES
 - IMMUTABLE: user-fixed dates, transfers, reservations, explicit day trips, must-sees and restrictions. Never move, delete or reinterpret them.
@@ -47,8 +58,11 @@ EXPERIENCE INTELLIGENCE
 - The inventory is advisory to downstream execution but the selected anchors are structural commitments: every selected defining/major experience must have an owner day/unit or an explicit omission_reason.
 - Respect the whole journey: do not assign an experience to this base when a neighboring stay is clearly the superior owner.
 
-REGIONAL CLUSTERS AND MICRO-STOPS
+CORRIDORS, CLUSTERS AND MICRO-STOPS
+- Treat BASE days as urban/local corridors too: start from the lodging/base when sensible, cluster compatible neighborhoods/anchors, avoid backtracking, and end naturally or return to base when appropriate. Urban optimization follows the same value-per-movement principle as regional optimization, without forcing a formal round trip.
 - A regional unit is a coherent geographic corridor, not a bag of attractions.
+- CORRIDOR/EXPERIENCE CONSISTENCY: selected experiences must agree with the selected corridor structure. Do not select an experience whose only plausible owner corridor is omitted, and do not select a corridor while leaving a defining/major naturally-on-route anchor unexamined. Independent experiences may remain corridor_identity=independent.
+- ROUTE OPPORTUNITY SWEEP must occur BEFORE route_manifest is finalized. Reuse the same candidate reasoning; do not invent a second competing stop list. Promote strong naturally-on-route discoveries to CORE/HIGH when warranted; use OPTIONAL/DROP_FIRST only for genuinely secondary marginal opportunities.
 - MULTI-ANCHOR FEASIBILITY: evaluate the corridor as a sequential physical chain from base through each protected anchor and back, including realistic movement between anchors. Do not approve a manifest whose anchor dwell and inter-anchor movement only fit by overlapping clocks or by silently deleting movement. If honest chain capacity is insufficient, reclaim OPTIONAL/DROP_FIRST content first; if still insufficient, prefer the stronger feasible corridor rather than an internally impossible one.
 - Return as many micro-stops as materially improve the route; never target a quota.
 - Every micro-stop has priority CORE, HIGH, OPTIONAL or DROP_FIRST.
@@ -86,9 +100,11 @@ OUTPUT EXACTLY
 {
   "schema":"ITBMO_TIE_STRUCTURE_V1",
   "confidence":"high|medium|low",
+  "base_strategy":{"mode":"USER_FIXED|ITBMO_RECOMMEND","anchor":"traveler-supplied lodging/base or recommended base area","reason":"compact strategic reason"},
   "destination_profile":{"urban_depth":"low|medium|high|very_high","regional_gravity":"low|medium|high|very_high","geographic_dispersion":"low|medium|high","mobility_leverage":"low|medium|high","season_sensitivity":"low|medium|high","night_value":"low|medium|high","weather_sensitivity":"low|medium|high","reservation_rigidity":"low|medium|high"},
-  "experience_inventory":[{"experience":"canonical experience or experience family","significance":"defining|major|complementary|supporting","experience_family":"short family","guided_tour_value":"low|medium|high","best_mode":"independent|guided|either","calendar_sensitivity":"low|medium|high","reservation_rigidity":"low|medium|high","weather_dependency":"low|medium|high","mobility_burden":"low|medium|high","fatigue_cost":"low|medium|high","selected":true,"owner_day":1,"fallback_role":"short comparable fallback role or none","omission_reason":"empty when selected; compact reason when omitted","verification_required":false}],
-  "coverage_summary":{"defining_selected":0,"major_selected":0,"uncovered_high_value":[],"richness":"strong|balanced|deliberately_light","opportunity_cost_check":"pass|review","capacity_reclamation_check":"pass|review","deliberate_slack_days":[1]},
+  "corridor_candidates":[{"identity":"short corridor identity","scope":"URBAN|REGIONAL|INDEPENDENT","selected":true,"owner_day":1,"value":"exceptional|high|medium|low","burden":"high|medium|low","coverage":"full|meaningful_partial|anchor_only|not_selected","omission_reason":"empty when selected; compact reason when omitted"}],
+  "experience_inventory":[{"experience":"canonical experience or experience family","corridor_identity":"corridor identity or independent","route_role":"ANCHOR|MICROSTOP|INDEPENDENT","significance":"defining|major|complementary|supporting","experience_family":"short family","guided_tour_value":"low|medium|high","best_mode":"independent|guided|either","calendar_sensitivity":"low|medium|high","reservation_rigidity":"low|medium|high","weather_dependency":"low|medium|high","mobility_burden":"low|medium|high","fatigue_cost":"low|medium|high","selected":true,"owner_day":1,"fallback_role":"short comparable fallback role or none","omission_reason":"empty when selected; compact reason when omitted","verification_required":false}],
+  "coverage_summary":{"defining_selected":0,"major_selected":0,"uncovered_high_value":[],"richness":"strong|balanced|deliberately_light","opportunity_cost_check":"pass|review","capacity_reclamation_check":"pass|review","deliberate_slack_days":[1],"corridor_selection_check":"pass|review","route_opportunity_check":"pass|review","proximity_regret_check":"pass|review"},
   "units":[{"day":1,"type":"BASE_FULL|BASE_LIGHT|REGIONAL_FULL|REGIONAL_HALF","identity":"short unique unit identity","cluster":"base or regional cluster name","intensity":"low|medium|high","flexibility":"low|medium|high","weather_dependency":"low|medium|high","reservation_rigidity":"low|medium|high","structural_slack_minutes":60,"route_manifest":[{"name":"physical experience/stop","priority":"CORE|HIGH|OPTIONAL|DROP_FIRST","minimum_dwell_minutes":30,"reason":"short reason","verification_required":false,"evidence_refs":[]}]}],
   "night_overlays":[{"type":"short semantic type","identity":"experience","eligible_days":[1],"preferred_day":1,"start_window":"HH:MM-HH:MM or flexible","duration_minutes":300,"mobility":"fixed|mobile|either","recommended_mode":"guided_hunt|self_drive|local_observation|independent","alternative_mode":"self_drive|local_observation|guided_hunt|none","reschedulable":true,"weather_dependency":"low|medium|high","reservation_rigidity":"low|medium|high","recovery_cost":"none|low|medium|high","verification_required":true,"evidence_refs":[]}],
   "ownership":[{"experience":"canonical experience","owner_day":1,"owner_unit_identity":"identity"}],
@@ -97,9 +113,12 @@ OUTPUT EXACTLY
 }
 
 RULES
+- base_strategy is required. If lodging_authority.mode=USER_FIXED, base_strategy.mode must be USER_FIXED and anchor must preserve the supplied lodging anchor. If lodging_authority.mode=ITBMO_RECOMMEND, base_strategy.mode must be ITBMO_RECOMMEND and anchor must be a practical area/base description, never a fabricated hotel/property.
+- corridor_candidates must stay compact and decision-useful. Every selected REGIONAL unit must correspond to one selected REGIONAL corridor candidate; BASE units may share selected URBAN corridors across compatible days. Truly independent experiences use INDEPENDENT.
+- Before final output, run one omission challenge across both experiences and corridors: a materially stronger feasible corridor/experience must not remain omitted while weaker content consumes comparable capacity without a defensible reason.
 - Return one unit for every open day supplied, no missing/duplicate day.
 - Do not return units for blocked/user-fixed days.
-- Every REGIONAL unit needs a non-empty route_manifest.
+- Every REGIONAL unit needs a non-empty route_manifest. BASE units with meaningful tourism time should also use route_manifest to express the selected urban/local corridor when useful; do not manufacture stops for deliberate recovery/slack.
 - Avoid duplicate experiences across units and overlays.
 - NIGHT OVERLAY OWNER-DAY CONTRACT: preferred_day is the itinerary day whose evening/start owns the complete nocturnal experience. If that experience crosses midnight, every continuation row (experience, return, recovery directly belonging to that outing) remains owned by preferred_day even though its physical clock is on D+1. Never reinterpret post-midnight continuation as an itinerary unit/day N+1. The following day may only adapt its own start/pacing to the previous night finish.
 - experience_inventory must be compact and decision-useful, not an exhaustive attraction catalog.
@@ -127,6 +146,18 @@ export function validateTiePlan(plan, request){
     if(String(unit?.type||'').startsWith('REGIONAL') && !(Array.isArray(unit?.route_manifest)&&unit.route_manifest.length)) errors.push({code:'REGIONAL_WITHOUT_MANIFEST',day});
   }
   for(const day of openDays) if(!seen.has(day)) errors.push({code:'MISSING_OPEN_DAY',day});
+  const lodgingAuthority=request?.lodging_authority||{};
+  const baseStrategy=plan?.base_strategy||{};
+  if(!['USER_FIXED','ITBMO_RECOMMEND'].includes(String(baseStrategy?.mode||''))) errors.push({code:'BAD_BASE_STRATEGY'});
+  if(String(lodgingAuthority?.mode||'')==='USER_FIXED' && String(baseStrategy?.mode||'')!=='USER_FIXED') errors.push({code:'USER_BASE_NOT_PRESERVED'});
+  if(String(lodgingAuthority?.mode||'')==='ITBMO_RECOMMEND' && String(baseStrategy?.mode||'')!=='ITBMO_RECOMMEND') errors.push({code:'RECOMMENDED_BASE_NOT_RESOLVED'});
+  if(!String(baseStrategy?.anchor||'').trim()) errors.push({code:'MISSING_BASE_ANCHOR'});
+  const corridors=Array.isArray(plan?.corridor_candidates)?plan.corridor_candidates:[];
+  if(!corridors.length) errors.push({code:'MISSING_CORRIDOR_CANDIDATES'});
+  for(const corridor of corridors){
+    if(!['URBAN','REGIONAL','INDEPENDENT'].includes(String(corridor?.scope||''))) errors.push({code:'BAD_CORRIDOR_SCOPE',identity:corridor?.identity});
+    if(!String(corridor?.identity||'').trim()) errors.push({code:'MISSING_CORRIDOR_IDENTITY'});
+  }
   const inventory=Array.isArray(plan?.experience_inventory)?plan.experience_inventory:[];
   for(const item of inventory){
     if(!['defining','major','complementary','supporting'].includes(String(item?.significance||''))) errors.push({code:'BAD_EXPERIENCE_SIGNIFICANCE',experience:item?.experience});
