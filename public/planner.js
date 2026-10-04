@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V127';
-const ITBMO_RUNTIME_ASSET='planner.js?v=246';
+const ITBMO_RUNTIME_BUILD='V128';
+const ITBMO_RUNTIME_ASSET='planner.js?v=247';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6187,7 +6187,8 @@ HARD RULES:
 - Validate every row mathematically before returning it: a pure movement interval equals transport time; a visit interval equals transport plus activity. Correct or regenerate only the inconsistent row.
 - Apply intelligent minimum dwell times by experience category. Never create 5–10 minute activities except clearly labeled photographic micro-stops.
 - Detect semantic duplicate experiences, including aliases and overlapping district/sub-area descriptions, and keep only the strongest representation.
-- Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers.
+- Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers. When TIE supplied base_strategy, lodging_base already reflects either the traveler's immutable lodging/base or ITBMO's jointly optimized base area; do not re-optimize or substitute it downstream.
+- V128 CORRIDOR EXECUTION: TIE has already resolved strategic corridor selection. Execute the supplied day_directive/route_manifest as one coherent route and do not rediscover a competing attraction set. For BASE days, group the selected urban/local experiences from the lodging base in a geographically sensible sequence with minimal backtracking. For REGIONAL days, preserve the selected corridor and its CORE/HIGH anchors; OPTIONAL/DROP_FIRST remain the only disposable marginal opportunities when capacity tightens.
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
 - Respect all user-provided hard time boundaries; optimize open windows only when beneficial. If a day has no user-provided end, choose its natural end dynamically. Require meaningful use of the available day, but never force a fixed finishing hour or add filler; continue later only when a high-value evening experience materially improves the itinerary.
@@ -8564,6 +8565,12 @@ function _tieStableRequest_(contract={},unit={}){
   const allUnits=_v3BuildPhysicalStayUnits_({...contract,tie_physical_units:null,_tie_bypass:true});
   const fixedUnits=allUnits.filter(u=>u.unit_type==='DAY_TRIP').map(u=>({type:'USER_FIXED_DAY_TRIP',days:u.days,base:u.base_destination,destination:u.physical_destination}));
   const neighboring=(contract.trip_story_stays||[]).map(st=>({place:st.place,startDate:st.startDate,days:st.days,transitOnly:Boolean(st.transitOnly),explicit_day_trips:(st.dayTrips||[]).map(dt=>({day:dt.day,place:dt.place}))}));
+  const placePreference=Object.entries(contract.place_preferences||{}).find(([place])=>_v3PhysicalKey_(place)===unit.physical_key)?.[1]||null;
+  const lodgingChoice=String(placePreference?.lodgingChoice||'').trim();
+  const suppliedLodging=String(placePreference?.lodgingText||'').trim();
+  const lodgingAuthority=(lodgingChoice&&lodgingChoice!=='recommend')
+    ? {mode:'USER_FIXED',kind:lodgingChoice,anchor:suppliedLodging||lodgingChoice}
+    : {mode:'ITBMO_RECOMMEND',kind:'area',anchor:null};
   return {
     schema:'ITBMO_TIE_REQUEST_V1',
     // V108 · LANGUAGE CONTRACT: the itinerary language selected by the traveler
@@ -8571,9 +8578,10 @@ function _tieStableRequest_(contract={},unit={}){
     // This is intentionally independent from the ES/EN interface language.
     itinerary_language:String(contract.itinerary_language||plannerState?.itineraryLang||'').trim() || null,
     stay:{id:unit.id,base_destination:unit.base_destination||unit.physical_destination,days:unit.days,previous_destination:unit.previous_destination||null,next_destination:unit.next_destination||null},
+    lodging_authority:lodgingAuthority,
     open_days:openDays,
     immutable:{fixed_units:fixedUnits,fixed_movements:(contract.movement_ledger||[]),neighboring_stays:neighboring},
-    traveler:{transport_preference:contract.transport_preference||null,global_preferences:contract.global_preferences||null,special_conditions:contract.special_conditions||null,travelers:contract.travelers||null,traveler_profiles:contract.traveler_profiles||null,place_preference:Object.entries(contract.place_preferences||{}).find(([place])=>_v3PhysicalKey_(place)===unit.physical_key)?.[1]||null},
+    traveler:{transport_preference:contract.transport_preference||null,global_preferences:contract.global_preferences||null,special_conditions:contract.special_conditions||null,travelers:contract.travelers||null,traveler_profiles:contract.traveler_profiles||null,place_preference:placePreference},
     calendar_context:(contract.calendar_dates||[]).filter(x=>(unit.days||[]).includes(Number(x.day))).map(x=>{
       const iso=String(x.date||''); const md=iso.slice(5);
       const marker=md==='12-24'?'CHRISTMAS_EVE':md==='12-25'?'CHRISTMAS_DAY':md==='12-31'?'NEW_YEARS_EVE':md==='01-01'?'NEW_YEARS_DAY':null;
@@ -8588,6 +8596,12 @@ function _tieValidateBrowser_(plan={},request={}){
   if(!plan||plan.schema!==ITBMO_TIE_SCHEMA)return {ok:false,errors:['BAD_SCHEMA']};
   const expected=[...new Set((request.open_days||[]).map(x=>Number(x.day)).filter(Boolean))].sort((a,b)=>a-b);
   const units=Array.isArray(plan.units)?plan.units:[]; const seen=new Set(),errors=[];
+  const authority=String(request?.lodging_authority?.mode||'');
+  const baseMode=String(plan?.base_strategy?.mode||'');
+  if(!['USER_FIXED','ITBMO_RECOMMEND'].includes(baseMode))errors.push('BASE_STRATEGY');
+  if(authority&&baseMode!==authority)errors.push('BASE_AUTHORITY');
+  if(!String(plan?.base_strategy?.anchor||'').trim())errors.push('BASE_ANCHOR');
+  if(!Array.isArray(plan?.corridor_candidates)||!plan.corridor_candidates.length)errors.push('CORRIDORS');
   units.forEach(u=>{const d=Number(u.day);if(!expected.includes(d))errors.push(`OUTSIDE:${d}`);if(seen.has(d))errors.push(`DUP:${d}`);seen.add(d);if(!['BASE_FULL','BASE_LIGHT','REGIONAL_FULL','REGIONAL_HALF'].includes(String(u.type||'')))errors.push(`TYPE:${d}`);if(String(u.type||'').startsWith('REGIONAL')&&!(u.route_manifest||[]).length)errors.push(`MANIFEST:${d}`);});
   expected.forEach(d=>{if(!seen.has(d))errors.push(`MISSING:${d}`);});
   return {ok:!errors.length,errors};
@@ -8606,7 +8620,7 @@ async function _tieCallStructure_(request){
     if(!validation.ok)throw new Error(`TIE_BROWSER_VALIDATION:${validation.errors.join(',')}`);
     const value={plan:data.plan,fingerprint,duration_ms:Math.round(performance.now()-started)};
     _tieStructureCache_.set(fingerprint,value);
-    console.info('[ITBMO TIE] structure accepted',{base:request.stay?.base_destination,days:request.stay?.days,confidence:data.plan.confidence,duration_ms:value.duration_ms,units:data.plan.units.map(u=>({day:u.day,type:u.type,identity:u.identity,microstops:(u.route_manifest||[]).length})),overlays:(data.plan.night_overlays||[]).length,inventory:(data.plan.experience_inventory||[]).map(x=>({experience:x.experience,significance:x.significance,selected:Boolean(x.selected),owner_day:x.owner_day||null,guided_tour_value:x.guided_tour_value||null})),coverage:data.plan.coverage_summary||null});
+    console.info('[ITBMO TIE] structure accepted',{base:request.stay?.base_destination,days:request.stay?.days,confidence:data.plan.confidence,duration_ms:value.duration_ms,base_strategy:data.plan.base_strategy||null,corridors:(data.plan.corridor_candidates||[]).map(c=>({identity:c.identity,scope:c.scope,selected:Boolean(c.selected),owner_day:c.owner_day||null,coverage:c.coverage||null})),units:data.plan.units.map(u=>({day:u.day,type:u.type,identity:u.identity,microstops:(u.route_manifest||[]).length})),overlays:(data.plan.night_overlays||[]).length,inventory:(data.plan.experience_inventory||[]).map(x=>({experience:x.experience,significance:x.significance,selected:Boolean(x.selected),owner_day:x.owner_day||null,guided_tour_value:x.guided_tour_value||null})),coverage:data.plan.coverage_summary||null});
     console.info('[ITBMO V113 TIE EXPERIENCE DECISIONS]',{base:request.stay?.base_destination,selected:(data.plan.experience_inventory||[]).filter(x=>x.selected).map(x=>({experience:x.experience,significance:x.significance,owner_day:x.owner_day||null,best_mode:x.best_mode||null})),omitted:(data.plan.experience_inventory||[]).filter(x=>!x.selected).map(x=>({experience:x.experience,significance:x.significance,reason:x.omission_reason||null,fallback_role:x.fallback_role||null,verification_required:Boolean(x.verification_required)})),coverage:data.plan.coverage_summary||null});
     return value;
   }catch(error){
@@ -8669,7 +8683,7 @@ function _tieApplyPlanToBaseUnit_(baseUnit,plan){
   const out=[];
   if(baseWindows.length){
     const days=[...new Set(baseWindows.map(w=>Number(w.day)))].sort((a,b)=>a-b);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,aurora_stay_context:overlays.some(o=>_tieAuroraOverlay_(o)),day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>days.includes(Number(o?.preferred_day))),previous_day_recovery_contexts:Object.fromEntries(days.map(d=>[d,previousNightRecoveryForDay(d)]).filter(([,v])=>v)),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,base_strategy:plan.base_strategy||null,corridor_candidates:plan.corridor_candidates||[],destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,aurora_stay_context:overlays.some(o=>_tieAuroraOverlay_(o)),day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>days.includes(Number(o?.preferred_day))),previous_day_recovery_contexts:Object.fromEntries(days.map(d=>[d,previousNightRecoveryForDay(d)]).filter(([,v])=>v)),verification_needs:plan.verification_needs||[]}});
   }
   (plan.units||[]).filter(u=>String(u.type||'').startsWith('REGIONAL')).forEach((directive,index)=>{
     let windows=(baseUnit.windows||[]).filter(w=>Number(w.day)===Number(directive.day));
@@ -8677,7 +8691,7 @@ function _tieApplyPlanToBaseUnit_(baseUnit,plan){
     if(night){windows=_tieReserveNightBoundary_(windows,[night]);windows=[...windows,night];}
     if(!windows.length)return;
     const manifest=(directive.route_manifest||[]).map(x=>x.name).filter(Boolean);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,aurora_stay_context:overlays.some(o=>_tieAuroraOverlay_(o)),day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>Number(o?.preferred_day)===Number(directive.day)),previous_day_recovery_context:previousNightRecoveryForDay(Number(directive.day)),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,base_strategy:plan.base_strategy||null,corridor_candidates:plan.corridor_candidates||[],destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,aurora_stay_context:overlays.some(o=>_tieAuroraOverlay_(o)),day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>Number(o?.preferred_day)===Number(directive.day)),previous_day_recovery_context:previousNightRecoveryForDay(Number(directive.day)),verification_needs:plan.verification_needs||[]}});
   });
   return out.length?out:[baseUnit];
 }
@@ -8905,9 +8919,10 @@ function _v3BuildPhysicalStayUnits_(contract={}){
 
 function _v3StayContract_(contract,unit){
   const days=new Set(unit.days||[]);
-  const placePreference=Object.entries(contract.place_preferences||{}).find(([place])=>_v3PhysicalKey_(place)===unit.physical_key)?.[1]||null;
+  const placePreference=Object.entries(contract.place_preferences||{}).find(([place])=>{const key=_v3PhysicalKey_(place);return key===unit.physical_key||key===_v3PhysicalKey_(unit.base_destination||'');})?.[1]||null;
+  const tieRecommendedBase=String(unit?.tie_structure?.base_strategy?.anchor||'').trim();
   const unitLodging=placePreference
-    ? (placePreference.lodgingChoice==='recommend' ? 'recommend me' : (placePreference.lodgingText||placePreference.lodgingChoice||null))
+    ? (placePreference.lodgingChoice==='recommend' ? (tieRecommendedBase||'recommend me') : (placePreference.lodgingText||placePreference.lodgingChoice||null))
     : (_arePoiAliases_(unit.base_destination||unit.physical_destination,contract.planning_unit)?contract.lodging_base:null);
   return {
     version:'ITBMO_PHYSICAL_STAY_CONTRACT_V2',
@@ -9110,7 +9125,7 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - Every row must remain inside one supplied planning_window and use that window's original global day number. For ordinary BASE/DAY_TRIP units, respect the window physical location. For a TIE REGIONAL unit, the window is the authoritative clock boundary anchored to the base and the supplied route_manifest/allowed_physical_locations define the regional corridor inside it.
 - If unit_type is DAY_TRIP, maximize a coherent, traveler-friendly visit inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it.
 - If unit_type is BASE_STAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
-- If tie_structure is supplied, it is the authoritative strategic brief for this unit. Protect its day identity, experience cluster, selected defining/major experience_inventory anchors owned by this day, CORE/HIGH route_manifest stops, structural slack, night overlays and verification needs. For a REGIONAL unit, treat CORE/HIGH corridor anchors—including a strong route-closing/terminal experience—as structurally senior to OPTIONAL/DROP_FIRST micro-stops: preserve honest anchor dwell first, then fit supporting stops into remaining feasible capacity. OPTIONAL/DROP_FIRST micro-stops may be omitted when physical feasibility, daylight, fatigue or a stronger anchor requires it. Do not invent live confirmation for verification_required items. Do not spend long blocks on supporting filler while an owned defining/major anchor remains unrealized.
+- If tie_structure is supplied, it is the authoritative strategic brief for this unit. Protect its day identity, experience cluster, selected defining/major experience_inventory anchors owned by this day, CORE/HIGH route_manifest stops, structural slack, night overlays and verification needs. V128: base_strategy is already resolved upstream; lodging_base therefore represents either the traveler-fixed lodging/base or ITBMO's jointly optimized base area. Do not substitute or re-optimize that base. corridor_candidates are decision evidence, not a second itinerary: execute only the selected owner-day structure and do not resurrect omitted corridors. For BASE days, use the owner-day selected experiences/day directive as one geographically sensible urban/local corridor from the lodging base, minimizing backtracking; for REGIONAL days, route_manifest remains the executable strategic corridor. For a REGIONAL unit, treat CORE/HIGH corridor anchors—including a strong route-closing/terminal experience—as structurally senior to OPTIONAL/DROP_FIRST micro-stops: preserve honest anchor dwell first, then fit supporting stops into remaining feasible capacity. OPTIONAL/DROP_FIRST micro-stops may be omitted when physical feasibility, daylight, fatigue or a stronger anchor requires it. Do not invent live confirmation for verification_required items. Do not spend long blocks on supporting filler while an owned defining/major anchor remains unrealized.
 - TIE NIGHT OVERLAY EXECUTION: when tie_structure.night_overlays contains an overlay whose preferred_day belongs to this unit, materialize that preferred overlay as REAL chronological itinerary row(s) inside the supplied NIGHT_OVERLAY planning window. Include realistic movement when needed, the actual named night experience, duration and return/safety logic. NIGHT_OVERLAY time is a continuous physical clock: if the experience starts late and its honest duration crosses 00:00, KEEP EVERY ROW OF THAT NOCTURNAL CHAIN on the same starting itinerary owner day, including post-midnight experience/return rows and any genuine outing component that still occurs before lodging return. Use real next-day clock values (for example 20:00-01:00, then 01:00-01:20) but NEVER stamp those continuation rows as itinerary day N+1. Day N+1 starts only with its own later itinerary; it may be paced later because the previous owner day physically ended after midnight. Never truncate, compress or move a valid nocturnal experience merely to make it fit before 24:00. Weather-dependent natural phenomena are opportunities, never guarantees; state verification requirements in Notes. Do not reduce a preferred TIE overlay to preparation/checking text only. Eligible non-preferred days remain alternatives, not duplicate mandatory rows. V119 SINGLE-OWNER AUTHORITY: the night_overlays array contains executable overlays only for their preferred_day; never infer an executable night experience from recovery context or from eligibility on another day.
 - V119 INTER-DAY RECOVERY FIREWALL: tie_structure.previous_day_recovery_context / previous_day_recovery_contexts contain ONLY a de-identified physical-load summary from the previous itinerary day. They are not experiences and must never generate, reconstruct, name, return from, or otherwise materialize itinerary rows. Use only night_load_minutes, recovery_cost and physical_finish_after_midnight_minutes to choose humane pacing for this day's own activities. There is no universal fixed recovery hour; user-fixed/reservation-hard facts still prevail.
 - V118 NIGHT END: after the nocturnal chain returns to the lodging/base, END that owner-day chain. Do not create a standalone "sleep", "rest", "hydrate" or "recovery" itinerary row merely to occupy post-return clock time. Recovery belongs in next-day pacing, not as filler.
