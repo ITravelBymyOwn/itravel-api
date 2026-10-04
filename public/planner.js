@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V116';
-const ITBMO_RUNTIME_ASSET='planner.js?v=235';
+const ITBMO_RUNTIME_BUILD='V117';
+const ITBMO_RUNTIME_ASSET='planner.js?v=236';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -3620,8 +3620,8 @@ function renderCityItinerary(city){
       const cleanNotes = String(r.notes||'').replace(/^\s*valid:\s*/i, '').trim();
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${r.start||''}</td>
-        <td>${r.end||''}</td>
+        <td>${_v117VisibleStart_(r)}</td>
+        <td>${_v116VisibleEnd_(r)}</td>
         <td>${cleanActivity}</td>
         <td>${r.from||''}</td>
         <td>${r.to||''}</td>
@@ -3762,7 +3762,7 @@ function _immersiveBackToOverview_(){immersiveWorkspaceLevel='overview';immersiv
 function _immersiveRenderDayTimeline_(city,dayNum){
   const target=qs('#itinerary-focus-day-content');if(!target)return;const rows=itineraries?.[city]?.byDay?.[dayNum]||[],copy=_immersiveViewerCopy_();target.innerHTML='';
   if(!rows.length){target.innerHTML='<p class="itinerary-focus-empty">—</p>';return;} const timeline=document.createElement('div');timeline.className='itinerary-focus-timeline';
-  rows.forEach((r,index)=>{const item=document.createElement('article');item.className='itinerary-focus-activity';const duration=_v39VisibleDuration_(r);item.innerHTML=`<div class="itinerary-focus-activity__time"><strong>${_immersiveEscapeHtml_(r.start||'')}</strong><span>${_immersiveEscapeHtml_(_v116VisibleEnd_(r))}</span></div><div class="itinerary-focus-activity__rail"><i></i></div><div class="itinerary-focus-activity__card"><h4>${_immersiveEscapeHtml_(r.activity||'')}</h4><div class="itinerary-focus-activity__chips">${r.transport?`<span>${_immersiveEscapeHtml_(_v40VisibleTransportForRow_(r))}</span>`:''}${duration?`<span>${_immersiveEscapeHtml_(duration)}</span>`:''}</div><button class="itinerary-focus-detail-toggle" type="button" aria-expanded="false">${_immersiveEscapeHtml_(copy.details)} <i aria-hidden="true">＋</i></button><div class="itinerary-focus-activity__details" hidden>${r.from||r.to?`<p><b>${_immersiveEscapeHtml_(copy.route)}:</b> ${_immersiveEscapeHtml_(r.from||'')} ${r.from&&r.to?'→':''} ${_immersiveEscapeHtml_(r.to||'')}</p>`:''}${r.notes?`<p><b>${_immersiveEscapeHtml_(copy.notes)}:</b> ${_immersiveEscapeHtml_(r.notes)}</p>`:''}</div></div>`;
+  rows.forEach((r,index)=>{const item=document.createElement('article');item.className='itinerary-focus-activity';const duration=_v39VisibleDuration_(r);item.innerHTML=`<div class="itinerary-focus-activity__time"><strong>${_immersiveEscapeHtml_(_v117VisibleStart_(r))}</strong><span>${_immersiveEscapeHtml_(_v116VisibleEnd_(r))}</span></div><div class="itinerary-focus-activity__rail"><i></i></div><div class="itinerary-focus-activity__card"><h4>${_immersiveEscapeHtml_(r.activity||'')}</h4><div class="itinerary-focus-activity__chips">${r.transport?`<span>${_immersiveEscapeHtml_(_v40VisibleTransportForRow_(r))}</span>`:''}${duration?`<span>${_immersiveEscapeHtml_(duration)}</span>`:''}</div><button class="itinerary-focus-detail-toggle" type="button" aria-expanded="false">${_immersiveEscapeHtml_(copy.details)} <i aria-hidden="true">＋</i></button><div class="itinerary-focus-activity__details" hidden>${r.from||r.to?`<p><b>${_immersiveEscapeHtml_(copy.route)}:</b> ${_immersiveEscapeHtml_(r.from||'')} ${r.from&&r.to?'→':''} ${_immersiveEscapeHtml_(r.to||'')}</p>`:''}${r.notes?`<p><b>${_immersiveEscapeHtml_(copy.notes)}:</b> ${_immersiveEscapeHtml_(r.notes)}</p>`:''}</div></div>`;
     const toggle=qs('.itinerary-focus-detail-toggle',item),details=qs('.itinerary-focus-activity__details',item);toggle?.addEventListener('click',()=>{const expanded=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',expanded?'false':'true');details.hidden=expanded;toggle.firstChild.textContent=(expanded?copy.details:copy.hideDetails)+' ';const icon=qs('i',toggle);if(icon)icon.textContent=expanded?'＋':'−';});timeline.appendChild(item);});target.appendChild(timeline);
 }
 function _immersiveRenderPrepareShell_(city){const target=qs('#itinerary-focus-day-content'),copy=_immersiveViewerCopy_();if(!target)return;target.innerHTML=`<section class="itinerary-focus-prepare-shell"><div class="itinerary-focus-prepare-mark" aria-hidden="true">✦</div><span class="itinerary-focus-prepare-city">${_immersiveEscapeHtml_(city)}</span><h4>${_immersiveEscapeHtml_(copy.prepareTitle)}</h4><p>${_immersiveEscapeHtml_(copy.prepareIntro)}</p><div class="itinerary-focus-prepare-categories"><span>🎟 <b>${getLang()==='es'?'Entradas':'Tickets'}</b></span><span>✦ <b>${getLang()==='es'?'Tours':'Tours'}</b></span><span>↗ <b>${getLang()==='es'?'Moverte':'Getting around'}</b></span><span>＋ <b>${getLang()==='es'?'Más':'More'}</b></span></div><small>${_immersiveEscapeHtml_(copy.prepareSafe)}</small></section>`;}
@@ -6222,15 +6222,22 @@ function _v116CrossesMidnightRow_(row={}){
   const s=_hhmmToMinutes_(row?.start),e=_hhmmToMinutes_(row?.end);
   return s!=null&&e!=null&&e<=s;
 }
-function _v116VisibleEnd_(row={}){
-  const end=String(row?.end||'');
-  if(!end)return end;
-  const s=_hhmmToMinutes_(row?.start),e=_hhmmToMinutes_(row?.end);
-  if(_v116CrossesMidnightRow_(row)&&s!=null&&e!=null&&e<=s){
-    return `${end} ${getLang()==='es'?'(+1 día)':'(+1 day)'}`;
+function _v117DayOffset_(row={},edge='start'){
+  const explicit=Number(row?._itbmo_day_offset||row?.commerce_context?._itbmo_day_offset||0);
+  if(Number.isFinite(explicit)&&explicit>0)return Math.floor(explicit);
+  if(edge==='end'&&_v116CrossesMidnightRow_(row)){
+    const s=_hhmmToMinutes_(row?.start),e=_hhmmToMinutes_(row?.end);
+    if(s!=null&&e!=null&&e<=s)return 1;
   }
-  return end;
+  return 0;
 }
+function _v117VisibleClock_(value,row={},edge='start'){
+  const clock=String(value||''); if(!clock)return clock;
+  const offset=_v117DayOffset_(row,edge);
+  return offset>0?`${clock} ${getLang()==='es'?`(+${offset} día${offset===1?'':'s'})`:`(+${offset} day${offset===1?'':'s'})`}`:clock;
+}
+function _v117VisibleStart_(row={}){return _v117VisibleClock_(row?.start,row,'start');}
+function _v116VisibleEnd_(row={}){return _v117VisibleClock_(row?.end,row,'end');}
 function _v114LogicalStartMinutes_(row={}){
   const start=_hhmmToMinutes_(row?.start);
   if(start==null)return null;
@@ -6480,7 +6487,7 @@ function _noteTemplateRatio_(rows=[]){
 function _auditSeverity_(error={}){
   const critical=new Set([
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
-    'ROW_TOO_SHORT','NIGHT_OVERLAY_TOO_SHORT','SELECTED_ANCHOR_NOT_COMMITTED','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
+    'ROW_TOO_SHORT','NIGHT_OVERLAY_TOO_SHORT','ORPHAN_NIGHT_CONTINUATION','SELECTED_ANCHOR_NOT_COMMITTED','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
     'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','WEEKDAY_DATE_MISMATCH',
   ]);
@@ -6612,30 +6619,18 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
   let out=JSON.parse(JSON.stringify(rows||[])),changed=false;
   const events=[];
 
-  // 1) Cross-midnight causal ownership. If a generated recovery/return row at
-  // 00:xx follows the raw end of an authoritative night overlay but was stamped
-  // with the overlay's starting day, move only that utility row to the next global
-  // day. This is generic for any NIGHT_OVERLAY (aurora, show, observation, etc.).
-  const byDay=_rowsByDayObject_(out);
-  for(const [dayKey,arrRaw] of Object.entries(byDay)){
-    const day=Number(dayKey),arr=[...arrRaw];
-    const overlays=arr.filter(_v115IsCrossMidnightNightRow_);
-    if(!overlays.length||day>=Number(totalDays||0))continue;
-    for(const overlay of overlays){
-      const rawEnd=_hhmmToMinutes_(overlay.end); if(rawEnd==null)continue;
-      for(const r of arr){
-        if(r===overlay||_v115IsHardRow_(r))continue;
-        const role=_v110SemanticRole_(r); if(!['recovery','return'].includes(role))continue;
-        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end); if(rs==null||re==null||rs>6*60)continue;
-        const distance=Math.abs(rs-rawEnd); if(distance>120)continue;
-        r.day=day+1;
-        // The old planning-window stamp belongs to the starting calendar day and
-        // must not falsely constrain the moved post-midnight utility row.
-        delete r.planning_window_id;
-        if(r.commerce_context&&typeof r.commerce_context==='object')delete r.commerce_context.planning_window_id;
-        r._v115_cross_midnight_continuation=true;
-        changed=true;events.push({type:'cross_midnight_continuation',from_day:day,to_day:day+1,start:r.start,end:r.end,activity:r.activity||null});
-      }
+  // 1) V117 owner-day invariant. A nocturnal chain belongs entirely to the
+  // itinerary day on which it starts, even when its physical clock continues
+  // after 00:00. Never move post-midnight return/recovery rows to day N+1.
+  // _v3StampStayRows_ assigns _itbmo_day_offset=1 to those continuation rows;
+  // chronology, rendering and fatigue may use that physical offset while the
+  // authoritative row.day remains the owner day.
+  for(const r of out){
+    if(!_v114IsNightOverlayRow_(r))continue;
+    const offset=Number(r?._itbmo_day_offset||r?.commerce_context?._itbmo_day_offset||0);
+    if(offset>0){
+      r._v117_owner_day_continuation=true;
+      if(r.commerce_context&&typeof r.commerce_context==='object')r.commerce_context._v117_owner_day_continuation=true;
     }
   }
 
@@ -6655,7 +6650,7 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
     }
   }
 
-  if(events.length)console.info(`[ITBMO V116 SEMANTIC SHIELD] ${city}`,{changed,events});
+  if(events.length)console.info(`[ITBMO V117 SEMANTIC SHIELD] ${city}`,{changed,events});
   return {rows:out,changed,events};
 }
 
@@ -6708,7 +6703,7 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       if(affected.some(r=>String(r?.kind||'').toLowerCase()==='fixed_transfer'||r?.user_fixed===true||r?.fixed===true))continue;
       const semanticRisk=_v115CascadeShiftRisk_(affected,delta);
       if(semanticRisk.blocked){
-        console.info(`[ITBMO V116 DIC SEMANTIC GUARD] ${city} · day ${day} · held +${delta} min propagation · ${semanticRisk.reason||'semantic_risk'} · protected ${semanticRisk.sensitive.length} row(s)`);
+        console.info(`[ITBMO V117 DIC SEMANTIC GUARD] ${city} · day ${day} · held +${delta} min propagation · ${semanticRisk.reason||'semantic_risk'} · protected ${semanticRisk.sensitive.length} row(s)`);
         continue;
       }
       let safe=true;
@@ -7023,6 +7018,17 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         const minimum=target>0?Math.max(60,Math.round(target*0.65)):0;
         if(minimum&&span<minimum){
           errors.push({code:'NIGHT_OVERLAY_TOO_SHORT',day,row,span,target,minimum,activity:r.activity||null,instruction:'Preserve the intended nocturnal experience duration from the authoritative NIGHT_OVERLAY. It may cross midnight and remain owned by its starting itinerary day. Do not truncate it merely to fit 24:00; keep realistic movement/return logic and show post-midnight clock time explicitly.'});
+        }
+      }
+
+      // V117: a post-midnight continuation may never survive without a real
+      // preceding nocturnal experience in the same owner day. This catches the
+      // V116 failure mode where a 00:xx return was published after its parent
+      // experience disappeared.
+      if(_v117DayOffset_(r,'start')>0){
+        const hasNightParent=dayRows.slice(0,i).some(prev=>_v114IsNightOverlayRow_(prev)&&_v110SemanticRole_(prev)==='experience'&&_v114LogicalEndMinutes_(prev)!=null&&_v114LogicalEndMinutes_(prev)<=start);
+        if(!hasNightParent){
+          errors.push({code:'ORPHAN_NIGHT_CONTINUATION',day,row,start:r.start,end:r.end,activity:r.activity||null,instruction:'Keep the complete nocturnal chain in its starting itinerary day. Restore the preceding NIGHT_OVERLAY experience before any post-midnight continuation/return; never publish a D+1 continuation as the first element of the owner day.'});
         }
       }
 
@@ -8791,11 +8797,16 @@ function _v3StampStayRows_(rows=[],unit={}){
       const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
       if(start==null||end==null) return false;
       const nightCross=Boolean(w?.crosses_midnight)&&String(w?.role||'')==='NIGHT_OVERLAY';
-      const rowEnd=nightCross&&end<=start?end+1440:end;
+      // V117: NIGHT_OVERLAY uses one continuous owner-day clock. A row such as
+      // 00:45-01:15 is physically D+1 but still belongs to the starting itinerary
+      // day. Lift its clock by +1440 for window matching instead of reassigning day.
+      const rowStart=nightCross&&ws!=null&&start<ws?start+1440:start;
+      let rowEnd=nightCross&&end<rowStart?end+1440:end;
+      if(nightCross&&rowStart>=1440&&rowEnd<1440)rowEnd+=1440;
       const windowEnd=nightCross&&we!=null&&we<=ws?we+1440:we;
-      if(rowEnd<=start) return false;
+      if(rowEnd<=rowStart) return false;
       // Half-open interval semantics: [start,end). Touching a boundary is valid.
-      if(ws!=null&&start<ws) return false;
+      if(ws!=null&&rowStart<ws) return false;
       return windowEnd==null||rowEnd<=windowEnd;
     }).sort((a,b)=>{
       const as=_hhmmToMinutes_(a.start)??-1,bs=_hhmmToMinutes_(b.start)??-1;
@@ -8809,7 +8820,9 @@ function _v3StampStayRows_(rows=[],unit={}){
     const auroraAuthorized=overlays.some(o=>_tieAuroraOverlay_(o));
     const inventory=(unit.tie_structure?.experience_inventory||[]).filter(x=>x?.selected&&Number(x?.owner_day||0)===day);
     const inventoryMatch=inventory.find(x=>_arePoiAliases_(x?.experience||'',row?.to||'')||_arePoiAliases_(x?.experience||'',row?.activity||''))||null;
-    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),_tie_selected_anchor:Boolean(inventoryMatch),_tie_selected_anchor_verification_required:Boolean(inventoryMatch?.verification_required),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
+    const windowStart=_hhmmToMinutes_(window.start),rowStartRaw=_hhmmToMinutes_(row.start);
+    const dayOffset=(String(window.role||'')==='NIGHT_OVERLAY'&&Boolean(window.crosses_midnight)&&windowStart!=null&&rowStartRaw!=null&&rowStartRaw<windowStart)?1:0;
+    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),_tie_selected_anchor:Boolean(inventoryMatch),_tie_selected_anchor_verification_required:Boolean(inventoryMatch?.verification_required),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
   });
   // V71 · if ITBMO had to move an estimated full-day excursion away from an
   // impossible transition day, explain the adjustment once in traveler-facing
@@ -8912,7 +8925,7 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - If unit_type is DAY_TRIP, maximize a coherent, traveler-friendly visit inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it.
 - If unit_type is BASE_STAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
 - If tie_structure is supplied, it is the authoritative strategic brief for this unit. Protect its day identity, experience cluster, selected defining/major experience_inventory anchors owned by this day, CORE/HIGH route_manifest stops, structural slack, night overlays and verification needs. OPTIONAL/DROP_FIRST micro-stops may be omitted when physical feasibility, daylight, fatigue or a stronger anchor requires it. Do not invent live confirmation for verification_required items. Do not spend long blocks on supporting filler while an owned defining/major anchor remains unrealized.
-- TIE NIGHT OVERLAY EXECUTION: when tie_structure.night_overlays contains an overlay whose preferred_day belongs to this unit, materialize that preferred overlay as REAL chronological itinerary row(s) inside the supplied NIGHT_OVERLAY planning window. Include realistic movement when needed, the actual named night experience, duration and return/safety logic. NIGHT_OVERLAY time is a continuous physical clock: if the experience starts late and its honest duration crosses 00:00, KEEP the same itinerary owner day and use the real next-day clock end (for example 20:00-01:00). Never truncate, compress or move a valid nocturnal experience merely to make it fit before 24:00. Weather-dependent natural phenomena are opportunities, never guarantees; state verification requirements in Notes. Do not reduce a preferred TIE overlay to preparation/checking text only. Eligible non-preferred days remain alternatives, not duplicate mandatory rows.
+- TIE NIGHT OVERLAY EXECUTION: when tie_structure.night_overlays contains an overlay whose preferred_day belongs to this unit, materialize that preferred overlay as REAL chronological itinerary row(s) inside the supplied NIGHT_OVERLAY planning window. Include realistic movement when needed, the actual named night experience, duration and return/safety logic. NIGHT_OVERLAY time is a continuous physical clock: if the experience starts late and its honest duration crosses 00:00, KEEP EVERY ROW OF THAT NOCTURNAL CHAIN on the same starting itinerary owner day, including post-midnight experience/return/recovery rows. Use real next-day clock values (for example 20:00-01:00, then 01:00-01:20) but NEVER stamp those continuation rows as itinerary day N+1. Day N+1 starts only with its own later itinerary; it may be paced later because the previous owner day physically ended after midnight. Never truncate, compress or move a valid nocturnal experience merely to make it fit before 24:00. Weather-dependent natural phenomena are opportunities, never guarantees; state verification requirements in Notes. Do not reduce a preferred TIE overlay to preparation/checking text only. Eligible non-preferred days remain alternatives, not duplicate mandatory rows.
 - AURORA EXECUTION: if the preferred overlay is an aurora/northern-lights opportunity, preserve the TIE strategy. A guided mobile aurora hunt is a genuine TOUR_EXPERIENCE: explain that the route/location may change to seek better sky conditions, recommend the guided hunt when TIE marks guided_hunt, and mention self-drive/local dark-sky observation as an alternative when supplied. Use the full extended NIGHT_OVERLAY window rather than collapsing it to a short fixed viewpoint visit. Set commerce_context.guided_tour_value=high and commercial_eligible=true for the hunt so Context Intelligence can surface distinct guided-tour options without inventing an operator. If conditions are poor, state that the opportunity may be moved to another eligible night subject to fatigue and itinerary constraints; never promise a sighting.
 - For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler. Build chronology sequentially: each next row starts only after the previous row ends plus any required movement; never independently assign overlapping clocks. If the corridor cannot fit, drop OPTIONAL then DROP_FIRST stops before compressing CORE/HIGH anchors or overlapping rows.
 - PREMIUM PACING CONTRACT: empty clock time is not automatically a defect. Meals, rest, access, buffers and hotel returns are logistics, not tourism richness. Use at most one lunch and one dinner unless the traveler explicitly requests otherwise; never add a second meal/rest/buffer merely to fill a gap or satisfy row count. A destination-defining long anchor plus necessary logistics can be a complete premium day with few rows. End naturally when the day is experientially sufficient; preserve recovery after high-fatigue or late-night experiences, including when the previous owner-day NIGHT_OVERLAY physically ended after midnight.
@@ -12199,7 +12212,7 @@ async function exportItineraryToPDF(options={}){
     doc.setFillColor(...style.fill);doc.roundedRect(x,y,width,height,7,7,'F');
     doc.setFillColor(...style.accent);doc.rect(x,y,3,height,'F');
     let at=y+14;doc.setTextColor(8,123,250);font('bold',size+1);
-    doc.text(`${row.start||''} - ${_v116VisibleEnd_(row)}`,x+10,at);at+=line+4;
+    doc.text(`${_v117VisibleStart_(row)} - ${_v116VisibleEnd_(row)}`,x+10,at);at+=line+4;
     doc.setTextColor(11,35,65);font('bold',size+0.5);doc.text(activity,x+10,at);at+=activity.length*(line+0.8)+2;
     doc.setTextColor(73,94,115);font('normal',size-0.3);doc.text(route,x+10,at);at+=route.length*line+2;
     if(transport.length){doc.setTextColor(32,122,145);font('bold',size-0.3);doc.text(transport,x+10,at);at+=transport.length*line+2;}
