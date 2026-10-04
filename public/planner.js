@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V121';
-const ITBMO_RUNTIME_ASSET='planner.js?v=238';
+const ITBMO_RUNTIME_BUILD='V122';
+const ITBMO_RUNTIME_ASSET='planner.js?v=241';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -4996,6 +4996,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
     _tie_day_cluster:String(r._tie_day_cluster ?? r.tie_day_cluster ?? '').trim() || null,
     _tie_unit_type:String(r._tie_unit_type ?? r.tie_unit_type ?? '').trim() || null,
     _tie_aurora_context:Boolean(r._tie_aurora_context ?? r.tie_aurora_context),
+    _tie_aurora_stay_context:Boolean(r._tie_aurora_stay_context ?? r.tie_aurora_stay_context),
     _tie_aurora_row_authorized:Boolean(r._tie_aurora_row_authorized ?? r.tie_aurora_row_authorized),
     plan_status:String(r.plan_status ?? r.planStatus ?? '').trim().toLowerCase() || null,
     fallback_role:String(r.fallback_role ?? r.fallbackRole ?? '').trim() || null,
@@ -5517,6 +5518,7 @@ function _userLanguageAnchor_(){
 const _astraGenerationMetrics_ = {
   active:false,
   startedAt:0,
+  accumulatedMs:0,
   finishedAt:0,
   calls:0,
   inputTokens:0,
@@ -5525,7 +5527,10 @@ const _astraGenerationMetrics_ = {
   tokenUsageSamples:0,
   models:{},
   configuredModels:{},
-  cities:[]
+  cities:[],
+  sessionTripId:null,
+  silentRecoveries:0,
+  visibleRecoveries:0
 };
 
 function _formatGenerationDuration_(ms){
@@ -5539,6 +5544,7 @@ function _formatGenerationDuration_(ms){
 function _resetAstraGenerationMetrics_(){
   _astraGenerationMetrics_.active=true;
   _astraGenerationMetrics_.startedAt=performance.now();
+  _astraGenerationMetrics_.accumulatedMs=0;
   _astraGenerationMetrics_.finishedAt=0;
   _astraGenerationMetrics_.calls=0;
   _astraGenerationMetrics_.inputTokens=0;
@@ -5548,6 +5554,18 @@ function _resetAstraGenerationMetrics_(){
   _astraGenerationMetrics_.models={};
   _astraGenerationMetrics_.configuredModels={};
   _astraGenerationMetrics_.cities=[];
+  _astraGenerationMetrics_.sessionTripId=String(currentTripId||'');
+  _astraGenerationMetrics_.silentRecoveries=0;
+  _astraGenerationMetrics_.visibleRecoveries=0;
+}
+
+function _resumeAstraGenerationMetricsForRecovery_(){
+  const sameTrip=String(_astraGenerationMetrics_.sessionTripId||'')===String(currentTripId||'');
+  if(!sameTrip||(!_astraGenerationMetrics_.startedAt&&!_astraGenerationMetrics_.active)){_resetAstraGenerationMetrics_();return;}
+  _astraGenerationMetrics_.active=true;
+  _astraGenerationMetrics_.startedAt=performance.now();
+  _astraGenerationMetrics_.finishedAt=0;
+  _astraGenerationMetrics_.visibleRecoveries=Number(_astraGenerationMetrics_.visibleRecoveries||0)+1;
 }
 
 function _extractExactUsage_(data){
@@ -5600,11 +5618,23 @@ function _captureExactUsage_(data){
   _astraGenerationMetrics_.tokenUsageSamples++;
 }
 
+function _pauseAstraGenerationMetrics_(){
+  if(!_astraGenerationMetrics_.active)return;
+  const now=performance.now();
+  _astraGenerationMetrics_.accumulatedMs+=Math.max(0,now-Number(_astraGenerationMetrics_.startedAt||now));
+  _astraGenerationMetrics_.finishedAt=now;
+  _astraGenerationMetrics_.active=false;
+}
+
 function _finishAstraGenerationMetrics_(){
-  _astraGenerationMetrics_.finishedAt=performance.now();
+  const now=performance.now();
+  if(_astraGenerationMetrics_.active){
+    _astraGenerationMetrics_.accumulatedMs+=Math.max(0,now-Number(_astraGenerationMetrics_.startedAt||now));
+  }
+  _astraGenerationMetrics_.finishedAt=now;
   _astraGenerationMetrics_.active=false;
 
-  const totalMs=_astraGenerationMetrics_.finishedAt-_astraGenerationMetrics_.startedAt;
+  const totalMs=_astraGenerationMetrics_.accumulatedMs;
   const tokenUsageAvailable=_astraGenerationMetrics_.tokenUsageSamples>0;
 
   const snapshot={
@@ -5617,7 +5647,9 @@ function _finishAstraGenerationMetrics_(){
     outputTokens:tokenUsageAvailable ? _astraGenerationMetrics_.outputTokens : null,
     totalTokens:tokenUsageAvailable ? _astraGenerationMetrics_.totalTokens : null,
     models:{..._astraGenerationMetrics_.models},
-    configuredModels:{..._astraGenerationMetrics_.configuredModels}
+    configuredModels:{..._astraGenerationMetrics_.configuredModels},
+    silentRecoveries:Number(_astraGenerationMetrics_.silentRecoveries||0),
+    visibleRecoveries:Number(_astraGenerationMetrics_.visibleRecoveries||0)
   };
 
   window.__ITBMO_LAST_GENERATION_METRICS__=snapshot;
@@ -5632,6 +5664,8 @@ function _finishAstraGenerationMetrics_(){
     else console.info('[ITBMO MODEL] Luna validation: PASS',{configured:snapshot.configuredModels});
   }else console.warn('[ITBMO MODEL] Actual model metadata unavailable from /api/chat usage payload.');
   if(snapshot.cities.length) console.table(snapshot.cities);
+
+  console.info(`[ITBMO RECOVERY METRICS] Silent: ${snapshot.silentRecoveries} · Visible/manual: ${snapshot.visibleRecoveries}`);
 
   if(tokenUsageAvailable){
     console.log(
@@ -8533,7 +8567,7 @@ function _tieApplyPlanToBaseUnit_(baseUnit,plan){
   const out=[];
   if(baseWindows.length){
     const days=[...new Set(baseWindows.map(w=>Number(w.day)))].sort((a,b)=>a-b);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>days.includes(Number(o?.preferred_day))),previous_day_recovery_contexts:Object.fromEntries(days.map(d=>[d,previousNightRecoveryForDay(d)]).filter(([,v])=>v)),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-base`,unit_type:'BASE_STAY',windows:[...baseWindows,...baseNightWindows],days,tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,aurora_stay_context:overlays.some(o=>_tieAuroraOverlay_(o)),day_directives:(plan.units||[]).filter(u=>days.includes(Number(u.day))),night_overlays:overlays.filter(o=>days.includes(Number(o?.preferred_day))),previous_day_recovery_contexts:Object.fromEntries(days.map(d=>[d,previousNightRecoveryForDay(d)]).filter(([,v])=>v)),verification_needs:plan.verification_needs||[]}});
   }
   (plan.units||[]).filter(u=>String(u.type||'').startsWith('REGIONAL')).forEach((directive,index)=>{
     let windows=(baseUnit.windows||[]).filter(w=>Number(w.day)===Number(directive.day));
@@ -8541,7 +8575,7 @@ function _tieApplyPlanToBaseUnit_(baseUnit,plan){
     if(night){windows=_tieReserveNightBoundary_(windows,[night]);windows=[...windows,night];}
     if(!windows.length)return;
     const manifest=(directive.route_manifest||[]).map(x=>x.name).filter(Boolean);
-    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>Number(o?.preferred_day)===Number(directive.day)),previous_day_recovery_context:previousNightRecoveryForDay(Number(directive.day)),verification_needs:plan.verification_needs||[]}});
+    out.push({...baseUnit,id:`${baseUnit.id}-tie-regional-${String(directive.day).padStart(2,'0')}`,unit_type:directive.type,physical_destination:directive.cluster||directive.identity||baseUnit.physical_destination,physical_key:_v3PhysicalKey_(directive.cluster||directive.identity||baseUnit.physical_destination),allowed_physical_locations:[...new Set([baseUnit.base_destination,...manifest].filter(Boolean))],windows,days:[Number(directive.day)],day_trips:[],tie_structure:{schema:plan.schema,destination_profile:plan.destination_profile,experience_inventory:plan.experience_inventory||[],coverage_summary:plan.coverage_summary||null,aurora_stay_context:overlays.some(o=>_tieAuroraOverlay_(o)),day_directives:[directive],route_manifest:directive.route_manifest||[],night_overlays:overlays.filter(o=>Number(o?.preferred_day)===Number(directive.day)),previous_day_recovery_context:previousNightRecoveryForDay(Number(directive.day)),verification_needs:plan.verification_needs||[]}});
   });
   return out.length?out:[baseUnit];
 }
@@ -8872,7 +8906,7 @@ function _v3StampStayRows_(rows=[],unit={}){
     const inventoryMatch=inventory.find(x=>_arePoiAliases_(x?.experience||'',row?.to||'')||_arePoiAliases_(x?.experience||'',row?.activity||''))||null;
     const windowStart=_hhmmToMinutes_(window.start),rowStartRaw=_hhmmToMinutes_(row.start);
     const dayOffset=(String(window.role||'')==='NIGHT_OVERLAY'&&Boolean(window.crosses_midnight)&&windowStart!=null&&rowStartRaw!=null&&rowStartRaw<windowStart)?1:0;
-    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),_tie_selected_anchor:Boolean(inventoryMatch),_tie_selected_anchor_verification_required:Boolean(inventoryMatch?.verification_required),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
+    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_stay_context:Boolean(unit.tie_structure?.aurora_stay_context),_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),_tie_selected_anchor:Boolean(inventoryMatch),_tie_selected_anchor_verification_required:Boolean(inventoryMatch?.verification_required),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
   });
   // V71 · if ITBMO had to move an estimated full-day excursion away from an
   // impossible transition day, explain the adjustment once in traveler-facing
@@ -10309,7 +10343,7 @@ async function runPaidGeneration({manualRetry=false}={}){
   let recoveryPublished=false;
   setPlanningChatLocked(true);
   qs('#itbmo-generation-retry')?.remove();
-  _resetAstraGenerationMetrics_();
+  if(manualRetry) _resumeAstraGenerationMetricsForRecovery_(); else _resetAstraGenerationMetrics_();
 
   try{
     // V72: never erase a terminal-success marker before we know the server has opened a genuinely new run.
@@ -10385,10 +10419,22 @@ async function runPaidGeneration({manualRetry=false}={}){
         // A route-quality block already went through deterministic cleanup and
         // bounded scoped repairs. Do not regenerate the whole planning unit again.
         // Genuine transient/network failures keep the normal retry policy.
-        if(!completed && ITBMO_GENERATION_ENGINE==='v3' && /V3_(?:ROUTE_QUALITY_BLOCK|STAY_RECOVERY_EXHAUSTED)/.test(_v3LastFailureByCity_[city]||'')){
-          // The V3 Stay engine already exhausted its own bounded, isolated retries.
-          // Do not restart the whole destination/planning unit and reset failed Stays
-          // to attempt 1/3 again. Accepted Stay checkpoints remain preserved.
+        if(!completed && ITBMO_GENERATION_ENGINE==='v3' && /V3_STAY_RECOVERY_EXHAUSTED/.test(_v3LastFailureByCity_[city]||'')){
+          // V122: two silent checkpoint recoveries before exposing fallback. This does
+          // NOT raise the per-Stay 2-attempt budget and never regenerates accepted Stays;
+          // generateCityItinerary reuses their checkpoints and revisits only pending units.
+          for(let silentRecovery=1;silentRecovery<=2 && !completed;silentRecovery++){
+            _astraGenerationMetrics_.silentRecoveries=Number(_astraGenerationMetrics_.silentRecoveries||0)+1;
+            console.warn(`[ITBMO V122 SILENT RECOVERY] ${city} · ${silentRecovery}/2 · reusing accepted Stay checkpoints`);
+            await _queueGenerationCheckpoint_('generating',{active_city:city});
+            const recovered=await generateCityItinerary(city,{silentFailure:true});
+            _assertGenerationRunActive_(runEpoch);
+            completed=Boolean(recovered && _generationCityComplete_(city));
+            if(!completed && !/V3_STAY_RECOVERY_EXHAUSTED/.test(_v3LastFailureByCity_[city]||'')) break;
+          }
+          if(!completed) attempts=ITBMO_CITY_GENERATION_MAX_ATTEMPTS;
+        }else if(!completed && ITBMO_GENERATION_ENGINE==='v3' && /V3_ROUTE_QUALITY_BLOCK/.test(_v3LastFailureByCity_[city]||'')){
+          // Structural route-quality failures keep the existing visible recovery path.
           attempts=ITBMO_CITY_GENERATION_MAX_ATTEMPTS;
         }
 
@@ -10423,6 +10469,7 @@ async function runPaidGeneration({manualRetry=false}={}){
         $preferencesGenerateV2.textContent=getLang()==='es'?'Verificando itinerario…':'Verifying itinerary…';
         $preferencesGenerateV2.classList.remove('is-generated');
       }
+      _pauseAstraGenerationMetrics_();
       _showGenerationRetry_(integrityFailure?'V3_EXPORT_SHAPE_BLOCK':'One or more cities remained incomplete.');
       recoveryPublished=true;
       return;
@@ -10474,6 +10521,7 @@ async function runPaidGeneration({manualRetry=false}={}){
       $preferencesGenerateV2.textContent=integrityFailure?(getLang()==='es'?'Verificando itinerario…':'Verifying itinerary…'):(getLang()==='es'?'Generación pendiente':'Generation pending');
       $preferencesGenerateV2.classList.remove('is-generated');
     }
+    _pauseAstraGenerationMetrics_();
     _showGenerationRetry_(recoveryReason);
     recoveryPublished=true;
   }finally{
@@ -12210,7 +12258,7 @@ function _v121PdfStayRoot_(row={}){
 function _v121PdfAuroraRoots_(days=[]){
   const roots=new Set();
   (days||[]).forEach(day=>(day?.rows||[]).forEach(row=>{
-    if(Boolean(row?._tie_aurora_context)||Boolean(row?._tie_aurora_row_authorized)||_isAuroraActivityRow_(row)){
+    if(Boolean(row?._tie_aurora_stay_context)||Boolean(row?._tie_aurora_context)||Boolean(row?._tie_aurora_row_authorized)||_isAuroraActivityRow_(row)){
       const root=_v121PdfStayRoot_(row);
       if(root)roots.add(root);
     }
@@ -12219,7 +12267,7 @@ function _v121PdfAuroraRoots_(days=[]){
 }
 function _v106PdfAuroraContext_(day={},auroraRoots=null){
   const rows=day.rows||[];
-  if(rows.some(r=>Boolean(r?._tie_aurora_context)||Boolean(r?._tie_aurora_row_authorized)||_isAuroraActivityRow_(r)))return true;
+  if(rows.some(r=>Boolean(r?._tie_aurora_stay_context)||Boolean(r?._tie_aurora_context)||Boolean(r?._tie_aurora_row_authorized)||_isAuroraActivityRow_(r)))return true;
   if(auroraRoots?.size)return rows.some(r=>auroraRoots.has(_v121PdfStayRoot_(r)));
   return false;
 }
