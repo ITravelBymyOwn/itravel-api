@@ -22,7 +22,7 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V119';
+const ITBMO_RUNTIME_BUILD='V121';
 const ITBMO_RUNTIME_ASSET='planner.js?v=238';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
@@ -12202,8 +12202,44 @@ function _v106PdfSemanticDayTitle_(day={}){
   const tie=rows.find(r=>String(r?._tie_day_identity||'').trim());
   return tie?String(tie._tie_day_identity).trim():'';
 }
-function _v106PdfAuroraContext_(day={}){
-  return (day.rows||[]).some(r=>Boolean(r?._tie_aurora_context)||Boolean(r?._tie_aurora_row_authorized)||_isAuroraActivityRow_(r));
+function _v121PdfStayRoot_(row={}){
+  const id=String(row?.stay_unit_id||'').trim();
+  if(!id)return '';
+  return id.replace(/-tie-(?:base|regional-[^-]+)$/i,'');
+}
+function _v121PdfAuroraRoots_(days=[]){
+  const roots=new Set();
+  (days||[]).forEach(day=>(day?.rows||[]).forEach(row=>{
+    if(Boolean(row?._tie_aurora_context)||Boolean(row?._tie_aurora_row_authorized)||_isAuroraActivityRow_(row)){
+      const root=_v121PdfStayRoot_(row);
+      if(root)roots.add(root);
+    }
+  }));
+  return roots;
+}
+function _v106PdfAuroraContext_(day={},auroraRoots=null){
+  const rows=day.rows||[];
+  if(rows.some(r=>Boolean(r?._tie_aurora_context)||Boolean(r?._tie_aurora_row_authorized)||_isAuroraActivityRow_(r)))return true;
+  if(auroraRoots?.size)return rows.some(r=>auroraRoots.has(_v121PdfStayRoot_(r)));
+  return false;
+}
+function _v121PdfAuroraOpportunityNote_(es=true){
+  return es
+    ? 'Auroras boreales: el avistamiento nunca está garantizado y depende de cielos despejados, nubosidad y actividad geomagnética. Si las condiciones no son favorables, considera otra noche elegible o una búsqueda guiada que pueda adaptar la ruta.'
+    : 'Northern lights: sightings are never guaranteed and depend on clear skies, cloud cover and geomagnetic activity. If conditions are unfavorable, consider another eligible night or a guided hunt that can adapt its route.';
+}
+function _v121PdfApplyAuroraNotes_(days=[],es=true){
+  const auroraRoots=_v121PdfAuroraRoots_(days);
+  if(!auroraRoots.size)return auroraRoots;
+  (days||[]).forEach(day=>{
+    if(!_v106PdfAuroraContext_(day,auroraRoots))return;
+    const rows=day.rows||[];
+    if(!rows.length||rows.some(r=>_isAuroraActivityRow_(r)&&Boolean(r?._tie_aurora_row_authorized)))return;
+    const last=rows.length-1,note=_v121PdfAuroraOpportunityNote_(es);
+    const current=String(rows[last]?.notes||'').trim();
+    if(!_isAuroraRow_({notes:current}))rows[last]={...rows[last],notes:[current,note].filter(Boolean).join(' · ')};
+  });
+  return auroraRoots;
 }
 async function exportItineraryToPDF(options={}){
   if(!window.jspdf?.jsPDF){alert('jsPDF no está disponible.');return;}
@@ -12222,6 +12258,10 @@ async function exportItineraryToPDF(options={}){
     (day.rows||[]).forEach(row=>item.rows.push({...row,_pdfDestination:block.destination}));
   }));
   days.sort((a,b)=>(parseDMY(a.date)?.getTime?.()||0)-(parseDMY(b.date)?.getTime?.()||0)||Number(a.globalDay)-Number(b.globalDay));
+  // V121 PDF-only aurora restoration. TIE remains the sole semantic authority.
+  // Propagate its already-stamped aurora context across sibling physical units of
+  // the same stay for presentation only; never alter planner rows or generation.
+  const pdfAuroraRoots=_v121PdfApplyAuroraNotes_(days,es);
   const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
   const left=34,gap=12,width=(W-68-gap)/2,footer=H-37;
   const font=(style,size)=>{doc.setFont('ITBMO',style);doc.setFontSize(size);doc.setCharSpace(0);};
@@ -12267,7 +12307,7 @@ async function exportItineraryToPDF(options={}){
     }else{
       font('bold',15);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(_v106PdfSemanticDayTitle_(day)||route),34,135,{maxWidth:W-68});
     }
-    if(_v106PdfAuroraContext_(day)){doc.setFillColor(249,252,255);doc.rect(W-225,76,191,20,'F');font('bold',7.2);doc.setTextColor(32,122,145);doc.text(es?'ZONA Y ÉPOCA DE AURORAS BOREALES':'NORTHERN LIGHTS AREA & SEASON',W-34,88,{align:'right',maxWidth:185});}
+    if(_v106PdfAuroraContext_(day,pdfAuroraRoots)){doc.setFillColor(249,252,255);doc.rect(W-225,76,191,20,'F');font('bold',7.2);doc.setTextColor(32,122,145);doc.text(es?'ZONA Y ÉPOCA DE AURORAS BOREALES':'NORTHERN LIGHTS AREA & SEASON',W-34,88,{align:'right',maxWidth:185});}
     if(continued){font('normal',7);doc.text(es?'Continuación':'Continued',W-34,154,{align:'right'});}
   };
   const paint=(card,x,y)=>{
