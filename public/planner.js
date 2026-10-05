@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V134';
-const ITBMO_RUNTIME_ASSET='planner.js?v=253';
+const ITBMO_RUNTIME_BUILD='V135';
+const ITBMO_RUNTIME_ASSET='planner.js?v=254';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6664,6 +6664,33 @@ function _v115IsHardRow_(r={}){
   const rigidity=String(r?.reservation_rigidity||r?.commerce_context?.reservation_rigidity||'').toLowerCase();
   return r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer'||rigidity==='high';
 }
+
+// V135 · TEMPORAL AUTHORITY CONTRACT. Reservation importance and clock authority
+// are different dimensions. A generated row may be reservation-important (for
+// example a ticketed anchor or a recommended transport booking) without owning an
+// immutable clock. Only traveler/fixed movement authority or a genuinely
+// calendar-sensitive row may stop deterministic arithmetic reconciliation. Keep
+// _v115IsHardRow_ unchanged because Semantic Shield and repair conservation still
+// use reservation rigidity to protect CONTENT; this narrower predicate is only for
+// V126 timeline movement.
+function _v135HasTemporalAuthority_(r={}){
+  if(r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer')return true;
+  const cc=r?.commerce_context||{};
+  if(cc?.user_fixed===true||cc?.departure_user_fixed===true||cc?.arrival_user_fixed===true)return true;
+  const source=String(cc?.source||r?.source||'').trim().toUpperCase();
+  if(source==='USER_FIXED')return true;
+  const calendar=String(r?.calendar_sensitivity||cc?.calendar_sensitivity||'').toLowerCase();
+  return calendar==='high';
+}
+function _v135TemporalCascadeShiftRisk_(affected=[],delta=0){
+  const sensitive=(affected||[]).filter(_v135HasTemporalAuthority_);
+  if(sensitive.length)return {blocked:true,sensitive,reason:'temporal_authority'};
+  const roles=(affected||[]).map(_v110SemanticRole_);
+  if(delta>45&&roles.some(role=>['meal','recovery','buffer'].includes(role)))return {blocked:true,sensitive:affected.filter(r=>['meal','recovery','buffer'].includes(_v110SemanticRole_(r))),reason:'utility_cascade'};
+  const ends=(affected||[]).map(r=>_v114LogicalEndMinutes_(r)).filter(v=>v!=null);
+  if(delta>60&&ends.length&&Math.max(...ends)+delta>22*60+30)return {blocked:true,sensitive:affected,reason:'late_day_cascade'};
+  return {blocked:false,sensitive:[],reason:null};
+}
 function _v115IsCrossMidnightNightRow_(r={}){
   if(!_v114IsNightOverlayRow_(r))return false;
   const s=_hhmmToMinutes_(r?.start),e=_hhmmToMinutes_(r?.end);
@@ -6823,8 +6850,7 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
         if(rs>=chainEnd)break; // natural slack has fully absorbed the upstream delay.
         const delta=chainEnd-rs;
         if(delta<=0)break;
-        const calendar=String(r?.calendar_sensitivity||r?.commerce_context?.calendar_sensitivity||'').toLowerCase();
-        if(_v115IsHardRow_(r)||calendar==='high'){safe=false;break;}
+        if(_v135HasTemporalAuthority_(r)){safe=false;break;}
         const w=_v111WindowForRow_(r,contract),wend=_hhmmToMinutes_(w?.end);
         const newEnd=re+delta;
         if(wend!=null&&newEnd>wend){safe=false;break;}
@@ -6832,7 +6858,7 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
         maxShift=Math.max(maxShift,delta);chainEnd=newEnd;
       }
       if(!safe||!proposal.length)continue;
-      const risk=_v115CascadeShiftRisk_(proposal.map(x=>x.row),maxShift);
+      const risk=_v135TemporalCascadeShiftRisk_(proposal.map(x=>x.row),maxShift);
       if(risk.blocked)continue;
       for(const x of proposal){x.row.start=_minutesToHHMM_(x.start);x.row.end=_minutesToHHMM_(x.end);}
       shifts+=proposal.length;
@@ -8429,7 +8455,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v13-v134-composite-anchor-coverage';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v14-v135-temporal-authority';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
