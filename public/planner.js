@@ -13941,6 +13941,9 @@ function _removePaymentPreparingOverlaysNow_(){
 }
 
 function showPostPaymentWelcome(){
+  // UX CLEAN R2: a valid payment/admin bypass must own the modal handoff.
+  // Purge any stale checkout state before mounting the post-payment step.
+  closeCheckoutModal();
   _removePaymentPreparingOverlaysNow_();
   document.querySelector('.itbmo-postpay-overlay')?.remove();
   const es=getLang()==='es';
@@ -14016,6 +14019,8 @@ async function requestPlanningStart(){
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
     if(alreadyPaid){
       await _persistPostPaymentProgress_('preferences');
+      // UX CLEAN R2: never allow a stale checkout layer to survive an authorized bypass.
+      closeCheckoutModal();
       // V103: end the blocking payment-status layer before the next modal is
       // mounted. Do not rely on the 220 ms exit animation for modal handoff.
       _removePaymentPreparingOverlaysNow_();
