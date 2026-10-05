@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V133';
-const ITBMO_RUNTIME_ASSET='planner.js?v=252';
+const ITBMO_RUNTIME_BUILD='V134';
+const ITBMO_RUNTIME_ASSET='planner.js?v=253';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -8429,7 +8429,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v12-v133-selected-anchor-integrity';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v13-v134-composite-anchor-coverage';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -9206,7 +9206,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // must physically depart from its overnight base. This checks only the first
     // generated row of each REGIONAL owner-day; it does not rewrite chronology,
     // fixed transfers, day-trip ownership or any healthy downstream row.
-    // V133 · TIE SELECTED-ANCHOR EXECUTION INTEGRITY GATE.
+    // V134 · TIE SELECTED-ANCHOR EXECUTION INTEGRITY GATE.
     // The authoritative semantic commitment is experience_inventory, not raw
     // route_manifest prose. The manifest is an execution corridor and may legally
     // contain movement/connective entries. Re-inferring "experience vs transport"
@@ -9238,21 +9238,40 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
         if(!requiredInventory.length) continue;
 
         const dayRows=(rows||[]).filter(r=>Number(r?.day)===Number(day));
-        const materializedAsExperience=(experienceName)=>dayRows.some(r=>{
+        const realExperienceRows=dayRows.filter(r=>{
           // Judge the semantic action from activity prose itself. A legitimate visit
           // may carry transport metadata/duration and therefore look "pure transport"
           // to physical-row classifiers; conversely "Traslado a X" must not satisfy X.
-          // Feeding only activity into the existing semantic-role classifier cleanly
-          // separates those cases without destination or language-specific POI rules.
           const rowKind=String(r?.kind||'').trim().toLowerCase();
           const activityRole=_v110SemanticRole_({activity:String(r?.activity||'')});
-          if(rowKind==='transport' || activityRole!=='experience') return false;
-          // Match against concrete destination/activity only. Notes and transport are
-          // excluded so passing by or merely mentioning an anchor cannot satisfy it.
-          return _arePoiAliases_(experienceName,String(r?.to||'')) ||
-                 _arePoiAliases_(experienceName,String(r?.activity||'')) ||
-                 _arePoiAliases_(experienceName,`${r?.to||''} ${r?.activity||''}`);
+          return rowKind!=='transport' && activityRole==='experience';
         });
+        const rowMaterializes=(anchorName)=>realExperienceRows.some(r=>
+          _arePoiAliases_(anchorName,String(r?.to||'')) ||
+          _arePoiAliases_(anchorName,String(r?.activity||'')) ||
+          _arePoiAliases_(anchorName,`${r?.to||''} ${r?.activity||''}`)
+        );
+        const materializedAsExperience=(experienceName)=>{
+          // Atomic selected experiences still require a direct real-experience match.
+          if(rowMaterializes(experienceName)) return true;
+
+          // V134 · COMPOSITE EXPERIENCE COVERAGE. TIE may intentionally express one
+          // selected experience as a family/circuit (for example "A with B and C")
+          // while route_manifest carries its concrete CORE/HIGH anchors separately.
+          // In that case the itinerary is semantically complete when at least two
+          // concrete manifest anchors belonging to that selected experience are each
+          // materialized as real experience rows. This consumes TIE's own structure;
+          // it does not infer destinations, transport classes or language keywords.
+          // Requiring >=2 components prevents an atomic anchor from being satisfied
+          // by one partial/name-overlap row. Supporting/OPTIONAL stops never count.
+          const components=manifest.filter(stop=>
+            ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
+            String(stop?.name||'').trim() &&
+            _arePoiAliases_(experienceName,String(stop.name||''))
+          );
+          if(components.length<2) return false;
+          return components.every(stop=>rowMaterializes(String(stop.name||'')));
+        };
 
         for(const item of requiredInventory){
           const experience=String(item.experience||'').trim();
