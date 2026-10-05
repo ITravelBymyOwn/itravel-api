@@ -6,7 +6,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=148" />
+  <link rel="stylesheet" href="./planner.css?v=149" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -344,7 +344,7 @@
           <h3>Tu viaje empieza aquí</h3>
           <p>Una decisión sencilla cada vez. Verás cómo tu recorrido toma forma mientras lo construyes.</p>
         </div>
-        <button type="button" id="build-guided-journey" class="guided-journey-entry__button"><small>CREA TU VIAJE</small><b>Comenzar</b><span>→</span></button>
+        <button type="button" id="build-guided-journey" class="guided-journey-entry__button is-auth-locked" disabled aria-disabled="true"><small>CREA TU VIAJE</small><b>Comenzar</b><span>→</span></button>
       </section>
 
       <div class="guided-journey-legacy" aria-hidden="true">
@@ -1232,7 +1232,7 @@
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
 <script src="./travel-model-v2.js?v=13"></script>
-<script src="./planner.js?v=248"></script>
+<script src="./planner.js?v=249"></script>
  
 </body>
 </html>
