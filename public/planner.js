@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V136';
-const ITBMO_RUNTIME_ASSET='planner.js?v=255';
+const ITBMO_RUNTIME_BUILD='V137';
+const ITBMO_RUNTIME_ASSET='planner.js?v=256';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6675,47 +6675,91 @@ function _v136HasTemporalAuthority_(r={}){
 // arithmetic projection: it never invents, deletes, reorders or compresses content.
 // If the fixed constraints and durations are mathematically infeasible, it leaves
 // that window unchanged for the existing semantic audit/repair path.
-function _v136SolveTemporalWindow_(rows=[],window={}){
+function _v137SolveTemporalWindow_(rows=[],window={}){
   if(!Array.isArray(rows)||rows.length<2)return {changed:false,feasible:true,moved:0,max_shift:0};
-  const ws=_hhmmToMinutes_(window?.start),we0=_hhmmToMinutes_(window?.end);
-  if(ws==null||we0==null)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'unbounded_window'};
-  let we=we0;if(we<=ws)we+=1440;
+  const rawWs=_hhmmToMinutes_(window?.start),rawWe=_hhmmToMinutes_(window?.end);
+  let ws=rawWs,we=rawWe;
+  if(ws!=null&&we!=null&&we<=ws)we+=1440;
   const items=[];
   for(const row of rows){
     if(_v114IsNightOverlayRow_(row))return {changed:false,feasible:false,moved:0,max_shift:0,reason:'night_chain'};
     const ps=_v114LogicalStartMinutes_(row),pe=_v114LogicalEndMinutes_(row);
     if(ps==null||pe==null||pe<=ps)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'invalid_interval'};
-    items.push({row,pref:ps,dur:pe-ps,locked:_v136HasTemporalAuthority_(row)});
+    const locked=_v136HasTemporalAuthority_(row);
+    let dur=pe-ps;
+    // A malformed model clock must not turn a short movement into hours of travel.
+    // When the row itself carries a parseable transport-duration contract, use it
+    // as the deterministic duration bound for flexible pure-transport rows.
+    if(!locked&&_isPureTransportRow_(row)){
+      const tb=_transportBoundsFromField_(row?.transport||'');
+      if(tb&&Number.isFinite(tb.min)&&Number.isFinite(tb.max)&&(dur<tb.min||dur>tb.max)){
+        dur=Math.max(1,Math.round(tb.max));
+      }
+    }
+    items.push({row,pref:ps,dur,locked});
   }
   const n=items.length,starts=new Array(n);
   const locked=[];for(let i=0;i<n;i++)if(items[i].locked)locked.push(i);
-  // Fixed rows must themselves be inside the authoritative window and leave enough
-  // physical capacity for all rows between consecutive hard boundaries.
-  let leftIndex=-1,leftEnd=ws;
-  for(const li of [...locked,n]){
-    const rightStart=li===n?we:items[li].pref;
-    if(li<n&&(rightStart<ws||rightStart+items[li].dur>we))return {changed:false,feasible:false,moved:0,max_shift:0,reason:'fixed_outside_window'};
-    const segment=[];for(let j=leftIndex+1;j<li;j++)segment.push(j);
-    const required=segment.reduce((a,j)=>a+items[j].dur,0);
-    if(leftEnd+required>rightStart)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'insufficient_capacity'};
 
-    // Backward latest-start envelope guarantees the segment can finish before the
-    // next hard boundary. Forward projection then keeps each proposed clock whenever
-    // possible, while eliminating overlaps with the minimum necessary displacement.
-    const latest=new Map();let cursor=rightStart;
-    for(let k=segment.length-1;k>=0;k--){const j=segment[k];cursor-=items[j].dur;latest.set(j,cursor);}
-    cursor=leftEnd;
-    for(const j of segment){
-      const lo=cursor,hi=latest.get(j);
-      if(hi<lo)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'insufficient_capacity'};
-      const st=Math.min(hi,Math.max(lo,items[j].pref));
-      starts[j]=st;cursor=st+items[j].dur;
+  // Solve each flexible segment between true temporal-authority anchors. Missing
+  // window edges are OPEN boundaries, never a reason to defer arithmetic repair.
+  // With an open left edge we preserve the first proposed start; with an open
+  // right edge we propagate forward as far as required. A present window edge is
+  // still authoritative and is enforced exactly as a hard capacity boundary.
+  let leftIndex=-1;
+  let leftEnd=ws;
+  for(const li of [...locked,n]){
+    const hasRightLock=li<n;
+    const rightStart=hasRightLock?items[li].pref:we;
+    if(hasRightLock){
+      if(ws!=null&&rightStart<ws)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'fixed_outside_window'};
+      if(we!=null&&rightStart+items[li].dur>we)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'fixed_outside_window'};
     }
-    if(li<n){
+    const segment=[];for(let j=leftIndex+1;j<li;j++)segment.push(j);
+
+    // Establish the left physical cursor. If no authoritative lower boundary
+    // exists, the first flexible row's proposed start is the least-displacement
+    // anchor for the open chain; it may move only when a later true fixed anchor
+    // mathematically requires a backward fit.
+    let segLeft=leftEnd;
+    if(segLeft==null&&segment.length)segLeft=items[segment[0]].pref;
+    if(segLeft==null&&hasRightLock)segLeft=rightStart-segment.reduce((a,j)=>a+items[j].dur,0);
+
+    if(rightStart!=null){
+      const required=segment.reduce((a,j)=>a+items[j].dur,0);
+      if(segLeft!=null&&segLeft+required>rightStart){
+        // For a genuinely open left edge, fit backward against the next fixed/end
+        // boundary instead of calling the model. For a bounded left edge this is
+        // a real capacity contradiction and must remain semantic-repair territory.
+        if(leftEnd==null&&ws==null)segLeft=rightStart-required;
+        else return {changed:false,feasible:false,moved:0,max_shift:0,reason:'insufficient_capacity'};
+      }
+      const latest=new Map();let cursor=rightStart;
+      for(let k=segment.length-1;k>=0;k--){const j=segment[k];cursor-=items[j].dur;latest.set(j,cursor);}
+      cursor=segLeft;
+      for(const j of segment){
+        const lo=cursor,hi=latest.get(j);
+        if(lo!=null&&hi<lo)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'insufficient_capacity'};
+        const floor=lo==null?items[j].pref:lo;
+        const st=Math.min(hi,Math.max(floor,items[j].pref));
+        starts[j]=st;cursor=st+items[j].dur;
+      }
+    }else{
+      // Open-ended chain: pure forward projection. This is the common case that
+      // V136 incorrectly labelled `unbounded_window` and sent to Luna repair.
+      let cursor=segLeft;
+      for(const j of segment){
+        const st=Math.max(cursor==null?items[j].pref:cursor,items[j].pref);
+        starts[j]=st;cursor=st+items[j].dur;
+      }
+    }
+
+    if(hasRightLock){
       starts[li]=items[li].pref;
       leftEnd=starts[li]+items[li].dur;leftIndex=li;
     }
   }
+
   let moved=0,maxShift=0;
   for(let i=0;i<n;i++){
     const st=starts[i];if(st==null)continue;
@@ -6726,9 +6770,8 @@ function _v136SolveTemporalWindow_(rows=[],window={}){
       moved++;maxShift=Math.max(maxShift,delta);
     }
   }
-  return {changed:moved>0,feasible:true,moved,max_shift:maxShift};
+  return {changed:moved>0,feasible:true,moved,max_shift:maxShift,open_start:ws==null,open_end:we==null};
 }
-
 function _v115IsCrossMidnightNightRow_(r={}){
   if(!_v114IsNightOverlayRow_(r))return false;
   const s=_hhmmToMinutes_(r?.start),e=_hhmmToMinutes_(r?.end);
@@ -6837,7 +6880,7 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
   return {rows:out,changed,events};
 }
 
-// V136 deterministic temporal compilation. One arithmetic authority replaces the
+// V137 deterministic temporal compilation. One arithmetic authority replaces the
 // overlapping V126 + legacy DIC cascade-shift passes for stamped planning windows.
 // Unstamped/ambiguous legacy shapes are deliberately left untouched and continue to
 // the existing audit path. This avoids multiple deterministic engines applying
@@ -6857,13 +6900,13 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
     if(chain.length<2)continue;
     const probe=chain[0],window=_v111WindowForRow_(probe,contract);
     if(!window)continue;
-    const result=_v136SolveTemporalWindow_(chain,window);
+    const result=_v137SolveTemporalWindow_(chain,window);
     if(result.changed){
       shifts+=result.moved;
       const day=Number(probe?.day||0);
-      console.info(`[ITBMO V136 TEMPORAL SOLVER] ${city} · day ${day} · ${String(probe?.planning_window_id||'window')} · reconciled ${result.moved} row(s) · max displacement ${result.max_shift} min`);
+      console.info(`[ITBMO V137 TEMPORAL SOLVER] ${city} · day ${day} · ${String(probe?.planning_window_id||'window')} · reconciled ${result.moved} row(s) · max displacement ${result.max_shift} min`);
     }else if(!result.feasible&&result.reason!=='night_chain'){
-      console.info(`[ITBMO V136 TEMPORAL SOLVER] ${city} · ${key} · deterministic solve deferred · ${result.reason}`);
+      console.info(`[ITBMO V137 TEMPORAL SOLVER] ${city} · ${key} · deterministic solve deferred · ${result.reason}`);
     }
   }
   return {rows:out,shifts};
@@ -8407,7 +8450,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v15-v136-deterministic-temporal-solver';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v16-v137-open-boundary-temporal-solver';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
