@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V130.1';
-const ITBMO_RUNTIME_ASSET='planner.js?v=257';
+const ITBMO_RUNTIME_BUILD='V130.2';
+const ITBMO_RUNTIME_ASSET='planner.js?v=258';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6944,9 +6944,7 @@ function _v112MissingProtectedAnchors_(manifest=[],rows=[]){
 
 // V130 regional commitment integrity. TIE already made the strategic decision;
 // V3 must prove that every protected CORE/HIGH regional stop was materialized as
-// a real experience before the Stay can checkpoint. This is deliberately scoped
-// to REGIONAL units and ignores OPTIONAL/DROP_FIRST opportunities. Mentions in
-// transport/notes do not count: the commitment must exist as an experience row.
+// a real experience before the Stay can checkpoint. Deliberately REGIONAL-only.
 function _v130RegionalCommitmentErrors_(unit={},rows=[]){
   if(!String(unit?.unit_type||'').startsWith('REGIONAL'))return [];
   const directives=Array.isArray(unit?.tie_structure?.day_directives)?unit.tie_structure.day_directives:[];
@@ -6967,11 +6965,7 @@ function _v130RegionalCommitmentErrors_(unit={},rows=[]){
       const name=String(stop?.name||'').trim();
       if(!['CORE','HIGH'].includes(priority)||!name||isLogisticsName(name))continue;
       if((byDay[day]||[]).some(row=>matches(row,name)))continue;
-      errors.push({
-        code:'MISSING_TIE_REGIONAL_COMMITMENT',day,stay_unit_id:unit.id,
-        commitment:name,priority,minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,
-        instruction:'Restore this authoritative TIE CORE/HIGH regional commitment as a real experience row on this owner day, with honest dwell and physical continuity. A mention in transfer text, notes, alternatives or fallback prose does not satisfy the commitment. Preserve all other healthy anchors; reclaim OPTIONAL/DROP_FIRST content first if capacity is needed.'
-      });
+      errors.push({code:'MISSING_TIE_REGIONAL_COMMITMENT',day,stay_unit_id:unit.id,commitment:name,priority,minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,instruction:'Restore this authoritative TIE CORE/HIGH regional commitment as a real experience row on this owner day, with honest dwell and physical continuity. A mention in transfer text, notes, alternatives or fallback prose does not satisfy the commitment. Preserve all other healthy anchors; reclaim OPTIONAL/DROP_FIRST content first if capacity is needed.'});
     }
   }
   return errors;
@@ -9278,9 +9272,6 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
     const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
-    // V130: close the exact semantic hole exposed by the Cusco 7-day test. A
-    // regional Stay cannot be accepted merely because its clocks are clean when
-    // an authoritative CORE/HIGH TIE stop never became a real experience row.
     const missingRegionalCommitments=_v130RegionalCommitmentErrors_(unit,rows);
     return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks,...missingRegionalCommitments]});
   };
@@ -13945,17 +13936,23 @@ async function paymentApi(payload){
 
 async function hasValidPaymentForCurrentTrip(){
   if(!ITBMO_COMMERCE_CONFIG.requirePayment) return true;
-  // V130.1 · payment entitlement is tri-state at this boundary:
-  // true = explicitly authorized, false = explicitly verified unpaid,
-  // null = authorization could not be verified. Never turn an unknown/error
-  // into "unpaid", because that can incorrectly open PayPal in Preview when
-  // the server-side admin bypass check is temporarily unavailable.
-  if(!currentTripId) return null;
-  if(paymentGateSatisfiedTripId === currentTripId) return true;
+  if(paymentGateSatisfiedTripId === currentTripId && currentTripId) return true;
 
   try{
     const token = getStoredSessionToken();
-    if(!token) return null;
+    if(!token) return false;
+
+    // V130.2 · Preview entitlement comes from the server deployment context,
+    // never from DOM/modal timing or hostname inference. This restores the
+    // intended Preview behavior even if the route-ready handoff occurs while
+    // trip/payment state is still settling. Production never receives this flag.
+    const cfg = commerceServerConfig || await loadCommerceServerConfig();
+    if(cfg?.preview_payment_bypass===true && currentUser){
+      if(currentTripId) paymentGateSatisfiedTripId=currentTripId;
+      return true;
+    }
+
+    if(!currentTripId) return false;
     const data = await paymentApi({
       action:'status',
       session_token:token,
@@ -13972,8 +13969,8 @@ async function hasValidPaymentForCurrentTrip(){
     applyInfoChatStatus(data);
     return authorized;
   }catch(err){
-    console.warn('[PAYMENT STATUS UNVERIFIED]',err);
-    return null;
+    console.warn('[PAYMENT STATUS]',err);
+    return false;
   }
 }
 
@@ -14058,17 +14055,7 @@ async function requestPlanningStart(){
 
   try{
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
-    if(alreadyPaid===null){
-      // V130.1 · fail closed on entitlement uncertainty. PayPal may open only
-      // after the server explicitly verifies that this trip is not authorized.
-      _removePaymentPreparingOverlaysNow_();
-      const es=getLang()==='es';
-      alert(es
-        ? 'No pudimos verificar la autorización de este viaje en este momento. Inténtalo nuevamente; no se abrirá una ventana de pago hasta confirmar el estado.'
-        : 'We could not verify this trip authorization right now. Please try again; a payment window will not open until the status is confirmed.');
-      return;
-    }
-    if(alreadyPaid===true){
+    if(alreadyPaid){
       await _persistPostPaymentProgress_('preferences');
       // V103: end the blocking payment-status layer before the next modal is
       // mounted. Do not rely on the 220 ms exit animation for modal handoff.
@@ -15098,7 +15085,7 @@ function _bindTripStoryDaysPicker_(root){
   const menu=picker.querySelector('[data-gj-days-menu]');
   if(!native||!trigger||!menu)return;
   const close=()=>{menu.hidden=true;trigger.setAttribute('aria-expanded','false');};
-  trigger.onclick=(event)=>{event.preventDefault();event.stopPropagation();const opening=menu.hidden;if(opening){menu.hidden=false;trigger.setAttribute('aria-expanded','true');requestAnimationFrame(()=>{menu.scrollTop=menu.scrollHeight;});}else close();};
+  trigger.onclick=()=>{const opening=menu.hidden;if(opening){menu.hidden=false;trigger.setAttribute('aria-expanded','true');requestAnimationFrame(()=>{menu.scrollTop=menu.scrollHeight;});}else close();};
   // UX CLEAN R3: selection is committed on click, after pointerup.
   // Do not mutate/re-render the route during pointerdown: replacing this DOM
   // before the browser finishes the gesture can produce click-through into the
@@ -15107,8 +15094,6 @@ function _bindTripStoryDaysPicker_(root){
   menu.addEventListener('click',event=>{
     const btn=event.target.closest?.('[data-gj-day-value]');
     if(!btn||!menu.contains(btn))return;
-    event.preventDefault();
-    event.stopPropagation();
     const value=String(btn.dataset.gjDayValue||'');
     if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
     native.value=value;
@@ -15116,10 +15101,7 @@ function _bindTripStoryDaysPicker_(root){
     if(label)label.textContent=value==='transit'?(getLang()==='es'?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'):value;
     menu.querySelectorAll('[data-gj-day-value]').forEach(option=>option.setAttribute('aria-selected',String(option.dataset.gjDayValue)===value?'true':'false'));
     close();
-    // V130.1: finish the picker click completely before publishing the canonical
-    // native change. This prevents any modal/document click lifecycle from sharing
-    // the same browser gesture with downstream Planner state transitions.
-    setTimeout(()=>{if(native.isConnected)native.dispatchEvent(new Event('change',{bubbles:true}));},0);
+    native.dispatchEvent(new Event('change',{bubbles:true}));
   });
   picker.addEventListener('focusout',()=>setTimeout(()=>{if(!picker.contains(document.activeElement))close();},0));
 }
