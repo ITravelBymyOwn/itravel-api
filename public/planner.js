@@ -6979,6 +6979,40 @@ function _v138NormalizeReturnContinuity_(rows=[]){
   }
   return events;
 }
+
+// V144 · DEFINITIVE PHYSICAL PRECEDENCE COMPILER.
+// Raw model order and proposed clocks are preferences, not physical truth.
+// Build a destination-agnostic precedence graph from From→To continuity.
+function _v144PhysicalPrecedence_(rows=[]){
+  const input=[...(rows||[])]; if(input.length<2)return input;
+  const compatible=(a,b)=>a&&b&&(_arePoiAliases_(a,b)||_v111LocationsCompatible_(a,b,b)||_v111LocationsCompatible_(b,a,a));
+  const edgeScore=(a,b)=>{
+    if(!a||!b||a===b||_v114IsNightOverlayRow_(a)||_v114IsNightOverlayRow_(b))return -1;
+    const at=String(a?.to||'').trim(),bf=String(b?.from||'').trim();
+    if(!at||!bf)return -1;
+    if(_arePoiAliases_(at,bf))return 100;
+    return compatible(at,bf)?70:-1;
+  };
+  const n=input.length,indeg=new Array(n).fill(0),edges=Array.from({length:n},()=>[]);
+  for(let j=0;j<n;j++){
+    let best=-1,bestScore=-1;
+    for(let i=0;i<n;i++){
+      if(i===j)continue; const sc=edgeScore(input[i],input[j]);
+      if(sc>bestScore||(sc===bestScore&&sc>=0&&(best<0||i<best))){best=i;bestScore=sc;}
+    }
+    if(best>=0&&bestScore>=70){edges[best].push(j);indeg[j]++;}
+  }
+  const source=i=>Number.isFinite(Number(input[i]?._v143_source_order))?Number(input[i]._v143_source_order):i;
+  const available=[];for(let i=0;i<n;i++)if(indeg[i]===0)available.push(i);
+  available.sort((a,b)=>source(a)-source(b)||a-b);
+  const order=[];
+  while(available.length){
+    const i=available.shift();order.push(i);
+    for(const j of edges[i])if(--indeg[j]===0){available.push(j);available.sort((a,b)=>source(a)-source(b)||a-b);}
+  }
+  return order.length===n?order.map(i=>input[i]):input;
+}
+
 function _v111CompileTimeline_(city,rows=[],contract={}){
   const out=JSON.parse(JSON.stringify(rows||[]));
   let shifts=0;
@@ -7024,9 +7058,10 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       // Proposed clocks are preferences only. Sorting by a conflicting clock (V142)
       // can invert activity -> transfer precedence and make the solver optimize the
       // error itself. Use source precedence; the solver makes the clocks conform.
-      const chain=g.rows.map((row,index)=>({row,index,source:Number.isFinite(Number(row?._v143_source_order))?Number(row._v143_source_order):index}))
+      const sourceChain=g.rows.map((row,index)=>({row,index,source:Number.isFinite(Number(row?._v143_source_order))?Number(row._v143_source_order):index}))
         .sort((a,b)=>a.source-b.source||a.index-b.index)
         .map(x=>x.row);
+      const chain=_v144PhysicalPrecedence_(sourceChain);
       if(chain.length<2)continue;
       const result=_v137SolveTemporalWindow_(chain,g.window||{});
       if(result.feasible){
@@ -7037,9 +7072,9 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       }
       if(result.changed){
         shifts+=result.moved;
-        console.info(`[ITBMO V143 GOLDEN-CORE TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
+        console.info(`[ITBMO V144 DEFINITIVE TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
       }else if(!result.feasible&&result.reason!=='night_chain'){
-        console.info(`[ITBMO V143 GOLDEN-CORE TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
+        console.info(`[ITBMO V144 DEFINITIVE TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
       }
     }
   }
@@ -8596,7 +8631,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v21-v142-golden-temporal-convergence';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v22-v144-definitive-temporal-solver';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
