@@ -9241,8 +9241,3 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .gj-choice--finish>span{background:linear-gradient(135deg,#0c82d8,#11b7c8);color:#fff;box-shadow:0 6px 15px rgba(11,133,199,.18)}
 .gj-choice--finish b{color:#0b527e}
 .gj-choice--finish:hover{border-color:#16a9d3;box-shadow:0 12px 30px rgba(11,133,199,.16)}
-.gj-form select option.gj-transit-option{font-weight:900;color:#075d8b}
-.gj-form select option.gj-days-divider{color:#9aabba}
-
-
-/* V129 UX R3b · Days picker: transit is always visible at the bottom; 1,2,3... rise above it. */
