@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V131';
-const ITBMO_RUNTIME_ASSET='planner.js?v=250';
+const ITBMO_RUNTIME_BUILD='V132';
+const ITBMO_RUNTIME_ASSET='planner.js?v=251';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -8429,7 +8429,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v10-v131-tie-regional-commitment';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v11-v132-semantic-regional-commitment';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -9206,12 +9206,20 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // must physically depart from its overnight base. This checks only the first
     // generated row of each REGIONAL owner-day; it does not rewrite chronology,
     // fixed transfers, day-trip ownership or any healthy downstream row.
-    // V131 · TIE REGIONAL COMMITMENT INTEGRITY GATE.
-    // TIE has already selected the executable regional corridor. A CORE/HIGH
-    // route_manifest stop may not silently disappear between that decision and
-    // the final physical rows. Only a genuine experience visit can satisfy the
-    // commitment; transport, titles, notes and utility rows cannot. OPTIONAL and
-    // DROP_FIRST remain intentionally disposable. Destination-agnostic by design.
+    // V132 · SEMANTIC TIE REGIONAL COMMITMENT INTEGRITY GATE.
+    // V131 correctly exposed the latent execution hole, but treated every CORE/HIGH
+    // manifest entry as a visit. TIE's manifest can also contain structural movement
+    // (rail/road/ferry/return legs). Those are physical-chain commitments, not POI
+    // dwell commitments, and must never be repaired into fake sightseeing rows.
+    //
+    // Contract:
+    //   1) CORE/HIGH experience stops must materialize as real experience rows.
+    //   2) structural movement remains governed by continuity/transport QA.
+    //   3) a movement-shaped label is still an experience when TIE explicitly owns
+    //      it in experience_inventory (e.g. a scenic railway experience).
+    //   4) matching checks both concrete destination and activity prose; a broad
+    //      `to` field must not hide a clearly materialized named experience.
+    // OPTIONAL/DROP_FIRST remain disposable. No destination-specific knowledge.
     const missingTieRegionalCommitments=[];
     if(String(unit?.unit_type||'').startsWith('REGIONAL')){
       for(const day of unitDays){
@@ -9219,14 +9227,36 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
         const manifest=Array.isArray(directive?.route_manifest)
           ? directive.route_manifest
           : (unitDays.length===1&&Array.isArray(unit?.tie_structure?.route_manifest)?unit.tie_structure.route_manifest:[]);
-        const required=manifest.filter(stop=>['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase())&&String(stop?.name||'').trim());
+        const ownedInventory=(unit?.tie_structure?.experience_inventory||[]).filter(x=>x?.selected&&Number(x?.owner_day||0)===Number(day));
+        const isOwnedExperience=(name)=>ownedInventory.some(x=>_arePoiAliases_(name,String(x?.experience||'')));
+        const isStructuralMovement=(stop)=>{
+          const name=String(stop?.name||'').trim();
+          if(!name) return false;
+          if(isOwnedExperience(name)) return false;
+          const semanticRole=_v110SemanticRole_({activity:name});
+          if(['transfer','return'].includes(semanticRole)) return true;
+          const t=_canonicalText_(`${name} ${stop?.reason||''}`);
+          return /^(rail|railway|train|bus|coach|ferry|boat|road|car|drive|driving|transfer|transport|return|regreso|retorno|traslado|transporte|tren|ferrocarril|ferroviari|autobus|bus|ferry|barco|carretera|conduccion|conducir)\b/.test(t)
+            || /\b(transfer to|transport to|return to base|back to base|traslado a|traslado hacia|regreso a la base|retorno a la base)\b/.test(t);
+        };
+        const required=manifest.filter(stop=>
+          ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
+          String(stop?.name||'').trim() &&
+          !isStructuralMovement(stop)
+        );
         if(!required.length) continue;
-        const experienceRows=(rows||[]).filter(r=>Number(r?.day)===Number(day)&&_v111ExperienceVisitRow_(r));
+        const experienceRows=(rows||[]).filter(r=>
+          Number(r?.day)===Number(day) &&
+          !_isUtilityRow_(r) &&
+          !_isPureTransportRow_(r) &&
+          _v110SemanticRole_(r)==='experience'
+        );
         for(const stop of required){
           const name=String(stop.name||'').trim();
           const materialized=experienceRows.some(r=>
             _arePoiAliases_(name,String(r?.to||'')) ||
-            _arePoiAliases_(name,String(r?.activity||''))
+            _arePoiAliases_(name,String(r?.activity||'')) ||
+            _arePoiAliases_(name,`${r?.to||''} ${r?.activity||''}`)
           );
           if(!materialized){
             missingTieRegionalCommitments.push({
@@ -9236,7 +9266,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
               commitment:name,
               priority:String(stop?.priority||'').toUpperCase(),
               minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,
-              instruction:'Restore this TIE-committed CORE/HIGH regional experience as a real visit row on its owner day. Preserve healthy CORE/HIGH anchors and the coherent corridor; remove OPTIONAL/DROP_FIRST material first if capacity is needed. A transport row, title or textual mention does not satisfy this commitment.'
+              instruction:'Restore this TIE-committed CORE/HIGH regional experience as a real visit row on its owner day. Preserve healthy CORE/HIGH anchors and the coherent corridor; remove OPTIONAL/DROP_FIRST material first if capacity is needed. Structural transport is validated by physical-chain QA and must not be invented as a sightseeing row.'
             });
           }
         }
