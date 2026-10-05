@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V141';
-const ITBMO_RUNTIME_ASSET='planner.js?v=260';
+const ITBMO_RUNTIME_BUILD='V142';
+const ITBMO_RUNTIME_ASSET='planner.js?v=261';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6450,6 +6450,16 @@ function _activityDurationBounds_(duration=''){
 // trip, but they must never masquerade as tourism richness or be duplicated merely
 // to fill a clock. Keep this deliberately language-tolerant and deterministic.
 function _v110SemanticRole_(row={}){
+  // V142: semantic identity is led by the activity itself. A meal/recovery row may
+  // legitimately include a short embedded movement in its transport field; treating
+  // that as a pure transfer prevented V129 Utility-Slack protection from capping
+  // inflated meals (the Cusco 3-hour lunch failure). Conversely, an activity whose
+  // action is explicitly a transfer remains transport even when its destination is a
+  // restaurant. This changes no attraction/night semantics.
+  const activity=_canonicalText_(String(row?.activity||''));
+  const activityIsTransfer=/^(transfer|traslado|transporte|transport|regreso|retorno|return|walk to|caminar hacia|paseo hacia|drive to|conducir hacia|train to|tren hacia|bus to|autobus hacia)\b/.test(activity);
+  if(!activityIsTransfer&&/\b(lunch|almuerzo|dinner|cena|breakfast|desayuno|meal|comida|brunch)\b/.test(activity)) return 'meal';
+  if(!activityIsTransfer&&/\b(rest|descanso|recovery|recuperacion|pausa|break)\b/.test(activity)) return 'recovery';
   if(_isPureTransportRow_(row)) return 'transfer';
   const t=_canonicalText_(`${row?.kind||''} ${row?.activity||''} ${row?.notes||''}`);
   if(/\b(cooking class|clase de cocina|food tour|tour gastronomico|tasting experience|experiencia gastronomica)\b/.test(t)) return 'experience';
@@ -7009,7 +7019,16 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       const g=groups.get(id);g.rows.push(e.row);if(!g.window&&window)g.window=window;
     }
     for(const [windowId,g] of groups){
-      const chain=g.rows;if(chain.length<2)continue;
+      // V142: the proposed clock is the model's explicit schedule-order signal.
+      // V140/V141 preserved raw JSON order; when that order disagreed with the
+      // proposed timeline, the solver could prove its private sequence feasible yet
+      // the canonical audit (chronological order) still saw overlaps. Solve the same
+      // chronological sequence that QA publishes, using source order only as a stable
+      // tie-break. Location/content are untouched; NIGHT_OVERLAY never enters here.
+      const chain=g.rows.map((row,index)=>({row,index,start:_v114LogicalStartMinutes_(row)}))
+        .sort((a,b)=>(a.start??Number.MAX_SAFE_INTEGER)-(b.start??Number.MAX_SAFE_INTEGER)||a.index-b.index)
+        .map(x=>x.row);
+      if(chain.length<2)continue;
       const result=_v137SolveTemporalWindow_(chain,g.window||{});
       if(result.feasible){
         // A feasible solve is authoritative even when no clock needed movement.
@@ -7019,14 +7038,14 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       }
       if(result.changed){
         shifts+=result.moved;
-        console.info(`[ITBMO V141 GOLDEN-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
+        console.info(`[ITBMO V142 GOLDEN TEMPORAL CONVERGENCE] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
       }else if(!result.feasible&&result.reason!=='night_chain'){
-        console.info(`[ITBMO V141 GOLDEN-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
+        console.info(`[ITBMO V142 GOLDEN TEMPORAL CONVERGENCE] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
       }
     }
   }
   const continuity=_v138NormalizeReturnContinuity_(out);
-  if(continuity.length)console.info(`[ITBMO V141 RETURN CONTINUITY] ${city}`,continuity);
+  if(continuity.length)console.info(`[ITBMO V142 RETURN CONTINUITY] ${city}`,continuity);
   return {rows:out,shifts};
 }
 
@@ -8574,7 +8593,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v20-v141-golden-night-overlay-and-chain-convergence';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v21-v142-golden-temporal-convergence';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -9404,10 +9423,23 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
           const activityRole=_v110SemanticRole_({activity:String(r?.activity||'')});
           return rowKind!=='transport' && activityRole==='experience';
         });
+        // V142: safe lexical containment for a concrete anchor embedded inside a
+        // broader TIE commitment label (e.g. "Ollantaytambo y tramo central...").
+        // Require the complete normalized concrete phrase (>=5 chars) to occur in
+        // the commitment or vice versa; generic/broad place labels never qualify.
+        // This is deterministic semantic recognition, not a destination dictionary.
+        const v142ConcreteContainment=(a,b)=>{
+          const ca=_canonicalText_(a),cb=_canonicalText_(b);
+          if(!ca||!cb||ca.length<5||cb.length<5)return false;
+          if(_v111BroadPlace_(a)||_v111BroadPlace_(b))return false;
+          return ca.includes(cb)||cb.includes(ca);
+        };
         const rowMaterializes=(anchorName)=>realExperienceRows.some(r=>
           _arePoiAliases_(anchorName,String(r?.to||'')) ||
           _arePoiAliases_(anchorName,String(r?.activity||'')) ||
-          _arePoiAliases_(anchorName,`${r?.to||''} ${r?.activity||''}`)
+          _arePoiAliases_(anchorName,`${r?.to||''} ${r?.activity||''}`) ||
+          v142ConcreteContainment(anchorName,String(r?.to||'')) ||
+          v142ConcreteContainment(anchorName,String(r?.activity||''))
         );
         const materializedAsExperience=(experienceName)=>{
           // Atomic selected experiences still require a direct real-experience match.
