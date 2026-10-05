@@ -6942,43 +6942,43 @@ function _v112MissingProtectedAnchors_(manifest=[],rows=[]){
   return missing;
 }
 
-// V130 · TIE regional commitment integrity gate. V129 already treats the
-// REGIONAL route_manifest as the executable strategic corridor, but local QA
-// previously validated only rows that existed. A CORE/HIGH manifest stop that
-// never materialized could therefore disappear without producing a finding.
-// Keep this deliberately narrow: only REGIONAL owner-days and only CORE/HIGH
-// manifest commitments are enforced. OPTIONAL/DROP_FIRST remain disposable.
-function _v130MissingRegionalCommitments_(unit={},rows=[]){
-  if(!String(unit?.unit_type||'').startsWith('REGIONAL')) return [];
-  const directives=unit?.tie_structure?.day_directives||[];
+// V130 regional commitment integrity. TIE already made the strategic decision;
+// V3 must prove that every protected CORE/HIGH regional stop was materialized as
+// a real experience before the Stay can checkpoint. This is deliberately scoped
+// to REGIONAL units and ignores OPTIONAL/DROP_FIRST opportunities. Mentions in
+// transport/notes do not count: the commitment must exist as an experience row.
+function _v130RegionalCommitmentErrors_(unit={},rows=[]){
+  if(!String(unit?.unit_type||'').startsWith('REGIONAL'))return [];
+  const directives=Array.isArray(unit?.tie_structure?.day_directives)?unit.tie_structure.day_directives:[];
+  const fallbackManifest=Array.isArray(unit?.tie_structure?.route_manifest)?unit.tie_structure.route_manifest:[];
   const byDay=_rowsByDayObject_(rows);
-  const missing=[];
-  for(const directive of directives){
-    const day=Number(directive?.day||0); if(!day)continue;
-    const commitments=(directive?.route_manifest||[]).filter(stop=>['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase())&&String(stop?.name||'').trim());
-    for(const stop of commitments){
-      const label=String(stop.name).trim();
-      const found=(byDay[day]||[]).some(r=>{
-        if(!_v111ExperienceVisitRow_(r)) return false;
-        return _arePoiAliases_(label,r?.to||'') || _arePoiAliases_(label,r?.activity||'');
+  const errors=[];
+  const isLogisticsName=(name='')=>/\b(return|regreso|retorno|transfer|traslado|desplazamiento|drive|conduccion|conducción|road transfer|base return|hotel return)\b/i.test(String(name||''));
+  const matches=(row,name)=>{
+    if(!_v111ExperienceVisitRow_(row))return false;
+    const candidates=[row?.to,row?.activity,row?.commerce_context?.canonical_place].filter(Boolean);
+    return candidates.some(value=>_arePoiAliases_(value,name));
+  };
+  for(const day of [...new Set((unit?.days||[]).map(Number).filter(Boolean))]){
+    const directive=directives.find(d=>Number(d?.day)===day)||null;
+    const manifest=Array.isArray(directive?.route_manifest)?directive.route_manifest:fallbackManifest;
+    for(const stop of manifest||[]){
+      const priority=String(stop?.priority||'').toUpperCase();
+      const name=String(stop?.name||'').trim();
+      if(!['CORE','HIGH'].includes(priority)||!name||isLogisticsName(name))continue;
+      if((byDay[day]||[]).some(row=>matches(row,name)))continue;
+      errors.push({
+        code:'MISSING_TIE_REGIONAL_COMMITMENT',day,stay_unit_id:unit.id,
+        commitment:name,priority,minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,
+        instruction:'Restore this authoritative TIE CORE/HIGH regional commitment as a real experience row on this owner day, with honest dwell and physical continuity. A mention in transfer text, notes, alternatives or fallback prose does not satisfy the commitment. Preserve all other healthy anchors; reclaim OPTIONAL/DROP_FIRST content first if capacity is needed.'
       });
-      if(!found){
-        missing.push({
-          code:'MISSING_TIE_REGIONAL_COMMITMENT',
-          day,
-          commitment:label,
-          priority:String(stop?.priority||'').toUpperCase(),
-          minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,
-          instruction:'Restore this TIE-selected CORE/HIGH regional commitment as a real experience row in the owner day. Preserve all healthy anchors and chronology. If capacity is tight, remove OPTIONAL/DROP_FIRST content before reducing or omitting this commitment.'
-        });
-      }
     }
   }
-  return missing;
+  return errors;
 }
 
 function _v112RepairBlockRows_(rows=[],findings=[],scopeDays=[]){
-  const fullDayCodes=new Set(['MISSING_DAY','MISSING_PHYSICAL_WINDOW','WRONG_OVERNIGHT_BASE']);
+  const fullDayCodes=new Set(['MISSING_DAY','MISSING_PHYSICAL_WINDOW','WRONG_OVERNIGHT_BASE','MISSING_TIE_REGIONAL_COMMITMENT']);
   if((findings||[]).some(f=>fullDayCodes.has(String(f?.code||'')))){
     const set=new Set((scopeDays||[]).map(Number));
     return (rows||[]).filter(r=>set.has(Number(r?.day)));
@@ -9278,7 +9278,10 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
     const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
-    const missingRegionalCommitments=_v130MissingRegionalCommitments_(unit,rows);
+    // V130: close the exact semantic hole exposed by the Cusco 7-day test. A
+    // regional Stay cannot be accepted merely because its clocks are clean when
+    // an authoritative CORE/HIGH TIE stop never became a real experience row.
+    const missingRegionalCommitments=_v130RegionalCommitmentErrors_(unit,rows);
     return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks,...missingRegionalCommitments]});
   };
 
@@ -9328,7 +9331,7 @@ ${JSON.stringify(repairRows)}
 LOCAL VALIDATOR FINDINGS TO CORRECT:
 ${JSON.stringify(repairFindings)}
 
-Repair ONLY the supplied local row block(s). Rows not supplied are immutable and must not be recreated, summarized or deleted. Preserve the semantic identity of every healthy experience anchor. V129: never solve a chronology defect by stretching a flexible meal/rest/access/buffer to absorb slack before a later experience; keep utility duration semantically normal and protect downstream selected/CORE/HIGH dwell. User-fixed/reservation-hard utility facts remain immutable. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
+Repair ONLY the supplied local row block(s). Rows not supplied are immutable and must not be recreated, summarized or deleted. Preserve the semantic identity of every healthy experience anchor. V130: when a MISSING_TIE_REGIONAL_COMMITMENT finding is supplied, materialize that named CORE/HIGH commitment as a REAL experience row on its owner day; a mention in transfer text, Notes, alternatives or fallback prose is not execution. Preserve the other healthy anchors and reclaim OPTIONAL/DROP_FIRST content first if capacity is needed. V129: never solve a chronology defect by stretching a flexible meal/rest/access/buffer to absorb slack before a later experience; keep utility duration semantically normal and protect downstream selected/CORE/HIGH dwell. User-fixed/reservation-hard utility facts remain immutable. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
 `.trim();
     const raw=await _v3Call_(prompt);
     const parsed=parseJSON(raw);
