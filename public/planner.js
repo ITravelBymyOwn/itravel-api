@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V130';
-const ITBMO_RUNTIME_ASSET='planner.js?v=256';
+const ITBMO_RUNTIME_BUILD='V130.1';
+const ITBMO_RUNTIME_ASSET='planner.js?v=257';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -13945,12 +13945,17 @@ async function paymentApi(payload){
 
 async function hasValidPaymentForCurrentTrip(){
   if(!ITBMO_COMMERCE_CONFIG.requirePayment) return true;
-  if(!currentTripId) return false;
+  // V130.1 · payment entitlement is tri-state at this boundary:
+  // true = explicitly authorized, false = explicitly verified unpaid,
+  // null = authorization could not be verified. Never turn an unknown/error
+  // into "unpaid", because that can incorrectly open PayPal in Preview when
+  // the server-side admin bypass check is temporarily unavailable.
+  if(!currentTripId) return null;
   if(paymentGateSatisfiedTripId === currentTripId) return true;
 
   try{
     const token = getStoredSessionToken();
-    if(!token) return false;
+    if(!token) return null;
     const data = await paymentApi({
       action:'status',
       session_token:token,
@@ -13967,8 +13972,8 @@ async function hasValidPaymentForCurrentTrip(){
     applyInfoChatStatus(data);
     return authorized;
   }catch(err){
-    console.warn('[PAYMENT STATUS]',err);
-    return false;
+    console.warn('[PAYMENT STATUS UNVERIFIED]',err);
+    return null;
   }
 }
 
@@ -14053,7 +14058,17 @@ async function requestPlanningStart(){
 
   try{
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
-    if(alreadyPaid){
+    if(alreadyPaid===null){
+      // V130.1 · fail closed on entitlement uncertainty. PayPal may open only
+      // after the server explicitly verifies that this trip is not authorized.
+      _removePaymentPreparingOverlaysNow_();
+      const es=getLang()==='es';
+      alert(es
+        ? 'No pudimos verificar la autorización de este viaje en este momento. Inténtalo nuevamente; no se abrirá una ventana de pago hasta confirmar el estado.'
+        : 'We could not verify this trip authorization right now. Please try again; a payment window will not open until the status is confirmed.');
+      return;
+    }
+    if(alreadyPaid===true){
       await _persistPostPaymentProgress_('preferences');
       // V103: end the blocking payment-status layer before the next modal is
       // mounted. Do not rely on the 220 ms exit animation for modal handoff.
@@ -15083,7 +15098,7 @@ function _bindTripStoryDaysPicker_(root){
   const menu=picker.querySelector('[data-gj-days-menu]');
   if(!native||!trigger||!menu)return;
   const close=()=>{menu.hidden=true;trigger.setAttribute('aria-expanded','false');};
-  trigger.onclick=()=>{const opening=menu.hidden;if(opening){menu.hidden=false;trigger.setAttribute('aria-expanded','true');requestAnimationFrame(()=>{menu.scrollTop=menu.scrollHeight;});}else close();};
+  trigger.onclick=(event)=>{event.preventDefault();event.stopPropagation();const opening=menu.hidden;if(opening){menu.hidden=false;trigger.setAttribute('aria-expanded','true');requestAnimationFrame(()=>{menu.scrollTop=menu.scrollHeight;});}else close();};
   // UX CLEAN R3: selection is committed on click, after pointerup.
   // Do not mutate/re-render the route during pointerdown: replacing this DOM
   // before the browser finishes the gesture can produce click-through into the
@@ -15092,6 +15107,8 @@ function _bindTripStoryDaysPicker_(root){
   menu.addEventListener('click',event=>{
     const btn=event.target.closest?.('[data-gj-day-value]');
     if(!btn||!menu.contains(btn))return;
+    event.preventDefault();
+    event.stopPropagation();
     const value=String(btn.dataset.gjDayValue||'');
     if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
     native.value=value;
@@ -15099,7 +15116,10 @@ function _bindTripStoryDaysPicker_(root){
     if(label)label.textContent=value==='transit'?(getLang()==='es'?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'):value;
     menu.querySelectorAll('[data-gj-day-value]').forEach(option=>option.setAttribute('aria-selected',String(option.dataset.gjDayValue)===value?'true':'false'));
     close();
-    native.dispatchEvent(new Event('change',{bubbles:true}));
+    // V130.1: finish the picker click completely before publishing the canonical
+    // native change. This prevents any modal/document click lifecycle from sharing
+    // the same browser gesture with downstream Planner state transitions.
+    setTimeout(()=>{if(native.isConnected)native.dispatchEvent(new Event('change',{bubbles:true}));},0);
   });
   picker.addEventListener('focusout',()=>setTimeout(()=>{if(!picker.contains(document.activeElement))close();},0));
 }
