@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V130.3';
-const ITBMO_RUNTIME_ASSET='planner.js?v=258';
+const ITBMO_RUNTIME_BUILD='V129-UX-SAFE-R2';
+const ITBMO_RUNTIME_ASSET='planner.js?v=250';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6942,37 +6942,8 @@ function _v112MissingProtectedAnchors_(manifest=[],rows=[]){
   return missing;
 }
 
-// V130 regional commitment integrity. TIE already made the strategic decision;
-// V3 must prove that every protected CORE/HIGH regional stop was materialized as
-// a real experience before the Stay can checkpoint. Deliberately REGIONAL-only.
-function _v130RegionalCommitmentErrors_(unit={},rows=[]){
-  if(!String(unit?.unit_type||'').startsWith('REGIONAL'))return [];
-  const directives=Array.isArray(unit?.tie_structure?.day_directives)?unit.tie_structure.day_directives:[];
-  const fallbackManifest=Array.isArray(unit?.tie_structure?.route_manifest)?unit.tie_structure.route_manifest:[];
-  const byDay=_rowsByDayObject_(rows);
-  const errors=[];
-  const isLogisticsName=(name='')=>/\b(return|regreso|retorno|transfer|traslado|desplazamiento|drive|conduccion|conducción|road transfer|base return|hotel return)\b/i.test(String(name||''));
-  const matches=(row,name)=>{
-    if(!_v111ExperienceVisitRow_(row))return false;
-    const candidates=[row?.to,row?.activity,row?.commerce_context?.canonical_place].filter(Boolean);
-    return candidates.some(value=>_arePoiAliases_(value,name));
-  };
-  for(const day of [...new Set((unit?.days||[]).map(Number).filter(Boolean))]){
-    const directive=directives.find(d=>Number(d?.day)===day)||null;
-    const manifest=Array.isArray(directive?.route_manifest)?directive.route_manifest:fallbackManifest;
-    for(const stop of manifest||[]){
-      const priority=String(stop?.priority||'').toUpperCase();
-      const name=String(stop?.name||'').trim();
-      if(!['CORE','HIGH'].includes(priority)||!name||isLogisticsName(name))continue;
-      if((byDay[day]||[]).some(row=>matches(row,name)))continue;
-      errors.push({code:'MISSING_TIE_REGIONAL_COMMITMENT',day,stay_unit_id:unit.id,commitment:name,priority,minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,instruction:'Restore this authoritative TIE CORE/HIGH regional commitment as a real experience row on this owner day, with honest dwell and physical continuity. A mention in transfer text, notes, alternatives or fallback prose does not satisfy the commitment. Preserve all other healthy anchors; reclaim OPTIONAL/DROP_FIRST content first if capacity is needed.'});
-    }
-  }
-  return errors;
-}
-
 function _v112RepairBlockRows_(rows=[],findings=[],scopeDays=[]){
-  const fullDayCodes=new Set(['MISSING_DAY','MISSING_PHYSICAL_WINDOW','WRONG_OVERNIGHT_BASE','MISSING_TIE_REGIONAL_COMMITMENT']);
+  const fullDayCodes=new Set(['MISSING_DAY','MISSING_PHYSICAL_WINDOW','WRONG_OVERNIGHT_BASE']);
   if((findings||[]).some(f=>fullDayCodes.has(String(f?.code||'')))){
     const set=new Set((scopeDays||[]).map(Number));
     return (rows||[]).filter(r=>set.has(Number(r?.day)));
@@ -8093,7 +8064,7 @@ function _v3HardBlockingCodes_(){
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','WRONG_OVERNIGHT_BASE',
-    'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT','MISSING_TIE_REGIONAL_COMMITMENT'
+    'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT'
   ]);
 }
 
@@ -9272,8 +9243,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
     const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
-    const missingRegionalCommitments=_v130RegionalCommitmentErrors_(unit,rows);
-    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks,...missingRegionalCommitments]});
+    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
@@ -9322,7 +9292,7 @@ ${JSON.stringify(repairRows)}
 LOCAL VALIDATOR FINDINGS TO CORRECT:
 ${JSON.stringify(repairFindings)}
 
-Repair ONLY the supplied local row block(s). Rows not supplied are immutable and must not be recreated, summarized or deleted. Preserve the semantic identity of every healthy experience anchor. V130: when a MISSING_TIE_REGIONAL_COMMITMENT finding is supplied, materialize that named CORE/HIGH commitment as a REAL experience row on its owner day; a mention in transfer text, Notes, alternatives or fallback prose is not execution. Preserve the other healthy anchors and reclaim OPTIONAL/DROP_FIRST content first if capacity is needed. V129: never solve a chronology defect by stretching a flexible meal/rest/access/buffer to absorb slack before a later experience; keep utility duration semantically normal and protect downstream selected/CORE/HIGH dwell. User-fixed/reservation-hard utility facts remain immutable. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
+Repair ONLY the supplied local row block(s). Rows not supplied are immutable and must not be recreated, summarized or deleted. Preserve the semantic identity of every healthy experience anchor. V129: never solve a chronology defect by stretching a flexible meal/rest/access/buffer to absorb slack before a later experience; keep utility duration semantically normal and protect downstream selected/CORE/HIGH dwell. User-fixed/reservation-hard utility facts remain immutable. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
 `.trim();
     const raw=await _v3Call_(prompt);
     const parsed=parseJSON(raw);
@@ -13936,23 +13906,12 @@ async function paymentApi(payload){
 
 async function hasValidPaymentForCurrentTrip(){
   if(!ITBMO_COMMERCE_CONFIG.requirePayment) return true;
-  if(paymentGateSatisfiedTripId === currentTripId && currentTripId) return true;
+  if(!currentTripId) return false;
+  if(paymentGateSatisfiedTripId === currentTripId) return true;
 
   try{
     const token = getStoredSessionToken();
     if(!token) return false;
-
-    // V130.2 · Preview entitlement comes from the server deployment context,
-    // never from DOM/modal timing or hostname inference. This restores the
-    // intended Preview behavior even if the route-ready handoff occurs while
-    // trip/payment state is still settling. Production never receives this flag.
-    const cfg = commerceServerConfig || await loadCommerceServerConfig();
-    if(cfg?.preview_payment_bypass===true && currentUser){
-      if(currentTripId) paymentGateSatisfiedTripId=currentTripId;
-      return true;
-    }
-
-    if(!currentTripId) return false;
     const data = await paymentApi({
       action:'status',
       session_token:token,
@@ -13999,35 +13958,8 @@ function showPostPaymentWelcome(){
   </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('button')?.addEventListener('click',()=>{
-    // V130.3 · Modal handoff is atomic. The completed route builder must never
-    // remain as a live/hidden modal during the transition to Personalization.
-    // Retire only route-builder shells; the canonical Trip Story/state is kept.
-    overlay.remove();
-    try{
-      if(_tripStoryBuilderSession_?.overlay?.isConnected){
-        _tripStoryBuilderSession_.overlay.remove();
-      }
-      _tripStoryBuilderSession_=null;
-      document.querySelectorAll('.trip-story-minimized-fab').forEach(el=>el.remove());
-      document.body.classList.remove('trip-story-open');
-      _tripStorySetMinimizedState_(false);
-      _tripStorySetWorkspaceResume_(false);
-    }catch(err){ console.warn('[V130.3 PERSONALIZATION HANDOFF CLEANUP]',err); }
-
-    // The guided Personalization modal is the authoritative next surface.
-    // showPreferencesStage still prepares the underlying canonical state, but a
-    // rendering error in that legacy/underlying stage must not strand the user
-    // back on Planner.
-    try{ showPreferencesStage(); }
-    catch(err){
-      console.error('[V130.3 PREFERENCES STAGE PREP]',err);
-      try{ openGuidedPersonalizationJourney(); }catch(inner){ console.error('[V130.3 GUIDED PERSONALIZATION]',inner); }
-    }
-    requestAnimationFrame(()=>{
-      if(!document.querySelector('#guided-personalization-overlay')){
-        try{ openGuidedPersonalizationJourney(); }catch(err){ console.error('[V130.3 GUIDED PERSONALIZATION RAF]',err); }
-      }
-    });
+    overlay.remove();showPreferencesStage();
+    requestAnimationFrame(()=>smoothAdvanceTo('#preferences-stage',{gap:92,center:false}));
   });
 }
 
@@ -15094,43 +15026,8 @@ function _tripStoryRequiredTimeOptions_(selected=''){const es=getLang()==='es';r
 function _tripStoryTimeStatusOptions_(selected='estimated'){const es=getLang()==='es';return [['confirmed',es?'Confirmado · ya tengo el horario':'Confirmed · I have the schedule'],['estimated',es?'Estimado · podré ajustarlo después':'Estimated · I can update it later']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
 function _tripStoryDaysOptions_(selected=1,transitOnly=false){
   const es=getLang()==='es';
-  // Canonical select values. Visual order is mirrored by the custom picker below:
-  // transit at the bottom, then 1, 2, 3... immediately above it.
+  // Native selector only: transit stays at the bottom, with 1, 2, 3... immediately above it.
   return Array.from({length:30},(_,i)=>30-i).map(day=>`<option value="${day}" ${!transitOnly&&Number(selected)===day?'selected':''}>${day}</option>`).join('')+`<option class="gj-days-divider" value="" disabled>──────────</option><option class="gj-transit-option" value="transit" ${transitOnly?'selected':''}>${es?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'}</option>`;
-}
-function _tripStoryDaysPicker_(selected=1,transitOnly=false){
-  const es=getLang()==='es';
-  const current=transitOnly?(es?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'):String(Number(selected)||1);
-  const numeric=Array.from({length:30},(_,i)=>30-i).map(day=>`<button type="button" class="gj-days-picker__option" data-gj-day-value="${day}" role="option" aria-selected="${!transitOnly&&Number(selected)===day?'true':'false'}">${day}</button>`).join('');
-  return `<div class="gj-days-picker"><select class="gj-days-picker__native" data-stay-days aria-hidden="true" tabindex="-1">${_tripStoryDaysOptions_(selected,transitOnly)}</select><button type="button" class="gj-days-picker__trigger" data-gj-days-trigger aria-haspopup="listbox" aria-expanded="false"><span>${current}</span><span class="gj-days-picker__chevron" aria-hidden="true">⌄</span></button><div class="gj-days-picker__menu" data-gj-days-menu role="listbox" hidden>${numeric}<div class="gj-days-picker__divider" aria-hidden="true"></div><button type="button" class="gj-days-picker__option gj-days-picker__option--transit" data-gj-day-value="transit" role="option" aria-selected="${transitOnly?'true':'false'}">${es?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'}</button></div></div>`;
-}
-function _bindTripStoryDaysPicker_(root){
-  const picker=root?.querySelector?.('.gj-days-picker');
-  if(!picker)return;
-  const native=picker.querySelector('[data-stay-days]');
-  const trigger=picker.querySelector('[data-gj-days-trigger]');
-  const menu=picker.querySelector('[data-gj-days-menu]');
-  if(!native||!trigger||!menu)return;
-  const close=()=>{menu.hidden=true;trigger.setAttribute('aria-expanded','false');};
-  trigger.onclick=()=>{const opening=menu.hidden;if(opening){menu.hidden=false;trigger.setAttribute('aria-expanded','true');requestAnimationFrame(()=>{menu.scrollTop=menu.scrollHeight;});}else close();};
-  // UX CLEAN R3: selection is committed on click, after pointerup.
-  // Do not mutate/re-render the route during pointerdown: replacing this DOM
-  // before the browser finishes the gesture can produce click-through into the
-  // next route control/modal.
-  // Canonical selection path. The original V129 <select> remains the source of truth.
-  menu.addEventListener('click',event=>{
-    const btn=event.target.closest?.('[data-gj-day-value]');
-    if(!btn||!menu.contains(btn))return;
-    const value=String(btn.dataset.gjDayValue||'');
-    if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
-    native.value=value;
-    const label=trigger.querySelector('span:first-child');
-    if(label)label.textContent=value==='transit'?(getLang()==='es'?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'):value;
-    menu.querySelectorAll('[data-gj-day-value]').forEach(option=>option.setAttribute('aria-selected',String(option.dataset.gjDayValue)===value?'true':'false'));
-    close();
-    native.dispatchEvent(new Event('change',{bubbles:true}));
-  });
-  picker.addEventListener('focusout',()=>setTimeout(()=>{if(!picker.contains(document.activeElement))close();},0));
 }
 function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};}
 function _tripStoryDraftKey_(){const who=String(currentUser?.id||currentUser?.email||'guest').replace(/[^a-z0-9_.@-]/gi,'_');return `itbmo_trip_story_draft_v1_${who}`;}
@@ -15492,8 +15389,8 @@ function openTripStoryBuilder(){
     }
     if(phase==='stay'){
       const st=story.stays[activeStay];
-      active.innerHTML=shell(activeStay===0?(es?'PRIMER DESTINO':'FIRST DESTINATION'):(es?'SIGUIENTE DESTINO':'NEXT DESTINATION'),activeStay===0?(es?'¿Dónde comienza tu recorrido?':'Where does your journey begin?'):(es?'¿Cuál es tu siguiente destino?':'What is your next destination?'),es?'Agrega todos los lugares en el orden real de tu viaje, incluidos los que sean sólo de tránsito, hasta llegar al punto desde el cual iniciarás el regreso a tu lugar de origen. Si llegas a una ciudad y continúas hacia otra, agrégala también; después indicarás el traslado y los horarios.':'Add every place in the real order of your trip, including transit-only stops, until you reach the point from which you will begin your return home. If you arrive in one city and continue to another, add it too; you will enter the transfer and times afterward.',`<div class="gj-form"><label>${es?'País':'Country'}${countryField(st.country,st.countryCode,'data-stay-country')}</label><label>${es?'Destino':'Destination'}${destinationField(st.place,'data-stay-place')}</label><label>${es?'Fecha de llegada':'Arrival date'}<input type="date" data-stay-start value="${st.startDate||''}"></label><label>${es?'¿Cuánto tiempo estarás aquí?':'How long will you be here?'}${_tripStoryDaysPicker_(st.days,st.transitOnly)}</label></div>`,nextButton(es?'Agregar esta parada':'Add this stop'));
-      bindLocation(active.querySelector('[data-stay-country]'),x=>{const changed=st.country!==x.label||Boolean(x.code&&st.countryCode!==x.code);st.country=x.label;if(x.code)st.countryCode=x.code;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});}persist();},'country');bindLocation(active.querySelector('[data-stay-place]'),x=>{const changed=st.place!==x.label;st.place=x.label;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});}persist();},'city',()=>st.countryCode);active.querySelector('[data-stay-start]').onchange=e=>{const changed=st.startDate!==e.target.value;st.startDate=e.target.value;if(changed){st.arrivalDate=st.startDate;if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStoryInvalidateStayDerived_(st);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{dateChanged:true});}else st.arrivalDate=st.arrivalDate||st.startDate;_tripStoryEnsureStay_(st);persist();renderStory();};_bindTripStoryDaysPicker_(active);active.querySelector('[data-stay-days]').onchange=e=>{const transit=e.target.value==='transit';const nextDays=transit?1:Number(e.target.value);const changed=Boolean(st.transitOnly)!==transit||Number(st.days)!==nextDays;st.transitOnly=transit;st.days=nextDays;if(transit)st.dayTrips=[];_tripStoryEnsureStay_(st);if(changed){_tripStoryInvalidateStayDerived_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);}persist();renderStory();};active.querySelector('[data-gj-next]').onclick=()=>{
+      active.innerHTML=shell(activeStay===0?(es?'PRIMER DESTINO':'FIRST DESTINATION'):(es?'SIGUIENTE DESTINO':'NEXT DESTINATION'),activeStay===0?(es?'¿Dónde comienza tu recorrido?':'Where does your journey begin?'):(es?'¿Cuál es tu siguiente destino?':'What is your next destination?'),es?'Agrega todos los lugares en el orden real de tu viaje, incluidos los que sean sólo de tránsito, hasta llegar al punto desde el cual iniciarás el regreso a tu lugar de origen. Si llegas a una ciudad y continúas hacia otra, agrégala también; después indicarás el traslado y los horarios.':'Add every place in the real order of your trip, including transit-only stops, until you reach the point from which you will begin your return home. If you arrive in one city and continue to another, add it too; you will enter the transfer and times afterward.',`<div class="gj-form"><label>${es?'País':'Country'}${countryField(st.country,st.countryCode,'data-stay-country')}</label><label>${es?'Destino':'Destination'}${destinationField(st.place,'data-stay-place')}</label><label>${es?'Fecha de llegada':'Arrival date'}<input type="date" data-stay-start value="${st.startDate||''}"></label><label>${es?'¿Cuánto tiempo estarás aquí?':'How long will you be here?'}<select data-stay-days>${_tripStoryDaysOptions_(st.days,st.transitOnly)}</select></label></div>`,nextButton(es?'Agregar esta parada':'Add this stop'));
+      bindLocation(active.querySelector('[data-stay-country]'),x=>{const changed=st.country!==x.label||Boolean(x.code&&st.countryCode!==x.code);st.country=x.label;if(x.code)st.countryCode=x.code;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});}persist();},'country');bindLocation(active.querySelector('[data-stay-place]'),x=>{const changed=st.place!==x.label;st.place=x.label;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});}persist();},'city',()=>st.countryCode);active.querySelector('[data-stay-start]').onchange=e=>{const changed=st.startDate!==e.target.value;st.startDate=e.target.value;if(changed){st.arrivalDate=st.startDate;if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStoryInvalidateStayDerived_(st);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{dateChanged:true});}else st.arrivalDate=st.arrivalDate||st.startDate;_tripStoryEnsureStay_(st);persist();renderStory();};active.querySelector('[data-stay-days]').onchange=e=>{const transit=e.target.value==='transit';const nextDays=transit?1:Number(e.target.value);const changed=Boolean(st.transitOnly)!==transit||Number(st.days)!==nextDays;st.transitOnly=transit;st.days=nextDays;if(transit)st.dayTrips=[];_tripStoryEnsureStay_(st);if(changed){_tripStoryInvalidateStayDerived_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);}persist();renderStory();};active.querySelector('[data-gj-next]').onclick=()=>{
         if(!st.place||!st.startDate)return;
         if(activeStay>0){
           const prev=story.stays[activeStay-1],prevEnd=_tripStoryStayEnd_(prev);
