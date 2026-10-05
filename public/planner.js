@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V150';
-const ITBMO_RUNTIME_ASSET='planner.js?v=269';
+const ITBMO_RUNTIME_BUILD='V151';
+const ITBMO_RUNTIME_ASSET='planner.js?v=270';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -8152,6 +8152,22 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   const unitById=new Map(units.map(u=>[String(u.id),u]));
   const windowCoverage=_v3PhysicalWindowCoverage_(rows,units);
   windowCoverage.missing.forEach(w=>errors.push({code:'MISSING_PHYSICAL_WINDOW',day:w.day,stay_unit_id:w.stay_unit_id,window_id:w.window_id,location:w.location,window:`${w.start||''}-${w.end||'open'}`}));
+
+  // V151 surgical night-chain seal. Local Stay QA already requires every
+  // authoritative NIGHT_OVERLAY to contain a real experience row, but that
+  // invariant must also survive the independent-Stay merge and the canonical
+  // export commit. Re-run the same contract-derived check here so a return,
+  // preparation or recovery row can never satisfy/publish a night overlay after
+  // its parent experience disappears. This is validation only: no chronology,
+  // TIE decision, duration, fatigue rule or generated row is rewritten here.
+  units.forEach(unit=>(unit.windows||[]).filter(w=>String(w?.role||'')==='NIGHT_OVERLAY').forEach(w=>{
+    const windowId=String(w?.window_id||'');
+    const chainRows=(rows||[]).filter(r=>String(r?.stay_unit_id||'')===String(unit.id||'')&&String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'')===windowId);
+    const hasExperience=chainRows.some(r=>_v110SemanticRole_(r)==='experience');
+    if(!hasExperience){
+      errors.push({code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'});
+    }
+  }));
   errors.push(..._v127NightOwnerDayLeakErrors_(rows));
 
   for(let day=1;day<=maxDay;day++){
