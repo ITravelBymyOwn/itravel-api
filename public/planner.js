@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V129';
-const ITBMO_RUNTIME_ASSET='planner.js?v=248';
+const ITBMO_RUNTIME_BUILD='V131';
+const ITBMO_RUNTIME_ASSET='planner.js?v=250';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6550,7 +6550,7 @@ function _noteTemplateRatio_(rows=[]){
 
 function _auditSeverity_(error={}){
   const critical=new Set([
-    'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
+    'MISSING_DAY','MISSING_TIE_REGIONAL_COMMITMENT','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','NIGHT_OVERLAY_TOO_SHORT','MISSING_NIGHT_OVERLAY_EXECUTION','ORPHAN_NIGHT_CONTINUATION','SELECTED_ANCHOR_NOT_COMMITTED','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
     'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','WEEKDAY_DATE_MISMATCH',
@@ -8043,11 +8043,11 @@ function _v3AuditSummary_(report={}){
 }
 
 function _v3HardBlockingCodes_(){
-  // V111: HARD means physically impossible, missing authoritative structure, or
-  // direct user-constraint violation. Quality/opportunity findings never trigger
-  // regeneration by themselves.
+  // V131: HARD also includes a semantic commitment that TIE explicitly made for
+  // a REGIONAL corridor but which never materialized as a real experience row.
+  // This is integrity of the authoritative plan, not a quality/opportunity quota.
   return new Set([
-    'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
+    'MISSING_DAY','MISSING_PHYSICAL_WINDOW','MISSING_TIE_REGIONAL_COMMITMENT','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','WRONG_OVERNIGHT_BASE',
     'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT'
@@ -8429,7 +8429,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v9-v115-semantic-shield';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v10-v131-tie-regional-commitment';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -9206,6 +9206,42 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // must physically depart from its overnight base. This checks only the first
     // generated row of each REGIONAL owner-day; it does not rewrite chronology,
     // fixed transfers, day-trip ownership or any healthy downstream row.
+    // V131 · TIE REGIONAL COMMITMENT INTEGRITY GATE.
+    // TIE has already selected the executable regional corridor. A CORE/HIGH
+    // route_manifest stop may not silently disappear between that decision and
+    // the final physical rows. Only a genuine experience visit can satisfy the
+    // commitment; transport, titles, notes and utility rows cannot. OPTIONAL and
+    // DROP_FIRST remain intentionally disposable. Destination-agnostic by design.
+    const missingTieRegionalCommitments=[];
+    if(String(unit?.unit_type||'').startsWith('REGIONAL')){
+      for(const day of unitDays){
+        const directive=(unit?.tie_structure?.day_directives||[]).find(d=>Number(d?.day)===Number(day))||null;
+        const manifest=Array.isArray(directive?.route_manifest)
+          ? directive.route_manifest
+          : (unitDays.length===1&&Array.isArray(unit?.tie_structure?.route_manifest)?unit.tie_structure.route_manifest:[]);
+        const required=manifest.filter(stop=>['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase())&&String(stop?.name||'').trim());
+        if(!required.length) continue;
+        const experienceRows=(rows||[]).filter(r=>Number(r?.day)===Number(day)&&_v111ExperienceVisitRow_(r));
+        for(const stop of required){
+          const name=String(stop.name||'').trim();
+          const materialized=experienceRows.some(r=>
+            _arePoiAliases_(name,String(r?.to||'')) ||
+            _arePoiAliases_(name,String(r?.activity||''))
+          );
+          if(!materialized){
+            missingTieRegionalCommitments.push({
+              code:'MISSING_TIE_REGIONAL_COMMITMENT',
+              day:Number(day),
+              stay_unit_id:unit.id,
+              commitment:name,
+              priority:String(stop?.priority||'').toUpperCase(),
+              minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,
+              instruction:'Restore this TIE-committed CORE/HIGH regional experience as a real visit row on its owner day. Preserve healthy CORE/HIGH anchors and the coherent corridor; remove OPTIONAL/DROP_FIRST material first if capacity is needed. A transport row, title or textual mention does not satisfy this commitment.'
+            });
+          }
+        }
+      }
+    }
     const regionalFirstOrigin=[];
     if(String(unit?.unit_type||'').startsWith('REGIONAL')){
       for(const day of unitDays){
@@ -9229,7 +9265,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
     const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
-    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
+    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...missingTieRegionalCommitments,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
