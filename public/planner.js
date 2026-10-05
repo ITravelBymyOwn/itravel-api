@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V129-UX-SAFE-R2';
-const ITBMO_RUNTIME_ASSET='planner.js?v=250';
+const ITBMO_RUNTIME_BUILD='V130';
+const ITBMO_RUNTIME_ASSET='planner.js?v=260';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6942,6 +6942,41 @@ function _v112MissingProtectedAnchors_(manifest=[],rows=[]){
   return missing;
 }
 
+// V130 · TIE regional commitment integrity gate. V129 already treats the
+// REGIONAL route_manifest as the executable strategic corridor, but local QA
+// previously validated only rows that existed. A CORE/HIGH manifest stop that
+// never materialized could therefore disappear without producing a finding.
+// Keep this deliberately narrow: only REGIONAL owner-days and only CORE/HIGH
+// manifest commitments are enforced. OPTIONAL/DROP_FIRST remain disposable.
+function _v130MissingRegionalCommitments_(unit={},rows=[]){
+  if(!String(unit?.unit_type||'').startsWith('REGIONAL')) return [];
+  const directives=unit?.tie_structure?.day_directives||[];
+  const byDay=_rowsByDayObject_(rows);
+  const missing=[];
+  for(const directive of directives){
+    const day=Number(directive?.day||0); if(!day)continue;
+    const commitments=(directive?.route_manifest||[]).filter(stop=>['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase())&&String(stop?.name||'').trim());
+    for(const stop of commitments){
+      const label=String(stop.name).trim();
+      const found=(byDay[day]||[]).some(r=>{
+        if(!_v111ExperienceVisitRow_(r)) return false;
+        return _arePoiAliases_(label,r?.to||'') || _arePoiAliases_(label,r?.activity||'');
+      });
+      if(!found){
+        missing.push({
+          code:'MISSING_TIE_REGIONAL_COMMITMENT',
+          day,
+          commitment:label,
+          priority:String(stop?.priority||'').toUpperCase(),
+          minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,
+          instruction:'Restore this TIE-selected CORE/HIGH regional commitment as a real experience row in the owner day. Preserve all healthy anchors and chronology. If capacity is tight, remove OPTIONAL/DROP_FIRST content before reducing or omitting this commitment.'
+        });
+      }
+    }
+  }
+  return missing;
+}
+
 function _v112RepairBlockRows_(rows=[],findings=[],scopeDays=[]){
   const fullDayCodes=new Set(['MISSING_DAY','MISSING_PHYSICAL_WINDOW','WRONG_OVERNIGHT_BASE']);
   if((findings||[]).some(f=>fullDayCodes.has(String(f?.code||'')))){
@@ -8064,7 +8099,7 @@ function _v3HardBlockingCodes_(){
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','WRONG_OVERNIGHT_BASE',
-    'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT'
+    'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT','MISSING_TIE_REGIONAL_COMMITMENT'
   ]);
 }
 
@@ -9243,7 +9278,8 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
     const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
-    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
+    const missingRegionalCommitments=_v130MissingRegionalCommitments_(unit,rows);
+    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks,...missingRegionalCommitments]});
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
@@ -15026,8 +15062,7 @@ function _tripStoryRequiredTimeOptions_(selected=''){const es=getLang()==='es';r
 function _tripStoryTimeStatusOptions_(selected='estimated'){const es=getLang()==='es';return [['confirmed',es?'Confirmado · ya tengo el horario':'Confirmed · I have the schedule'],['estimated',es?'Estimado · podré ajustarlo después':'Estimated · I can update it later']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
 function _tripStoryDaysOptions_(selected=1,transitOnly=false){
   const es=getLang()==='es';
-  // Native selector only: transit stays at the bottom, with 1, 2, 3... immediately above it.
-  return Array.from({length:30},(_,i)=>30-i).map(day=>`<option value="${day}" ${!transitOnly&&Number(selected)===day?'selected':''}>${day}</option>`).join('')+`<option class="gj-days-divider" value="" disabled>──────────</option><option class="gj-transit-option" value="transit" ${transitOnly?'selected':''}>${es?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'}</option>`;
+  return `<option value="transit" ${transitOnly?'selected':''}>${es?'Sólo estaré de tránsito':'Transit only'}</option>`+Array.from({length:30},(_,i)=>`<option value="${i+1}" ${!transitOnly&&Number(selected)===i+1?'selected':''}>${i+1}</option>`).join('');
 }
 function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};}
 function _tripStoryDraftKey_(){const who=String(currentUser?.id||currentUser?.email||'guest').replace(/[^a-z0-9_.@-]/gi,'_');return `itbmo_trip_story_draft_v1_${who}`;}
