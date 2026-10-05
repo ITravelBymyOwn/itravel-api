@@ -4,6 +4,27 @@
 
 export const TIE_SCHEMA_VERSION = 'ITBMO_TIE_STRUCTURE_V1';
 
+// V147 · TIE cross-day uniqueness guard. This is deliberately lexical and
+// destination-agnostic: it protects concrete manifest anchors from being owned by
+// two different regional days before parallel Stay generation begins.
+function _v147TieKey_(value=''){
+  return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function _v147TieManifestAlias_(a='',b=''){
+  const A=_v147TieKey_(a),B=_v147TieKey_(b);
+  if(!A||!B)return false;
+  if(A===B)return true;
+  // Containment is safe only for substantial labels. Do not collapse broad short
+  // words such as "coast" or "center" into unrelated experiences.
+  if(A.length>=8&&B.length>=8&&(A.includes(B)||B.includes(A)))return true;
+  const generic=new Set(['area','zona','region','regional','landscape','paisaje','coast','costa','route','ruta','valley','valle','center','centro']);
+  const aa=[...new Set(A.split(' ').filter(x=>x.length>=4&&!generic.has(x)))];
+  const bb=[...new Set(B.split(' ').filter(x=>x.length>=4&&!generic.has(x)))];
+  if(!aa.length||!bb.length)return false;
+  const Bset=new Set(bb);let common=0;aa.forEach(x=>{if(Bset.has(x))common++;});
+  return common>=2 && common/Math.min(aa.length,bb.length)>=0.8;
+}
+
 export function buildTieSystemPrompt(){
   return `You are ITBMO Travel Intelligence Engine (TIE), the strategic layer that decides WHAT physical travel structure should exist before another engine builds detailed itinerary rows.
 
@@ -120,7 +141,7 @@ RULES
 - Return one unit for every open day supplied, no missing/duplicate day.
 - Do not return units for blocked/user-fixed days.
 - Every REGIONAL unit needs a non-empty route_manifest. BASE units with meaningful tourism time should also use route_manifest to express the selected urban/local corridor when useful; do not manufacture stops for deliberate recovery/slack.
-- Avoid duplicate experiences across units and overlays.
+- Avoid duplicate experiences across units and overlays. CORE/HIGH route_manifest anchors are single-owner across REGIONAL days: once a meaningful POI/experience is assigned to one regional day, do not assign the same place or a semantic alias to another regional day. If a later day would substantially repeat an earlier regional corridor, choose the strongest feasible unused corridor/experience family instead; if no strong unused option exists, prefer a BASE_LIGHT/deliberately-light day rather than repeating icons. Different viewpoints or sub-areas count as distinct only when they deliver a genuinely different physical experience, not merely different wording.
 - NIGHT OVERLAY OWNER-DAY CONTRACT: preferred_day is the itinerary day whose evening/start owns the complete nocturnal experience. If that experience crosses midnight, every continuation row (experience, return, recovery directly belonging to that outing) remains owned by preferred_day even though its physical clock is on D+1. Never reinterpret post-midnight continuation as an itinerary unit/day N+1. The following day may only adapt its own start/pacing to the previous night finish.
 - experience_inventory must be compact and decision-useful, not an exhaustive attraction catalog.
 - Every selected defining/major inventory item needs owner_day matching an open day, a fixed user unit, or a night overlay; otherwise list it in uncovered_high_value with the reason.
@@ -147,6 +168,22 @@ export function validateTiePlan(plan, request){
     if(String(unit?.type||'').startsWith('REGIONAL') && !(Array.isArray(unit?.route_manifest)&&unit.route_manifest.length)) errors.push({code:'REGIONAL_WITHOUT_MANIFEST',day});
   }
   for(const day of openDays) if(!seen.has(day)) errors.push({code:'MISSING_OPEN_DAY',day});
+  // V147: parallel REGIONAL Stay generation cannot discover that TIE assigned the
+  // same major physical anchor to two different days. Reject that strategic plan
+  // here so the existing single bounded TIE repair call can reassign the later day
+  // before any itinerary rows are generated. CORE/HIGH only; OPTIONAL microstops do
+  // not invalidate an otherwise strong structure.
+  const ownedRegionalAnchors=[];
+  for(const unit of units.filter(u=>String(u?.type||'').startsWith('REGIONAL')).sort((a,b)=>Number(a?.day||0)-Number(b?.day||0))){
+    for(const stop of (Array.isArray(unit?.route_manifest)?unit.route_manifest:[])){
+      if(!['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()))continue;
+      const name=String(stop?.name||'').trim();if(!name)continue;
+      const prior=ownedRegionalAnchors.find(x=>x.day!==Number(unit?.day)&&_v147TieManifestAlias_(x.name,name));
+      if(prior){
+        errors.push({code:'DUPLICATE_REGIONAL_ANCHOR',day:Number(unit?.day),previous_day:prior.day,anchor:name,previous_anchor:prior.name,instruction:'Reassign this later regional day to a strong unused corridor/experience family. Preserve the earlier owner and do not solve the conflict by renaming the same physical experience.'});
+      }else ownedRegionalAnchors.push({day:Number(unit?.day),name});
+    }
+  }
   const lodgingAuthority=request?.lodging_authority||{};
   const baseStrategy=plan?.base_strategy||{};
   if(!['USER_FIXED','ITBMO_RECOMMEND'].includes(String(baseStrategy?.mode||''))) errors.push({code:'BAD_BASE_STRATEGY'});
