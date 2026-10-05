@@ -9233,3 +9233,21 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 
 /* V92 — minimized route builder must leave the Planner fully interactive. */
 .trip-story-overlay.is-minimized{display:none!important;pointer-events:none!important;visibility:hidden!important}
+
+
+/* =========================================================
+   V149 · UX-only shell rules
+   Golden Core generation is untouched.
+========================================================= */
+body.itbmo-builder-closed-clean .planner-stage-nav,
+body.itbmo-builder-closed-clean .planner-builder-intro,
+body.itbmo-builder-closed-clean #account-box,
+body.itbmo-builder-closed-clean .guided-journey-legacy,
+body.itbmo-builder-closed-clean #preferences-stage,
+body.itbmo-builder-closed-clean #planner-agent-flow,
+body.itbmo-builder-closed-clean #planner-post-generation{display:none!important;}
+body.itbmo-builder-closed-clean #guided-journey-entry{display:flex!important;}
+body.itbmo-builder-closed-clean #reset-planner{display:block!important;}
+.gj-resolvable-details.is-itbmo-resolved{opacity:.72;}
+.gj-resolvable-details.is-itbmo-resolved select:disabled,
+.gj-resolvable-details.is-itbmo-resolved input:disabled{background:#f3f7fa!important;color:#647789!important;cursor:not-allowed;}
