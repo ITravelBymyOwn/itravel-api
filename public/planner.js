@@ -22,7 +22,7 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V130.2';
+const ITBMO_RUNTIME_BUILD='V130.3';
 const ITBMO_RUNTIME_ASSET='planner.js?v=258';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
@@ -13999,8 +13999,35 @@ function showPostPaymentWelcome(){
   </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('button')?.addEventListener('click',()=>{
-    overlay.remove();showPreferencesStage();
-    requestAnimationFrame(()=>smoothAdvanceTo('#preferences-stage',{gap:92,center:false}));
+    // V130.3 · Modal handoff is atomic. The completed route builder must never
+    // remain as a live/hidden modal during the transition to Personalization.
+    // Retire only route-builder shells; the canonical Trip Story/state is kept.
+    overlay.remove();
+    try{
+      if(_tripStoryBuilderSession_?.overlay?.isConnected){
+        _tripStoryBuilderSession_.overlay.remove();
+      }
+      _tripStoryBuilderSession_=null;
+      document.querySelectorAll('.trip-story-minimized-fab').forEach(el=>el.remove());
+      document.body.classList.remove('trip-story-open');
+      _tripStorySetMinimizedState_(false);
+      _tripStorySetWorkspaceResume_(false);
+    }catch(err){ console.warn('[V130.3 PERSONALIZATION HANDOFF CLEANUP]',err); }
+
+    // The guided Personalization modal is the authoritative next surface.
+    // showPreferencesStage still prepares the underlying canonical state, but a
+    // rendering error in that legacy/underlying stage must not strand the user
+    // back on Planner.
+    try{ showPreferencesStage(); }
+    catch(err){
+      console.error('[V130.3 PREFERENCES STAGE PREP]',err);
+      try{ openGuidedPersonalizationJourney(); }catch(inner){ console.error('[V130.3 GUIDED PERSONALIZATION]',inner); }
+    }
+    requestAnimationFrame(()=>{
+      if(!document.querySelector('#guided-personalization-overlay')){
+        try{ openGuidedPersonalizationJourney(); }catch(err){ console.error('[V130.3 GUIDED PERSONALIZATION RAF]',err); }
+      }
+    });
   });
 }
 
