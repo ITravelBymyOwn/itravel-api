@@ -22,7 +22,7 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V139';
+const ITBMO_RUNTIME_BUILD='V140';
 const ITBMO_RUNTIME_ASSET='planner.js?v=258';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
@@ -6760,6 +6760,19 @@ function _v137SolveTemporalWindow_(rows=[],window={}){
     }
   }
 
+  // V140 hard postcondition: a feasible deterministic solve is not allowed to
+  // return a residual overlap. This converts precedence from a best-effort shift
+  // into an invariant. If a true fixed/window contradiction exists, defer without
+  // partially mutating the chain; otherwise every successor starts at/after the
+  // previous solved end.
+  for(let i=0;i<n;i++){
+    if(starts[i]==null)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'unsolved_row'};
+    if(i>0&&starts[i]<starts[i-1]+items[i-1].dur)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'precedence_postcondition'};
+    if(ws!=null&&starts[i]<ws)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'window_start_postcondition'};
+    if(we!=null&&starts[i]+items[i].dur>we)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'window_end_postcondition'};
+    if(items[i].locked&&starts[i]!==items[i].pref)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'fixed_clock_postcondition'};
+  }
+
   let moved=0,maxShift=0;
   for(let i=0;i<n;i++){
     const st=starts[i];if(st==null)continue;
@@ -6778,7 +6791,7 @@ function _v115IsCrossMidnightNightRow_(r={}){
   return s!=null&&e!=null&&e<=s;
 }
 function _v115AdaptiveUtilityCeiling_(role,rows=[]){
-  const peers=(rows||[]).filter(r=>_v110SemanticRole_(r)===role&&!_v115IsHardRow_(r)).map(_v110RowSpan_).filter(v=>v>=15&&v<=240);
+  const peers=(rows||[]).filter(r=>_v110SemanticRole_(r)===role&&!_v136HasTemporalAuthority_(r)).map(_v110RowSpan_).filter(v=>v>=15&&v<=240);
   const median=_v115Median_(peers);
   // The floor/ceiling are category safety rails, not destination knowledge. The
   // itinerary's own median is authoritative whenever enough peer evidence exists.
@@ -6867,7 +6880,7 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
   for(const role of ['meal','recovery','buffer']){
     const ceiling=_v115AdaptiveUtilityCeiling_(role,out); if(!ceiling)continue;
     for(const r of out){
-      if(_v110SemanticRole_(r)!==role||_v115IsHardRow_(r))continue;
+      if(_v110SemanticRole_(r)!==role||_v136HasTemporalAuthority_(r))continue;
       const span=_v110RowSpan_(r); if(span<=ceiling+30)continue;
       const start=_hhmmToMinutes_(r.start); if(start==null)continue;
       const oldEnd=r.end; r.end=_minutesToHHMM_(start+ceiling);
@@ -6952,7 +6965,17 @@ function _v138NormalizeReturnContinuity_(rows=[]){
 function _v111CompileTimeline_(city,rows=[],contract={}){
   const out=JSON.parse(JSON.stringify(rows||[]));
   let shifts=0;
-  const byDay=_rowsByDayObject_(out);
+  // V140: temporal precedence comes from the generated semantic row sequence, not
+  // from clocks that may themselves overlap. _rowsByDayObject_ sorts by proposed
+  // start time, which can invert a physically intended chain exactly when the
+  // solver is needed most (e.g. meal -> access -> anchor -> return). Preserve the
+  // source sequence here; audits may still sort the already-solved clocks later.
+  const byDay={};
+  for(const row of out){
+    const d=Number(row?.day||1);
+    if(!byDay[d])byDay[d]=[];
+    byDay[d].push(row);
+  }
   for(const [dayKey,dayRows] of Object.entries(byDay)){
     const day=Number(dayKey);if(!day)continue;
     const membership=_v138WindowMembership_(dayRows,contract,day);
@@ -6989,14 +7012,14 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       }
       if(result.changed){
         shifts+=result.moved;
-        console.info(`[ITBMO V139 FULL-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
+        console.info(`[ITBMO V140 SEMANTIC-ORDER TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
       }else if(!result.feasible&&result.reason!=='night_chain'){
-        console.info(`[ITBMO V139 FULL-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
+        console.info(`[ITBMO V140 SEMANTIC-ORDER TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
       }
     }
   }
   const continuity=_v138NormalizeReturnContinuity_(out);
-  if(continuity.length)console.info(`[ITBMO V139 RETURN CONTINUITY] ${city}`,continuity);
+  if(continuity.length)console.info(`[ITBMO V140 RETURN CONTINUITY] ${city}`,continuity);
   return {rows:out,shifts};
 }
 
@@ -8544,7 +8567,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v18-v139-deterministic-convergence';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v19-v140-semantic-order-temporal-convergence';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
