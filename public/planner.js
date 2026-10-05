@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V143';
-const ITBMO_RUNTIME_ASSET='planner.js?v=261';
+const ITBMO_RUNTIME_BUILD='V145';
+const ITBMO_RUNTIME_ASSET='planner.js?v=264';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6450,16 +6450,6 @@ function _activityDurationBounds_(duration=''){
 // trip, but they must never masquerade as tourism richness or be duplicated merely
 // to fill a clock. Keep this deliberately language-tolerant and deterministic.
 function _v110SemanticRole_(row={}){
-  // V142: semantic identity is led by the activity itself. A meal/recovery row may
-  // legitimately include a short embedded movement in its transport field; treating
-  // that as a pure transfer prevented V129 Utility-Slack protection from capping
-  // inflated meals (the Cusco 3-hour lunch failure). Conversely, an activity whose
-  // action is explicitly a transfer remains transport even when its destination is a
-  // restaurant. This changes no attraction/night semantics.
-  const activity=_canonicalText_(String(row?.activity||''));
-  const activityIsTransfer=/^(transfer|traslado|transporte|transport|regreso|retorno|return|walk to|caminar hacia|paseo hacia|drive to|conducir hacia|train to|tren hacia|bus to|autobus hacia)\b/.test(activity);
-  if(!activityIsTransfer&&/\b(lunch|almuerzo|dinner|cena|breakfast|desayuno|meal|comida|brunch)\b/.test(activity)) return 'meal';
-  if(!activityIsTransfer&&/\b(rest|descanso|recovery|recuperacion|pausa|break)\b/.test(activity)) return 'recovery';
   if(_isPureTransportRow_(row)) return 'transfer';
   const t=_canonicalText_(`${row?.kind||''} ${row?.activity||''} ${row?.notes||''}`);
   if(/\b(cooking class|clase de cocina|food tour|tour gastronomico|tasting experience|experiencia gastronomica)\b/.test(t)) return 'experience';
@@ -6626,6 +6616,16 @@ function _v113TransitionReachesOrigin_(previousRow={},currentFrom=''){
   // explicitly named; never infer a hidden visit.
   return ['transfer','return','buffer'].includes(_v110SemanticRole_(previousRow)) && text.includes(target);
 }
+function _v113SemanticShiftRisk_(rows=[],delta=0){
+  const sensitive=[];
+  for(const r of rows||[]){
+    const rigidity=String(r?.reservation_rigidity||r?.commerce_context?.reservation_rigidity||'').toLowerCase();
+    const calendar=String(r?.calendar_sensitivity||r?.commerce_context?.calendar_sensitivity||'').toLowerCase();
+    const fixed=r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer';
+    if(fixed||rigidity==='high'||calendar==='high')sensitive.push(r);
+  }
+  return {blocked:delta>30&&sensitive.length>0,sensitive};
+}
 function _v111IssueKey_(e={}){
   const code=String(e?.code||'UNKNOWN');
   if(code==='GLOBAL_DUPLICATE_POI'){
@@ -6664,144 +6664,13 @@ function _v115IsHardRow_(r={}){
   const rigidity=String(r?.reservation_rigidity||r?.commerce_context?.reservation_rigidity||'').toLowerCase();
   return r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer'||rigidity==='high';
 }
-
-// V136 · DETERMINISTIC TEMPORAL AUTHORITY. Content importance, reservation
-// importance and exact-clock authority are separate dimensions. Only an explicit
-// traveler/fixed movement fact owns an immutable clock. Calendar/reservation
-// sensitivity remains semantically protected elsewhere, but a model-proposed clock
-// is a preference, not a hard equality constraint.
-function _v136HasTemporalAuthority_(r={}){
-  if(r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer')return true;
-  const cc=r?.commerce_context||{};
-  if(cc?.user_fixed===true||cc?.departure_user_fixed===true||cc?.arrival_user_fixed===true)return true;
-  const source=String(cc?.source||r?.source||'').trim().toUpperCase();
-  return source==='USER_FIXED';
-}
-
-// V143 · consolidated deterministic temporal solver, rebased around V129. For each authoritative planning window,
-// preserve the model/TIE row order and every row duration, then project proposed
-// clocks onto the feasible set: s[i+1] >= s[i] + duration[i]. Explicit fixed rows
-// are equality constraints; planning-window edges are hard bounds. This is a pure
-// arithmetic projection: it never invents, deletes, reorders or compresses content.
-// If the fixed constraints and durations are mathematically infeasible, it leaves
-// that window unchanged for the existing semantic audit/repair path.
-function _v137SolveTemporalWindow_(rows=[],window={}){
-  if(!Array.isArray(rows)||rows.length<2)return {changed:false,feasible:true,moved:0,max_shift:0};
-  const rawWs=_hhmmToMinutes_(window?.start),rawWe=_hhmmToMinutes_(window?.end);
-  let ws=rawWs,we=rawWe;
-  if(ws!=null&&we!=null&&we<=ws)we+=1440;
-  const items=[];
-  for(const row of rows){
-    if(_v114IsNightOverlayRow_(row))return {changed:false,feasible:false,moved:0,max_shift:0,reason:'night_chain'};
-    const ps=_v114LogicalStartMinutes_(row),pe=_v114LogicalEndMinutes_(row);
-    if(ps==null||pe==null||pe<=ps)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'invalid_interval'};
-    const locked=_v136HasTemporalAuthority_(row);
-    let dur=pe-ps;
-    // A malformed model clock must not turn a short movement into hours of travel.
-    // When the row itself carries a parseable transport-duration contract, use it
-    // as the deterministic duration bound for flexible pure-transport rows.
-    if(!locked&&_isPureTransportRow_(row)){
-      const tb=_transportBoundsFromField_(row?.transport||'');
-      if(tb&&Number.isFinite(tb.min)&&Number.isFinite(tb.max)&&(dur<tb.min||dur>tb.max)){
-        dur=Math.max(1,Math.round(tb.max));
-      }
-    }
-    items.push({row,pref:ps,dur,locked});
-  }
-  const n=items.length,starts=new Array(n);
-  const locked=[];for(let i=0;i<n;i++)if(items[i].locked)locked.push(i);
-
-  // Solve each flexible segment between true temporal-authority anchors. Missing
-  // window edges are OPEN boundaries, never a reason to defer arithmetic repair.
-  // With an open left edge we preserve the first proposed start; with an open
-  // right edge we propagate forward as far as required. A present window edge is
-  // still authoritative and is enforced exactly as a hard capacity boundary.
-  let leftIndex=-1;
-  let leftEnd=ws;
-  for(const li of [...locked,n]){
-    const hasRightLock=li<n;
-    const rightStart=hasRightLock?items[li].pref:we;
-    if(hasRightLock){
-      if(ws!=null&&rightStart<ws)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'fixed_outside_window'};
-      if(we!=null&&rightStart+items[li].dur>we)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'fixed_outside_window'};
-    }
-    const segment=[];for(let j=leftIndex+1;j<li;j++)segment.push(j);
-
-    // Establish the left physical cursor. If no authoritative lower boundary
-    // exists, the first flexible row's proposed start is the least-displacement
-    // anchor for the open chain; it may move only when a later true fixed anchor
-    // mathematically requires a backward fit.
-    let segLeft=leftEnd;
-    if(segLeft==null&&segment.length)segLeft=items[segment[0]].pref;
-    if(segLeft==null&&hasRightLock)segLeft=rightStart-segment.reduce((a,j)=>a+items[j].dur,0);
-
-    if(rightStart!=null){
-      const required=segment.reduce((a,j)=>a+items[j].dur,0);
-      if(segLeft!=null&&segLeft+required>rightStart){
-        // For a genuinely open left edge, fit backward against the next fixed/end
-        // boundary instead of calling the model. For a bounded left edge this is
-        // a real capacity contradiction and must remain semantic-repair territory.
-        if(leftEnd==null&&ws==null)segLeft=rightStart-required;
-        else return {changed:false,feasible:false,moved:0,max_shift:0,reason:'insufficient_capacity'};
-      }
-      const latest=new Map();let cursor=rightStart;
-      for(let k=segment.length-1;k>=0;k--){const j=segment[k];cursor-=items[j].dur;latest.set(j,cursor);}
-      cursor=segLeft;
-      for(const j of segment){
-        const lo=cursor,hi=latest.get(j);
-        if(lo!=null&&hi<lo)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'insufficient_capacity'};
-        const floor=lo==null?items[j].pref:lo;
-        const st=Math.min(hi,Math.max(floor,items[j].pref));
-        starts[j]=st;cursor=st+items[j].dur;
-      }
-    }else{
-      // Open-ended chain: pure forward projection. This is the common case that
-      // V136 incorrectly labelled `unbounded_window` and sent to Luna repair.
-      let cursor=segLeft;
-      for(const j of segment){
-        const st=Math.max(cursor==null?items[j].pref:cursor,items[j].pref);
-        starts[j]=st;cursor=st+items[j].dur;
-      }
-    }
-
-    if(hasRightLock){
-      starts[li]=items[li].pref;
-      leftEnd=starts[li]+items[li].dur;leftIndex=li;
-    }
-  }
-
-  // V140 hard postcondition: a feasible deterministic solve is not allowed to
-  // return a residual overlap. This converts precedence from a best-effort shift
-  // into an invariant. If a true fixed/window contradiction exists, defer without
-  // partially mutating the chain; otherwise every successor starts at/after the
-  // previous solved end.
-  for(let i=0;i<n;i++){
-    if(starts[i]==null)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'unsolved_row'};
-    if(i>0&&starts[i]<starts[i-1]+items[i-1].dur)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'precedence_postcondition'};
-    if(ws!=null&&starts[i]<ws)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'window_start_postcondition'};
-    if(we!=null&&starts[i]+items[i].dur>we)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'window_end_postcondition'};
-    if(items[i].locked&&starts[i]!==items[i].pref)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'fixed_clock_postcondition'};
-  }
-
-  let moved=0,maxShift=0;
-  for(let i=0;i<n;i++){
-    const st=starts[i];if(st==null)continue;
-    const delta=Math.abs(st-items[i].pref);
-    if(delta>0){
-      items[i].row.start=_minutesToHHMM_(st);
-      items[i].row.end=_minutesToHHMM_(st+items[i].dur);
-      moved++;maxShift=Math.max(maxShift,delta);
-    }
-  }
-  return {changed:moved>0,feasible:true,moved,max_shift:maxShift,open_start:ws==null,open_end:we==null};
-}
 function _v115IsCrossMidnightNightRow_(r={}){
   if(!_v114IsNightOverlayRow_(r))return false;
   const s=_hhmmToMinutes_(r?.start),e=_hhmmToMinutes_(r?.end);
   return s!=null&&e!=null&&e<=s;
 }
 function _v115AdaptiveUtilityCeiling_(role,rows=[]){
-  const peers=(rows||[]).filter(r=>_v110SemanticRole_(r)===role&&!_v136HasTemporalAuthority_(r)).map(_v110RowSpan_).filter(v=>v>=15&&v<=240);
+  const peers=(rows||[]).filter(r=>_v110SemanticRole_(r)===role&&!_v115IsHardRow_(r)).map(_v110RowSpan_).filter(v=>v>=15&&v<=240);
   const median=_v115Median_(peers);
   // The floor/ceiling are category safety rails, not destination knowledge. The
   // itinerary's own median is authoritative whenever enough peer evidence exists.
@@ -6890,7 +6759,7 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
   for(const role of ['meal','recovery','buffer']){
     const ceiling=_v115AdaptiveUtilityCeiling_(role,out); if(!ceiling)continue;
     for(const r of out){
-      if(_v110SemanticRole_(r)!==role||_v136HasTemporalAuthority_(r))continue;
+      if(_v110SemanticRole_(r)!==role||_v115IsHardRow_(r))continue;
       const span=_v110RowSpan_(r); if(span<=ceiling+30)continue;
       const start=_hhmmToMinutes_(r.start); if(start==null)continue;
       const oldEnd=r.end; r.end=_minutesToHHMM_(start+ceiling);
@@ -6903,183 +6772,122 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
   return {rows:out,changed,events};
 }
 
-// V138 deterministic temporal compilation. The solver owns the COMPLETE physical
-// chain inside each planning window, including rows whose planning_window_id was
-// omitted by the model. V137 grouped only explicitly stamped rows; that allowed a
-// shifted anchor to leave an unstamped downstream transfer behind. V138 infers the
-// missing window membership from the authoritative day windows and contiguous row
-// sequence, then projects the whole chain transactionally. TIE order/content remain
-// untouched and NIGHT_OVERLAY stays under the sealed owner-day contract.
-function _v138WindowMembership_(dayRows=[],contract={},day=0){
-  const routeDay=(contract?.route_days||[]).find(d=>Number(d?.day)===Number(day));
-  const windows=Array.isArray(routeDay?.location_windows)?routeDay.location_windows:[];
-  // V141: NIGHT_OVERLAY is a parallel owner-day clock contract, never a reason to
-  // fragment the ordinary daytime physical chain. V140 counted the night window
-  // when deciding whether a day had a single authoritative daytime window; on an
-  // aurora day that turned one daytime chain into multiple tiny groups and let
-  // ordinary overlaps escape deterministic solving. Preserve the sealed V129 night
-  // chain by excluding it from ordinary-window membership altogether.
-  const ordinaryWindows=windows.filter(w=>String(w?.role||'').toUpperCase()!=='NIGHT_OVERLAY');
-  const entries=dayRows.map((row,index)=>{
-    const explicit=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'').trim();
-    let window=null;
-    if(explicit)window=windows.find(w=>String(w?.window_id||'')===explicit)||null;
-    if(!window)window=_v111WindowForRow_(row,contract);
-    const id=explicit||String(window?.window_id||'').trim();
-    return {row,index,id,window,explicit:Boolean(explicit)};
-  });
-  // V139: absence of a route-window object does NOT mean absence of a physical
-  // chain. Regional/model-owned days often arrive with valid clocks and ordering
-  // but no explicit location_windows metadata. Solve that ordinary daytime chain
-  // against open boundaries instead of falling through to local model repair.
-  // NIGHT_OVERLAY remains excluded and keeps its sealed owner-day chronology.
-  if(!ordinaryWindows.length){
-    const id=`day-${Number(day)||1}-open-chain`,window={window_id:id,start:null,end:null};
-    for(const e of entries)if(!_v114IsNightOverlayRow_(e.row)){e.id=id;e.window=window;}
-    return entries;
-  }
-  // If the day has exactly one authoritative window, every ordinary physical row
-  // belongs to it. This is the common BASE/regional shape and closes the V137 hole.
-  if(ordinaryWindows.length===1){
-    const only=ordinaryWindows[0],id=String(only?.window_id||'day-window');
-    for(const e of entries)if(!_v114IsNightOverlayRow_(e.row)){e.id=id;e.window=only;}
-    return entries;
-  }
-  // For multi-window days, fill only contiguous holes whose neighbouring evidence
-  // agrees. A leading/trailing hole may inherit its sole neighbour. Never bridge
-  // two different authoritative windows and never absorb NIGHT_OVERLAY rows.
-  for(let i=0;i<entries.length;i++){
-    const e=entries[i];if(e.id||_v114IsNightOverlayRow_(e.row))continue;
-    let left=null,right=null;
-    for(let j=i-1;j>=0;j--){if(_v114IsNightOverlayRow_(entries[j].row))break;if(entries[j].id){left=entries[j];break;}}
-    for(let j=i+1;j<entries.length;j++){if(_v114IsNightOverlayRow_(entries[j].row))break;if(entries[j].id){right=entries[j];break;}}
-    const donor=(left&&right&&left.id===right.id)?left:(!left&&right?right:(left&&!right?left:null));
-    if(donor){e.id=donor.id;e.window=donor.window;}
-  }
-  return entries;
-}
-function _v138NormalizeReturnContinuity_(rows=[]){
-  const byDay=_rowsByDayObject_(rows),events=[];
-  for(const [dayKey,arr] of Object.entries(byDay)){
-    for(let i=1;i<arr.length;i++){
-      const prev=arr[i-1],row=arr[i];
-      if(_v114IsNightOverlayRow_(row)||_v136HasTemporalAuthority_(row))continue;
-      if(_v110SemanticRole_(row)!=='return')continue;
-      const priorTo=String(prev?.to||'').trim(),from=String(row?.from||'').trim();
-      if(!priorTo||!from||_arePoiAliases_(priorTo,from))continue;
-      // A broad previous location is already the last physically established state.
-      // If a return starts from a different concrete POI without an intervening row,
-      // use that established state instead of implying an invisible visit/movement.
-      if(!_v111BroadPlace_(priorTo)||_v111BroadPlace_(from))continue;
-      const pe=_v114LogicalEndMinutes_(prev),rs=_v114LogicalStartMinutes_(row);
-      if(pe==null||rs==null||rs<pe)continue;
-      const old=row.from;row.from=priorTo;
-      events.push({day:Number(dayKey),row:i+1,from:old,to:priorTo});
-    }
-  }
-  return events;
-}
-
-// V144 · DEFINITIVE PHYSICAL PRECEDENCE COMPILER.
-// Raw model order and proposed clocks are preferences, not physical truth.
-// Build a destination-agnostic precedence graph from From→To continuity.
-function _v144PhysicalPrecedence_(rows=[]){
-  const input=[...(rows||[])]; if(input.length<2)return input;
-  const compatible=(a,b)=>a&&b&&(_arePoiAliases_(a,b)||_v111LocationsCompatible_(a,b,b)||_v111LocationsCompatible_(b,a,a));
-  const edgeScore=(a,b)=>{
-    if(!a||!b||a===b||_v114IsNightOverlayRow_(a)||_v114IsNightOverlayRow_(b))return -1;
-    const at=String(a?.to||'').trim(),bf=String(b?.from||'').trim();
-    if(!at||!bf)return -1;
-    if(_arePoiAliases_(at,bf))return 100;
-    return compatible(at,bf)?70:-1;
-  };
-  const n=input.length,indeg=new Array(n).fill(0),edges=Array.from({length:n},()=>[]);
-  for(let j=0;j<n;j++){
-    let best=-1,bestScore=-1;
-    for(let i=0;i<n;i++){
-      if(i===j)continue; const sc=edgeScore(input[i],input[j]);
-      if(sc>bestScore||(sc===bestScore&&sc>=0&&(best<0||i<best))){best=i;bestScore=sc;}
-    }
-    if(best>=0&&bestScore>=70){edges[best].push(j);indeg[j]++;}
-  }
-  const source=i=>Number.isFinite(Number(input[i]?._v143_source_order))?Number(input[i]._v143_source_order):i;
-  const available=[];for(let i=0;i<n;i++)if(indeg[i]===0)available.push(i);
-  available.sort((a,b)=>source(a)-source(b)||a-b);
-  const order=[];
-  while(available.length){
-    const i=available.shift();order.push(i);
-    for(const j of edges[i])if(--indeg[j]===0){available.push(j);available.sort((a,b)=>source(a)-source(b)||a-b);}
-  }
-  return order.length===n?order.map(i=>input[i]):input;
+// A cascade shift is safe only when the shift preserves the semantic shape of the
+// affected chain. This is intentionally conservative: unresolved collisions are
+// left for the existing scoped repair path instead of deterministically degrading
+// an otherwise strong itinerary.
+function _v115CascadeShiftRisk_(affected=[],delta=0){
+  const base=_v113SemanticShiftRisk_(affected,delta);
+  if(base.blocked)return {...base,reason:'rigid_or_calendar_sensitive'};
+  const roles=(affected||[]).map(_v110SemanticRole_);
+  if(delta>45&&roles.some(r=>['meal','recovery','buffer'].includes(r)))return {blocked:true,sensitive:affected.filter(r=>['meal','recovery','buffer'].includes(_v110SemanticRole_(r))),reason:'utility_cascade'};
+  const starts=(affected||[]).map(r=>_hhmmToMinutes_(r.start)).filter(v=>v!=null);
+  const ends=(affected||[]).map(r=>_hhmmToMinutes_(r.end)).filter(v=>v!=null);
+  if(delta>60&&starts.length&&ends.length&&Math.max(...ends)+delta>22*60+30)return {blocked:true,sensitive:affected,reason:'late_day_cascade'};
+  return {blocked:false,sensitive:[],reason:null};
 }
 
 function _v111CompileTimeline_(city,rows=[],contract={}){
-  const out=JSON.parse(JSON.stringify(rows||[]));
+  let out=JSON.parse(JSON.stringify(rows||[]));
   let shifts=0;
-  // V140: temporal precedence comes from the generated semantic row sequence, not
-  // from clocks that may themselves overlap. _rowsByDayObject_ sorts by proposed
-  // start time, which can invert a physically intended chain exactly when the
-  // solver is needed most (e.g. meal -> access -> anchor -> return). Preserve the
-  // source sequence here; audits may still sort the already-solved clocks later.
-  const byDay={};
-  for(const row of out){
-    const d=Number(row?.day||1);
-    if(!byDay[d])byDay[d]=[];
-    byDay[d].push(row);
-  }
-  for(const [dayKey,dayRows] of Object.entries(byDay)){
-    const day=Number(dayKey);if(!day)continue;
-    const membership=_v138WindowMembership_(dayRows,contract,day);
-    const groups=new Map();
-    let openRun=0,lastWasUnassigned=false;
-    for(const e of membership){
-      if(_v114IsNightOverlayRow_(e.row)){lastWasUnassigned=false;continue;}
-      // V139: stamped planning_window_id is enough to define chain ownership even
-      // when the contract copy no longer carries the corresponding window object.
-      // Likewise, a contiguous ordinary-row run with no window metadata is still a
-      // mathematically solvable open chain. Never send those overlaps to Luna.
-      let id=e.id;
-      let window=e.window;
-      if(!id){
-        if(!lastWasUnassigned)openRun++;
-        id=`day-${day}-open-run-${openRun}`;
-        window={window_id:id,start:null,end:null};
-        lastWasUnassigned=true;
-      }else{
-        lastWasUnassigned=false;
-        if(!window)window={window_id:id,start:null,end:null};
+  const byDay=_rowsByDayObject_(out);
+  // V126 Physical Chain Reconciler. V125 already instructs Luna to build every
+  // multi-anchor corridor as one dependency chain. This deterministic pre-pass
+  // closes only the arithmetic gap when a flexible downstream row nevertheless
+  // starts before its physical predecessor has ended. Unlike the legacy uniform
+  // cascade, propagation is slack-aware: each row moves only by the amount still
+  // required after natural gaps absorb the upstream delay. It never crosses an
+  // authoritative planning-window boundary, never touches NIGHT_OVERLAY chains,
+  // and never moves user-fixed/reservation-hard/calendar-hard rows. The existing
+  // DIC + audit/repair path remains the fallback for anything ambiguous.
+  for(const [dayKey,dayRowsRaw] of Object.entries(byDay)){
+    const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort(_v114LogicalRowCompare_);
+    for(let i=1;i<dayRows.length;i++){
+      const prev=dayRows[i-1],cur=dayRows[i];
+      if(_v114IsNightOverlayRow_(prev)||_v114IsNightOverlayRow_(cur))continue;
+      const prevEnd=_v114LogicalEndMinutes_(prev),curStart=_v114LogicalStartMinutes_(cur);
+      if(prevEnd==null||curStart==null||curStart>=prevEnd)continue;
+      const initialDelta=prevEnd-curStart;
+      if(initialDelta<=0||initialDelta>180)continue; // preserve V113's semantic-repair boundary.
+      const windowId=String(cur?.planning_window_id||cur?.commerce_context?.planning_window_id||'');
+      const prevWindowId=String(prev?.planning_window_id||prev?.commerce_context?.planning_window_id||'');
+      if(!windowId||!prevWindowId||windowId!==prevWindowId)continue;
+
+      const proposal=[]; let chainEnd=prevEnd,safe=true,maxShift=0;
+      for(let j=i;j<dayRows.length;j++){
+        const r=dayRows[j];
+        const rowWindow=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'');
+        if(rowWindow!==windowId||_v114IsNightOverlayRow_(r))break;
+        const rs=_v114LogicalStartMinutes_(r),re=_v114LogicalEndMinutes_(r);
+        if(rs==null||re==null||re<=rs){safe=false;break;}
+        if(rs>=chainEnd)break; // natural slack has fully absorbed the upstream delay.
+        const delta=chainEnd-rs;
+        if(delta<=0)break;
+        const calendar=String(r?.calendar_sensitivity||r?.commerce_context?.calendar_sensitivity||'').toLowerCase();
+        if(_v115IsHardRow_(r)||calendar==='high'){safe=false;break;}
+        const w=_v111WindowForRow_(r,contract),wend=_hhmmToMinutes_(w?.end);
+        const newEnd=re+delta;
+        if(wend!=null&&newEnd>wend){safe=false;break;}
+        proposal.push({row:r,start:rs+delta,end:newEnd,delta});
+        maxShift=Math.max(maxShift,delta);chainEnd=newEnd;
       }
-      if(!groups.has(id))groups.set(id,{rows:[],window});
-      const g=groups.get(id);g.rows.push(e.row);if(!g.window&&window)g.window=window;
-    }
-    for(const [windowId,g] of groups){
-      // V143 · SINGLE TEMPORAL AUTHORITY. Physical/semantic precedence comes from
-      // the V129/TIE generated chain captured before chronological normalization.
-      // Proposed clocks are preferences only. Sorting by a conflicting clock (V142)
-      // can invert activity -> transfer precedence and make the solver optimize the
-      // error itself. Use source precedence; the solver makes the clocks conform.
-      const sourceChain=g.rows.map((row,index)=>({row,index,source:Number.isFinite(Number(row?._v143_source_order))?Number(row._v143_source_order):index}))
-        .sort((a,b)=>a.source-b.source||a.index-b.index)
-        .map(x=>x.row);
-      const chain=_v144PhysicalPrecedence_(sourceChain);
-      if(chain.length<2)continue;
-      const result=_v137SolveTemporalWindow_(chain,g.window||{});
-      if(result.feasible){
-        // A feasible solve is authoritative even when no clock needed movement.
-        // Mark the complete chain so the legacy <=30 min micro-overlap helper cannot
-        // become a second temporal authority later in cleanup.
-        for(const r of chain)r._v138_temporal_solved=true;
-      }
-      if(result.changed){
-        shifts+=result.moved;
-        console.info(`[ITBMO V144 DEFINITIVE TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
-      }else if(!result.feasible&&result.reason!=='night_chain'){
-        console.info(`[ITBMO V144 DEFINITIVE TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
-      }
+      if(!safe||!proposal.length)continue;
+      const risk=_v115CascadeShiftRisk_(proposal.map(x=>x.row),maxShift);
+      if(risk.blocked)continue;
+      for(const x of proposal){x.row.start=_minutesToHHMM_(x.start);x.row.end=_minutesToHHMM_(x.end);}
+      shifts+=proposal.length;
+      console.info(`[ITBMO V126 PHYSICAL CHAIN] ${city} · day ${day} · reconciled ${proposal.length} row(s) · initial +${initialDelta} min · max +${maxShift} min`);
     }
   }
-  const continuity=_v138NormalizeReturnContinuity_(out);
-  if(continuity.length)console.info(`[ITBMO V143 RETURN CONTINUITY] ${city}`,continuity);
+  for(const [dayKey,dayRowsRaw] of Object.entries(byDay)){
+    const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort(_v114LogicalRowCompare_);
+    for(let i=1;i<dayRows.length;i++){
+      const prev=dayRows[i-1],cur=dayRows[i];
+      const ps=_hhmmToMinutes_(prev.start),pe=_hhmmToMinutes_(prev.end),cs=_hhmmToMinutes_(cur.start),ce=_hhmmToMinutes_(cur.end);
+      if(ps==null||pe==null||cs==null||ce==null)continue;
+      let prevEnd=pe;if(prevEnd<=ps)prevEnd+=1440;
+      let curStart=cs,curEnd=ce;if(curEnd<=curStart)curEnd+=1440;
+      if(curStart>=prevEnd)continue;
+      const delta=prevEnd-curStart;
+      // Pure arithmetic overlap: shift this row and the following flexible chain.
+      // Never move user-fixed/fixed-transfer rows; never push beyond a closed
+      // authoritative planning window. Large contradictions remain for semantic repair.
+      if(delta<=0||delta>180)continue;
+      // V112: propagate only inside the SAME authoritative planning window. A
+      // daytime arithmetic collision must never push a later night overlay (or a
+      // separate post-return window) and thereby make an otherwise solvable shift
+      // look unsafe. This is the Moray/Maras edge exposed by the V111 Cusco PDF.
+      const curWindow=String(cur?.planning_window_id||cur?.commerce_context?.planning_window_id||'');
+      const affected=[];
+      for(const r of dayRows.slice(i)){
+        const rowWindow=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'');
+        if(curWindow && rowWindow && rowWindow!==curWindow) break;
+        if(curWindow && !rowWindow) break;
+        affected.push(r);
+      }
+      if(!affected.length)continue;
+      if(affected.some(r=>String(r?.kind||'').toLowerCase()==='fixed_transfer'||r?.user_fixed===true||r?.fixed===true))continue;
+      const semanticRisk=_v115CascadeShiftRisk_(affected,delta);
+      if(semanticRisk.blocked){
+        console.info(`[ITBMO V117 DIC SEMANTIC GUARD] ${city} · day ${day} · held +${delta} min propagation · ${semanticRisk.reason||'semantic_risk'} · protected ${semanticRisk.sensitive.length} row(s)`);
+        continue;
+      }
+      let safe=true;
+      for(const r of affected){
+        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);if(rs==null||re==null){safe=false;break;}
+        let rend=re;if(rend<=rs)rend+=1440;
+        const w=_v111WindowForRow_(r,contract),wend=_hhmmToMinutes_(w?.end);
+        if(wend!=null&&rend+delta>wend){safe=false;break;}
+      }
+      if(!safe)continue;
+      for(const r of affected){
+        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);let rend=re;if(rend<=rs)rend+=1440;
+        r.start=_minutesToHHMM_(rs+delta);r.end=_minutesToHHMM_(rend+delta);
+      }
+      shifts++;
+      console.info(`[ITBMO V113 DIC TIMELINE] ${city} · day ${day} · propagated +${delta} min from row ${i+1}`);
+    }
+  }
   return {rows:out,shifts};
 }
 
@@ -7328,12 +7136,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       // Multiple local mobility recommendations are valid traveler guidance.
       // Timeline arithmetic already validates the declared duration range.
 
-      // V139: category dwell applies only to an actual experience row. Utility,
-      // transfer and return notes may legitimately mention a "guided tour" or
-      // museum they connect to; classifying those rows as the experience itself
-      // created false CATEGORY_DWELL_TOO_SHORT repairs (for example a post-tour
-      // return with no activity duration). Canonical semantic role is the gate.
-      const profile=_v110SemanticRole_(r)==='experience'?_activityProfile_(r):null;
+      const profile=_activityProfile_(r);
       const activityBounds=_activityDurationBounds_(r.duration);
       if(profile && (!activityBounds || activityBounds.min<profile.min)){
         errors.push({
@@ -8240,9 +8043,9 @@ function _v3AuditSummary_(report={}){
 }
 
 function _v3HardBlockingCodes_(){
-  // V133: HARD also includes a selected defining/major commitment that TIE explicitly made for
-  // a REGIONAL corridor but which never materialized as a real experience row.
-  // This is integrity of the authoritative plan, not a quality/opportunity quota.
+  // V111: HARD means physically impossible, missing authoritative structure, or
+  // direct user-constraint violation. Quality/opportunity findings never trigger
+  // regeneration by themselves.
   return new Set([
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','MISSING_TIE_REGIONAL_COMMITMENT','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
@@ -8453,25 +8256,20 @@ function _v3FitDurationToInterval_(row={}){
   const [transportLabel,activityLabel]=_durationLabels_();
   if(_isPureTransportRow_(row)){
     const existing=_transportBoundsFromField_(row.transport||'');
-    const safeTransport=_v126TransportText_(row.transport);
-    const transport=existing?safeTransport:[safeTransport,`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
+    const transport=existing?String(row.transport||'').trim():[String(row.transport||'').trim(),`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
     return {...row,transport,duration:''};
   }
   const transport=_transportBoundsFromField_(row.transport||'') || _durationBoundsMinutes_(_extractDurationPart_(row.duration,'transport'));
   const transportMinutes=Math.max(0,Math.min(span-1,Number(transport?.max||0)));
   const activityMinutes=Math.max(1,span-transportMinutes);
   const transportField=transportMinutes>0 && !_transportBoundsFromField_(row.transport||'')
-    ? [_v126TransportText_(row.transport),`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
-    : _v126TransportText_(row.transport);
+    ? [String(row.transport||'').trim(),`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
+    : String(row.transport||'').trim();
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
-  // V143 · V129 GOLDEN-CORE REBASE. Preserve the model/TIE physical sequence before
-  // any legacy chronological sorting. This sequence is the precedence graph; clocks
-  // are variables to solve, never a substitute for semantic/physical order.
-  const sourceRows=(rows||[]).map((r,index)=>({...r,_v143_source_order:index}));
-  let out=_v3EnforceHardRouteFacts_(sourceRows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
+  let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
@@ -8498,7 +8296,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       // The activity cannot start before the transfer that delivers the traveler
       // has ended. Keep the same transactional audit guard; fixed route facts are
       // not present in these model-owned rows and remain untouched downstream.
-      if(!row||!prev||_isPureTransportRow_(row)||row?._v138_temporal_solved===true||prev?._v138_temporal_solved===true)continue;
+      if(!row||!prev||_isPureTransportRow_(row))continue;
       const rs=_hhmmToMinutes_(row.start),re=_hhmmToMinutes_(row.end),pe=_hhmmToMinutes_(prev.end);
       if(rs==null||re==null||pe==null||re<=rs||pe<=rs)continue;
       const overlap=pe-rs;if(overlap<=0||overlap>30)continue;
@@ -8631,7 +8429,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v22-v144-definitive-temporal-solver';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v9-v115-semantic-shield';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
