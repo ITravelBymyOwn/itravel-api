@@ -787,7 +787,7 @@ function clearCachedUser(){
 function broadcastAuthState(state){
   try{ localStorage.setItem(ITBMO_AUTH_SYNC_KEY,JSON.stringify({state:String(state||''),ts:Date.now()})); }catch(_){}
 }
-function storeSessionToken(token, persistent=true){
+function storeSessionToken(token, persistent=true, {broadcast=true}={}){
   try{
     if(!token) return;
     if(persistent){
@@ -798,7 +798,7 @@ function storeSessionToken(token, persistent=true){
       localStorage.removeItem(ITBMO_SESSION_KEY);
     }
     localStorage.setItem(ITBMO_AUTH_OWNER_KEY,'planner');
-    broadcastAuthState('signed_in');
+    if(broadcast) broadcastAuthState('signed_in');
     setTimeout(()=>window.ITBMOFoundation?.syncAttribution?.(),0);
   }catch(_){}
 }
@@ -1239,7 +1239,7 @@ function openRequestedMyTripsView(){
 }
 function waitITBMO(ms){ return new Promise(resolve=>setTimeout(resolve,ms)); }
 
-async function restoreITBMOSession(){
+async function restoreITBMOSession({broadcast=true}={}){
   const callback=getSupabaseCallback();
   if(callback.error){ authReady=true; currentUser=null; renderAuthState(); setAccountMessage(callback.error,'error'); clearAuthCallbackFromUrl(); return; }
   if(callback.accessToken && callback.type === 'recovery'){
@@ -1264,7 +1264,7 @@ async function restoreITBMOSession(){
       const {response,data}=await postUserAction({action:'session',session_token:token});
       if(response.ok && data?.ok && data?.user){
         currentUser=data.user;
-        storeSessionToken(token,Boolean(currentUser.is_registered));
+        storeSessionToken(token,Boolean(currentUser.is_registered),{broadcast});
         authReady=true;
         renderAuthState();
         if(!openRequestedMyTripsView()) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
@@ -1443,7 +1443,7 @@ async function syncPlannerAuthFromAnotherTab(event){
   }
 
   if(token && (!currentUser || announcedState==='signed_in')){
-    await restoreITBMOSession();
+    await restoreITBMOSession({broadcast:false});
   }
 }
 
