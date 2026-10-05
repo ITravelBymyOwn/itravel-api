@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V146';
-const ITBMO_RUNTIME_ASSET='planner.js?v=265';
+const ITBMO_RUNTIME_BUILD='V147';
+const ITBMO_RUNTIME_ASSET='planner.js?v=266';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -9348,6 +9348,30 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
           v142ConcreteContainment(anchorName,String(r?.to||'')) ||
           v142ConcreteContainment(anchorName,String(r?.activity||''))
         );
+        // V147 · MANIFEST-TO-ROW EVIDENCE. Composite TIE commitments are semantic
+        // families/corridors, while route_manifest may use descriptive stop labels
+        // and the generated row may use the concrete POI name. Exact alias matching
+        // alone therefore produced false MISSING_TIE_REGIONAL_COMMITMENT repairs.
+        // Keep atomic named anchors strict; only multi-token manifest labels gain a
+        // conservative lexical bridge (>=2 distinctive shared tokens and >=50% of
+        // the smaller token set). This cannot make a missing single named anchor
+        // such as Ollantaytambo disappear behind another stop.
+        const v147MeaningfulTokens=(value)=>{
+          const stop=new Set(['activity','actividad','visit','visita','tour','recorrido','experience','experiencia','area','zona','region','regional','landscape','paisaje','the','and','with','from','toward','hacia','con','del','de','la','las','los','el','y','en','of','to']);
+          return [...new Set(_canonicalText_(value).split(' ').filter(t=>t.length>=4&&!stop.has(t)))];
+        };
+        const v147ManifestStopMaterialized=(stopName)=>{
+          if(rowMaterializes(stopName)) return true;
+          const a=v147MeaningfulTokens(stopName);
+          if(a.length<2) return false;
+          return realExperienceRows.some(r=>{
+            const b=v147MeaningfulTokens(`${r?.to||''} ${r?.activity||''}`);
+            if(b.length<2) return false;
+            const B=new Set(b); let common=0;
+            a.forEach(t=>{if(B.has(t))common++;});
+            return common>=2 && common/Math.min(a.length,b.length)>=0.5;
+          });
+        };
         const materializedAsExperience=(experienceName)=>{
           // Atomic selected experiences still require a direct real-experience match.
           if(rowMaterializes(experienceName)) return true;
@@ -9405,8 +9429,8 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
           // Atomic/multi-commitment days still require their direct inventory match,
           // so a genuinely missing named anchor (e.g. one commitment among several)
           // remains detectable.
-          const materializedCount=components.filter(stop=>rowMaterializes(String(stop.name||''))).length;
-          return requiredInventory.length===1 ? materializedCount>=2 : components.every(stop=>rowMaterializes(String(stop.name||'')));
+          const materializedCount=components.filter(stop=>v147ManifestStopMaterialized(String(stop.name||''))).length;
+          return requiredInventory.length===1 ? materializedCount>=2 : components.every(stop=>v147ManifestStopMaterialized(String(stop.name||'')));
         };
 
         for(const item of requiredInventory){
