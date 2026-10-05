@@ -1193,25 +1193,11 @@ function showEmpty(){
 function handoffToPlanner(){
   try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
 }
-function _focusExistingPlanner_(messageType=''){
-  try{
-    if(window.opener && !window.opener.closed && window.opener.location.origin===window.location.origin){
-      if(messageType) window.opener.postMessage({type:messageType},window.location.origin);
-      window.opener.focus();
-      return true;
-    }
-  }catch(_){ }
-  return false;
-}
 function backPlanner(){
   const params=new URLSearchParams();
   params.set('lang',lang);
   if(data?.trip_id) params.set('trip_id',data.trip_id);
   handoffToPlanner();
-  if(_focusExistingPlanner_()){
-    try{ window.close(); }catch(_){ }
-    return;
-  }
   window.location.replace(`./planner.html?${params.toString()}`);
 }
 function openMyTrips(){
@@ -1219,13 +1205,9 @@ function openMyTrips(){
   params.set('lang',lang);
   params.set('view','my-trips');
   if(data?.trip_id) params.set('trip_id',data.trip_id);
-  // Prefer the already-open Planner so Workspace navigation never creates a
-  // duplicate Planner tab or destroys a live Planner state.
+  // Navigation is not logout. Keep the shared session untouched and let the
+  // Planner render the history gate from the same authenticated trip.
   handoffToPlanner();
-  if(_focusExistingPlanner_('ITBMO_OPEN_MY_TRIPS')){
-    try{ window.close(); }catch(_){ }
-    return;
-  }
   window.location.assign(`./planner.html?${params.toString()}`);
 }
 
