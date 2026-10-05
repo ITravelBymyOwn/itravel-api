@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V137';
-const ITBMO_RUNTIME_ASSET='planner.js?v=256';
+const ITBMO_RUNTIME_BUILD='V138';
+const ITBMO_RUNTIME_ASSET='planner.js?v=257';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6880,35 +6880,97 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
   return {rows:out,changed,events};
 }
 
-// V137 deterministic temporal compilation. One arithmetic authority replaces the
-// overlapping V126 + legacy DIC cascade-shift passes for stamped planning windows.
-// Unstamped/ambiguous legacy shapes are deliberately left untouched and continue to
-// the existing audit path. This avoids multiple deterministic engines applying
-// conflicting notions of temporal rigidity to the same rows.
+// V138 deterministic temporal compilation. The solver owns the COMPLETE physical
+// chain inside each planning window, including rows whose planning_window_id was
+// omitted by the model. V137 grouped only explicitly stamped rows; that allowed a
+// shifted anchor to leave an unstamped downstream transfer behind. V138 infers the
+// missing window membership from the authoritative day windows and contiguous row
+// sequence, then projects the whole chain transactionally. TIE order/content remain
+// untouched and NIGHT_OVERLAY stays under the sealed owner-day contract.
+function _v138WindowMembership_(dayRows=[],contract={},day=0){
+  const routeDay=(contract?.route_days||[]).find(d=>Number(d?.day)===Number(day));
+  const windows=Array.isArray(routeDay?.location_windows)?routeDay.location_windows:[];
+  const entries=dayRows.map((row,index)=>{
+    const explicit=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'').trim();
+    let window=null;
+    if(explicit)window=windows.find(w=>String(w?.window_id||'')===explicit)||null;
+    if(!window)window=_v111WindowForRow_(row,contract);
+    const id=explicit||String(window?.window_id||'').trim();
+    return {row,index,id,window,explicit:Boolean(explicit)};
+  });
+  // If the day has exactly one authoritative window, every ordinary physical row
+  // belongs to it. This is the common BASE/regional shape and closes the V137 hole.
+  if(windows.length===1){
+    const only=windows[0],id=String(only?.window_id||'day-window');
+    for(const e of entries)if(!_v114IsNightOverlayRow_(e.row)){e.id=id;e.window=only;}
+    return entries;
+  }
+  // For multi-window days, fill only contiguous holes whose neighbouring evidence
+  // agrees. A leading/trailing hole may inherit its sole neighbour. Never bridge
+  // two different authoritative windows and never absorb NIGHT_OVERLAY rows.
+  for(let i=0;i<entries.length;i++){
+    const e=entries[i];if(e.id||_v114IsNightOverlayRow_(e.row))continue;
+    let left=null,right=null;
+    for(let j=i-1;j>=0;j--){if(_v114IsNightOverlayRow_(entries[j].row))break;if(entries[j].id){left=entries[j];break;}}
+    for(let j=i+1;j<entries.length;j++){if(_v114IsNightOverlayRow_(entries[j].row))break;if(entries[j].id){right=entries[j];break;}}
+    const donor=(left&&right&&left.id===right.id)?left:(!left&&right?right:(left&&!right?left:null));
+    if(donor){e.id=donor.id;e.window=donor.window;}
+  }
+  return entries;
+}
+function _v138NormalizeReturnContinuity_(rows=[]){
+  const byDay=_rowsByDayObject_(rows),events=[];
+  for(const [dayKey,arr] of Object.entries(byDay)){
+    for(let i=1;i<arr.length;i++){
+      const prev=arr[i-1],row=arr[i];
+      if(_v114IsNightOverlayRow_(row)||_v136HasTemporalAuthority_(row))continue;
+      if(_v110SemanticRole_(row)!=='return')continue;
+      const priorTo=String(prev?.to||'').trim(),from=String(row?.from||'').trim();
+      if(!priorTo||!from||_arePoiAliases_(priorTo,from))continue;
+      // A broad previous location is already the last physically established state.
+      // If a return starts from a different concrete POI without an intervening row,
+      // use that established state instead of implying an invisible visit/movement.
+      if(!_v111BroadPlace_(priorTo)||_v111BroadPlace_(from))continue;
+      const pe=_v114LogicalEndMinutes_(prev),rs=_v114LogicalStartMinutes_(row);
+      if(pe==null||rs==null||rs<pe)continue;
+      const old=row.from;row.from=priorTo;
+      events.push({day:Number(dayKey),row:i+1,from:old,to:priorTo});
+    }
+  }
+  return events;
+}
 function _v111CompileTimeline_(city,rows=[],contract={}){
   const out=JSON.parse(JSON.stringify(rows||[]));
   let shifts=0;
-  const groups=new Map();
-  // Preserve generation/TIE sequence. Do NOT sort by the clocks being repaired.
-  for(const r of out){
-    const day=Number(r?.day||0);
-    const windowId=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'').trim();
-    if(!day||!windowId||_v114IsNightOverlayRow_(r))continue;
-    const key=`${day}|${windowId}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);
-  }
-  for(const [key,chain] of groups){
-    if(chain.length<2)continue;
-    const probe=chain[0],window=_v111WindowForRow_(probe,contract);
-    if(!window)continue;
-    const result=_v137SolveTemporalWindow_(chain,window);
-    if(result.changed){
-      shifts+=result.moved;
-      const day=Number(probe?.day||0);
-      console.info(`[ITBMO V137 TEMPORAL SOLVER] ${city} · day ${day} · ${String(probe?.planning_window_id||'window')} · reconciled ${result.moved} row(s) · max displacement ${result.max_shift} min`);
-    }else if(!result.feasible&&result.reason!=='night_chain'){
-      console.info(`[ITBMO V137 TEMPORAL SOLVER] ${city} · ${key} · deterministic solve deferred · ${result.reason}`);
+  const byDay=_rowsByDayObject_(out);
+  for(const [dayKey,dayRows] of Object.entries(byDay)){
+    const day=Number(dayKey);if(!day)continue;
+    const membership=_v138WindowMembership_(dayRows,contract,day);
+    const groups=new Map();
+    for(const e of membership){
+      if(!e.id||_v114IsNightOverlayRow_(e.row))continue;
+      if(!groups.has(e.id))groups.set(e.id,{rows:[],window:e.window});
+      const g=groups.get(e.id);g.rows.push(e.row);if(!g.window&&e.window)g.window=e.window;
+    }
+    for(const [windowId,g] of groups){
+      const chain=g.rows;if(chain.length<2||!g.window)continue;
+      const result=_v137SolveTemporalWindow_(chain,g.window);
+      if(result.feasible){
+        // A feasible solve is authoritative even when no clock needed movement.
+        // Mark the complete chain so the legacy <=30 min micro-overlap helper cannot
+        // become a second temporal authority later in cleanup.
+        for(const r of chain)r._v138_temporal_solved=true;
+      }
+      if(result.changed){
+        shifts+=result.moved;
+        console.info(`[ITBMO V138 FULL-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
+      }else if(!result.feasible&&result.reason!=='night_chain'){
+        console.info(`[ITBMO V138 FULL-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
+      }
     }
   }
+  const continuity=_v138NormalizeReturnContinuity_(out);
+  if(continuity.length)console.info(`[ITBMO V138 RETURN CONTINUITY] ${city}`,continuity);
   return {rows:out,shifts};
 }
 
@@ -8317,7 +8379,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       // The activity cannot start before the transfer that delivers the traveler
       // has ended. Keep the same transactional audit guard; fixed route facts are
       // not present in these model-owned rows and remain untouched downstream.
-      if(!row||!prev||_isPureTransportRow_(row))continue;
+      if(!row||!prev||_isPureTransportRow_(row)||row?._v138_temporal_solved===true||prev?._v138_temporal_solved===true)continue;
       const rs=_hhmmToMinutes_(row.start),re=_hhmmToMinutes_(row.end),pe=_hhmmToMinutes_(prev.end);
       if(rs==null||re==null||pe==null||re<=rs||pe<=rs)continue;
       const overlap=pe-rs;if(overlap<=0||overlap>30)continue;
@@ -8450,7 +8512,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v16-v137-open-boundary-temporal-solver';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v17-v138-full-chain-temporal-propagation';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
