@@ -15055,6 +15055,14 @@ function _bindTripStoryDaysPicker_(root){
     const value=String(btn.dataset.gjDayValue||'');
     if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
     native.value=value;
+    // Keep the custom trigger synchronized with the canonical select BEFORE the
+    // existing ITBMO change flow runs. V129's original native select displayed
+    // its own selected value automatically; the custom visual trigger must do
+    // that explicitly.
+    const label=trigger.querySelector('span:first-child');
+    if(label)label.textContent=value==='transit'?(getLang()==='es'?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'):value;
+    menu.querySelectorAll('[data-gj-day-value]').forEach(option=>option.setAttribute('aria-selected',String(option.dataset.gjDayValue)===value?'true':'false'));
+    close();
     native.dispatchEvent(new Event('change',{bubbles:true}));
   });
   // Keyboard/click fallback for accessibility and browsers without PointerEvent.
@@ -15065,6 +15073,10 @@ function _bindTripStoryDaysPicker_(root){
     if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
     if(native.value===value){close();return;}
     native.value=value;
+    const label=trigger.querySelector('span:first-child');
+    if(label)label.textContent=value==='transit'?(getLang()==='es'?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'):value;
+    menu.querySelectorAll('[data-gj-day-value]').forEach(option=>option.setAttribute('aria-selected',String(option.dataset.gjDayValue)===value?'true':'false'));
+    close();
     native.dispatchEvent(new Event('change',{bubbles:true}));
   });
   picker.addEventListener('focusout',()=>setTimeout(()=>{if(!picker.contains(document.activeElement))close();},0));
