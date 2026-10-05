@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V135';
-const ITBMO_RUNTIME_ASSET='planner.js?v=254';
+const ITBMO_RUNTIME_BUILD='V136';
+const ITBMO_RUNTIME_ASSET='planner.js?v=255';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6616,16 +6616,6 @@ function _v113TransitionReachesOrigin_(previousRow={},currentFrom=''){
   // explicitly named; never infer a hidden visit.
   return ['transfer','return','buffer'].includes(_v110SemanticRole_(previousRow)) && text.includes(target);
 }
-function _v113SemanticShiftRisk_(rows=[],delta=0){
-  const sensitive=[];
-  for(const r of rows||[]){
-    const rigidity=String(r?.reservation_rigidity||r?.commerce_context?.reservation_rigidity||'').toLowerCase();
-    const calendar=String(r?.calendar_sensitivity||r?.commerce_context?.calendar_sensitivity||'').toLowerCase();
-    const fixed=r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer';
-    if(fixed||rigidity==='high'||calendar==='high')sensitive.push(r);
-  }
-  return {blocked:delta>30&&sensitive.length>0,sensitive};
-}
 function _v111IssueKey_(e={}){
   const code=String(e?.code||'UNKNOWN');
   if(code==='GLOBAL_DUPLICATE_POI'){
@@ -6665,32 +6655,80 @@ function _v115IsHardRow_(r={}){
   return r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer'||rigidity==='high';
 }
 
-// V135 · TEMPORAL AUTHORITY CONTRACT. Reservation importance and clock authority
-// are different dimensions. A generated row may be reservation-important (for
-// example a ticketed anchor or a recommended transport booking) without owning an
-// immutable clock. Only traveler/fixed movement authority or a genuinely
-// calendar-sensitive row may stop deterministic arithmetic reconciliation. Keep
-// _v115IsHardRow_ unchanged because Semantic Shield and repair conservation still
-// use reservation rigidity to protect CONTENT; this narrower predicate is only for
-// V126 timeline movement.
-function _v135HasTemporalAuthority_(r={}){
+// V136 · DETERMINISTIC TEMPORAL AUTHORITY. Content importance, reservation
+// importance and exact-clock authority are separate dimensions. Only an explicit
+// traveler/fixed movement fact owns an immutable clock. Calendar/reservation
+// sensitivity remains semantically protected elsewhere, but a model-proposed clock
+// is a preference, not a hard equality constraint.
+function _v136HasTemporalAuthority_(r={}){
   if(r?.user_fixed===true||r?.fixed===true||String(r?.kind||'').toLowerCase()==='fixed_transfer')return true;
   const cc=r?.commerce_context||{};
   if(cc?.user_fixed===true||cc?.departure_user_fixed===true||cc?.arrival_user_fixed===true)return true;
   const source=String(cc?.source||r?.source||'').trim().toUpperCase();
-  if(source==='USER_FIXED')return true;
-  const calendar=String(r?.calendar_sensitivity||cc?.calendar_sensitivity||'').toLowerCase();
-  return calendar==='high';
+  return source==='USER_FIXED';
 }
-function _v135TemporalCascadeShiftRisk_(affected=[],delta=0){
-  const sensitive=(affected||[]).filter(_v135HasTemporalAuthority_);
-  if(sensitive.length)return {blocked:true,sensitive,reason:'temporal_authority'};
-  const roles=(affected||[]).map(_v110SemanticRole_);
-  if(delta>45&&roles.some(role=>['meal','recovery','buffer'].includes(role)))return {blocked:true,sensitive:affected.filter(r=>['meal','recovery','buffer'].includes(_v110SemanticRole_(r))),reason:'utility_cascade'};
-  const ends=(affected||[]).map(r=>_v114LogicalEndMinutes_(r)).filter(v=>v!=null);
-  if(delta>60&&ends.length&&Math.max(...ends)+delta>22*60+30)return {blocked:true,sensitive:affected,reason:'late_day_cascade'};
-  return {blocked:false,sensitive:[],reason:null};
+
+// V136 · Constraint-Based Temporal Solver. For each authoritative planning window,
+// preserve the model/TIE row order and every row duration, then project proposed
+// clocks onto the feasible set: s[i+1] >= s[i] + duration[i]. Explicit fixed rows
+// are equality constraints; planning-window edges are hard bounds. This is a pure
+// arithmetic projection: it never invents, deletes, reorders or compresses content.
+// If the fixed constraints and durations are mathematically infeasible, it leaves
+// that window unchanged for the existing semantic audit/repair path.
+function _v136SolveTemporalWindow_(rows=[],window={}){
+  if(!Array.isArray(rows)||rows.length<2)return {changed:false,feasible:true,moved:0,max_shift:0};
+  const ws=_hhmmToMinutes_(window?.start),we0=_hhmmToMinutes_(window?.end);
+  if(ws==null||we0==null)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'unbounded_window'};
+  let we=we0;if(we<=ws)we+=1440;
+  const items=[];
+  for(const row of rows){
+    if(_v114IsNightOverlayRow_(row))return {changed:false,feasible:false,moved:0,max_shift:0,reason:'night_chain'};
+    const ps=_v114LogicalStartMinutes_(row),pe=_v114LogicalEndMinutes_(row);
+    if(ps==null||pe==null||pe<=ps)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'invalid_interval'};
+    items.push({row,pref:ps,dur:pe-ps,locked:_v136HasTemporalAuthority_(row)});
+  }
+  const n=items.length,starts=new Array(n);
+  const locked=[];for(let i=0;i<n;i++)if(items[i].locked)locked.push(i);
+  // Fixed rows must themselves be inside the authoritative window and leave enough
+  // physical capacity for all rows between consecutive hard boundaries.
+  let leftIndex=-1,leftEnd=ws;
+  for(const li of [...locked,n]){
+    const rightStart=li===n?we:items[li].pref;
+    if(li<n&&(rightStart<ws||rightStart+items[li].dur>we))return {changed:false,feasible:false,moved:0,max_shift:0,reason:'fixed_outside_window'};
+    const segment=[];for(let j=leftIndex+1;j<li;j++)segment.push(j);
+    const required=segment.reduce((a,j)=>a+items[j].dur,0);
+    if(leftEnd+required>rightStart)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'insufficient_capacity'};
+
+    // Backward latest-start envelope guarantees the segment can finish before the
+    // next hard boundary. Forward projection then keeps each proposed clock whenever
+    // possible, while eliminating overlaps with the minimum necessary displacement.
+    const latest=new Map();let cursor=rightStart;
+    for(let k=segment.length-1;k>=0;k--){const j=segment[k];cursor-=items[j].dur;latest.set(j,cursor);}
+    cursor=leftEnd;
+    for(const j of segment){
+      const lo=cursor,hi=latest.get(j);
+      if(hi<lo)return {changed:false,feasible:false,moved:0,max_shift:0,reason:'insufficient_capacity'};
+      const st=Math.min(hi,Math.max(lo,items[j].pref));
+      starts[j]=st;cursor=st+items[j].dur;
+    }
+    if(li<n){
+      starts[li]=items[li].pref;
+      leftEnd=starts[li]+items[li].dur;leftIndex=li;
+    }
+  }
+  let moved=0,maxShift=0;
+  for(let i=0;i<n;i++){
+    const st=starts[i];if(st==null)continue;
+    const delta=Math.abs(st-items[i].pref);
+    if(delta>0){
+      items[i].row.start=_minutesToHHMM_(st);
+      items[i].row.end=_minutesToHHMM_(st+items[i].dur);
+      moved++;maxShift=Math.max(maxShift,delta);
+    }
+  }
+  return {changed:moved>0,feasible:true,moved,max_shift:maxShift};
 }
+
 function _v115IsCrossMidnightNightRow_(r={}){
   if(!_v114IsNightOverlayRow_(r))return false;
   const s=_hhmmToMinutes_(r?.start),e=_hhmmToMinutes_(r?.end);
@@ -6799,119 +6837,33 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
   return {rows:out,changed,events};
 }
 
-// A cascade shift is safe only when the shift preserves the semantic shape of the
-// affected chain. This is intentionally conservative: unresolved collisions are
-// left for the existing scoped repair path instead of deterministically degrading
-// an otherwise strong itinerary.
-function _v115CascadeShiftRisk_(affected=[],delta=0){
-  const base=_v113SemanticShiftRisk_(affected,delta);
-  if(base.blocked)return {...base,reason:'rigid_or_calendar_sensitive'};
-  const roles=(affected||[]).map(_v110SemanticRole_);
-  if(delta>45&&roles.some(r=>['meal','recovery','buffer'].includes(r)))return {blocked:true,sensitive:affected.filter(r=>['meal','recovery','buffer'].includes(_v110SemanticRole_(r))),reason:'utility_cascade'};
-  const starts=(affected||[]).map(r=>_hhmmToMinutes_(r.start)).filter(v=>v!=null);
-  const ends=(affected||[]).map(r=>_hhmmToMinutes_(r.end)).filter(v=>v!=null);
-  if(delta>60&&starts.length&&ends.length&&Math.max(...ends)+delta>22*60+30)return {blocked:true,sensitive:affected,reason:'late_day_cascade'};
-  return {blocked:false,sensitive:[],reason:null};
-}
-
+// V136 deterministic temporal compilation. One arithmetic authority replaces the
+// overlapping V126 + legacy DIC cascade-shift passes for stamped planning windows.
+// Unstamped/ambiguous legacy shapes are deliberately left untouched and continue to
+// the existing audit path. This avoids multiple deterministic engines applying
+// conflicting notions of temporal rigidity to the same rows.
 function _v111CompileTimeline_(city,rows=[],contract={}){
-  let out=JSON.parse(JSON.stringify(rows||[]));
+  const out=JSON.parse(JSON.stringify(rows||[]));
   let shifts=0;
-  const byDay=_rowsByDayObject_(out);
-  // V126 Physical Chain Reconciler. V125 already instructs Luna to build every
-  // multi-anchor corridor as one dependency chain. This deterministic pre-pass
-  // closes only the arithmetic gap when a flexible downstream row nevertheless
-  // starts before its physical predecessor has ended. Unlike the legacy uniform
-  // cascade, propagation is slack-aware: each row moves only by the amount still
-  // required after natural gaps absorb the upstream delay. It never crosses an
-  // authoritative planning-window boundary, never touches NIGHT_OVERLAY chains,
-  // and never moves user-fixed/reservation-hard/calendar-hard rows. The existing
-  // DIC + audit/repair path remains the fallback for anything ambiguous.
-  for(const [dayKey,dayRowsRaw] of Object.entries(byDay)){
-    const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort(_v114LogicalRowCompare_);
-    for(let i=1;i<dayRows.length;i++){
-      const prev=dayRows[i-1],cur=dayRows[i];
-      if(_v114IsNightOverlayRow_(prev)||_v114IsNightOverlayRow_(cur))continue;
-      const prevEnd=_v114LogicalEndMinutes_(prev),curStart=_v114LogicalStartMinutes_(cur);
-      if(prevEnd==null||curStart==null||curStart>=prevEnd)continue;
-      const initialDelta=prevEnd-curStart;
-      if(initialDelta<=0||initialDelta>180)continue; // preserve V113's semantic-repair boundary.
-      const windowId=String(cur?.planning_window_id||cur?.commerce_context?.planning_window_id||'');
-      const prevWindowId=String(prev?.planning_window_id||prev?.commerce_context?.planning_window_id||'');
-      if(!windowId||!prevWindowId||windowId!==prevWindowId)continue;
-
-      const proposal=[]; let chainEnd=prevEnd,safe=true,maxShift=0;
-      for(let j=i;j<dayRows.length;j++){
-        const r=dayRows[j];
-        const rowWindow=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'');
-        if(rowWindow!==windowId||_v114IsNightOverlayRow_(r))break;
-        const rs=_v114LogicalStartMinutes_(r),re=_v114LogicalEndMinutes_(r);
-        if(rs==null||re==null||re<=rs){safe=false;break;}
-        if(rs>=chainEnd)break; // natural slack has fully absorbed the upstream delay.
-        const delta=chainEnd-rs;
-        if(delta<=0)break;
-        if(_v135HasTemporalAuthority_(r)){safe=false;break;}
-        const w=_v111WindowForRow_(r,contract),wend=_hhmmToMinutes_(w?.end);
-        const newEnd=re+delta;
-        if(wend!=null&&newEnd>wend){safe=false;break;}
-        proposal.push({row:r,start:rs+delta,end:newEnd,delta});
-        maxShift=Math.max(maxShift,delta);chainEnd=newEnd;
-      }
-      if(!safe||!proposal.length)continue;
-      const risk=_v135TemporalCascadeShiftRisk_(proposal.map(x=>x.row),maxShift);
-      if(risk.blocked)continue;
-      for(const x of proposal){x.row.start=_minutesToHHMM_(x.start);x.row.end=_minutesToHHMM_(x.end);}
-      shifts+=proposal.length;
-      console.info(`[ITBMO V126 PHYSICAL CHAIN] ${city} · day ${day} · reconciled ${proposal.length} row(s) · initial +${initialDelta} min · max +${maxShift} min`);
-    }
+  const groups=new Map();
+  // Preserve generation/TIE sequence. Do NOT sort by the clocks being repaired.
+  for(const r of out){
+    const day=Number(r?.day||0);
+    const windowId=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'').trim();
+    if(!day||!windowId||_v114IsNightOverlayRow_(r))continue;
+    const key=`${day}|${windowId}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);
   }
-  for(const [dayKey,dayRowsRaw] of Object.entries(byDay)){
-    const day=Number(dayKey); const dayRows=[...dayRowsRaw].sort(_v114LogicalRowCompare_);
-    for(let i=1;i<dayRows.length;i++){
-      const prev=dayRows[i-1],cur=dayRows[i];
-      const ps=_hhmmToMinutes_(prev.start),pe=_hhmmToMinutes_(prev.end),cs=_hhmmToMinutes_(cur.start),ce=_hhmmToMinutes_(cur.end);
-      if(ps==null||pe==null||cs==null||ce==null)continue;
-      let prevEnd=pe;if(prevEnd<=ps)prevEnd+=1440;
-      let curStart=cs,curEnd=ce;if(curEnd<=curStart)curEnd+=1440;
-      if(curStart>=prevEnd)continue;
-      const delta=prevEnd-curStart;
-      // Pure arithmetic overlap: shift this row and the following flexible chain.
-      // Never move user-fixed/fixed-transfer rows; never push beyond a closed
-      // authoritative planning window. Large contradictions remain for semantic repair.
-      if(delta<=0||delta>180)continue;
-      // V112: propagate only inside the SAME authoritative planning window. A
-      // daytime arithmetic collision must never push a later night overlay (or a
-      // separate post-return window) and thereby make an otherwise solvable shift
-      // look unsafe. This is the Moray/Maras edge exposed by the V111 Cusco PDF.
-      const curWindow=String(cur?.planning_window_id||cur?.commerce_context?.planning_window_id||'');
-      const affected=[];
-      for(const r of dayRows.slice(i)){
-        const rowWindow=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'');
-        if(curWindow && rowWindow && rowWindow!==curWindow) break;
-        if(curWindow && !rowWindow) break;
-        affected.push(r);
-      }
-      if(!affected.length)continue;
-      if(affected.some(r=>String(r?.kind||'').toLowerCase()==='fixed_transfer'||r?.user_fixed===true||r?.fixed===true))continue;
-      const semanticRisk=_v115CascadeShiftRisk_(affected,delta);
-      if(semanticRisk.blocked){
-        console.info(`[ITBMO V117 DIC SEMANTIC GUARD] ${city} · day ${day} · held +${delta} min propagation · ${semanticRisk.reason||'semantic_risk'} · protected ${semanticRisk.sensitive.length} row(s)`);
-        continue;
-      }
-      let safe=true;
-      for(const r of affected){
-        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);if(rs==null||re==null){safe=false;break;}
-        let rend=re;if(rend<=rs)rend+=1440;
-        const w=_v111WindowForRow_(r,contract),wend=_hhmmToMinutes_(w?.end);
-        if(wend!=null&&rend+delta>wend){safe=false;break;}
-      }
-      if(!safe)continue;
-      for(const r of affected){
-        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);let rend=re;if(rend<=rs)rend+=1440;
-        r.start=_minutesToHHMM_(rs+delta);r.end=_minutesToHHMM_(rend+delta);
-      }
-      shifts++;
-      console.info(`[ITBMO V113 DIC TIMELINE] ${city} · day ${day} · propagated +${delta} min from row ${i+1}`);
+  for(const [key,chain] of groups){
+    if(chain.length<2)continue;
+    const probe=chain[0],window=_v111WindowForRow_(probe,contract);
+    if(!window)continue;
+    const result=_v136SolveTemporalWindow_(chain,window);
+    if(result.changed){
+      shifts+=result.moved;
+      const day=Number(probe?.day||0);
+      console.info(`[ITBMO V136 TEMPORAL SOLVER] ${city} · day ${day} · ${String(probe?.planning_window_id||'window')} · reconciled ${result.moved} row(s) · max displacement ${result.max_shift} min`);
+    }else if(!result.feasible&&result.reason!=='night_chain'){
+      console.info(`[ITBMO V136 TEMPORAL SOLVER] ${city} · ${key} · deterministic solve deferred · ${result.reason}`);
     }
   }
   return {rows:out,shifts};
@@ -8455,7 +8407,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v14-v135-temporal-authority';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v15-v136-deterministic-temporal-solver';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
