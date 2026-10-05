@@ -15045,7 +15045,28 @@ function _bindTripStoryDaysPicker_(root){
   if(!native||!trigger||!menu)return;
   const close=()=>{menu.hidden=true;trigger.setAttribute('aria-expanded','false');};
   trigger.onclick=()=>{const opening=menu.hidden;if(opening){menu.hidden=false;trigger.setAttribute('aria-expanded','true');requestAnimationFrame(()=>{menu.scrollTop=menu.scrollHeight;});}else close();};
-  menu.querySelectorAll('[data-gj-day-value]').forEach(btn=>{btn.onclick=()=>{native.value=btn.dataset.gjDayValue||'1';native.dispatchEvent(new Event('change',{bubbles:true}));close();};});
+  // UX R4: commit the choice on pointer-down. This runs before focus changes can
+  // close the upward-opening menu, while preserving the canonical <select> and
+  // its existing change handler as the single source of truth.
+  menu.addEventListener('pointerdown',event=>{
+    const btn=event.target.closest?.('[data-gj-day-value]');
+    if(!btn||!menu.contains(btn))return;
+    event.preventDefault();
+    const value=String(btn.dataset.gjDayValue||'');
+    if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
+    native.value=value;
+    native.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  // Keyboard/click fallback for accessibility and browsers without PointerEvent.
+  menu.addEventListener('click',event=>{
+    const btn=event.target.closest?.('[data-gj-day-value]');
+    if(!btn||!menu.contains(btn))return;
+    const value=String(btn.dataset.gjDayValue||'');
+    if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
+    if(native.value===value){close();return;}
+    native.value=value;
+    native.dispatchEvent(new Event('change',{bubbles:true}));
+  });
   picker.addEventListener('focusout',()=>setTimeout(()=>{if(!picker.contains(document.activeElement))close();},0));
 }
 function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};}
