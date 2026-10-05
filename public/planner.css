@@ -9243,3 +9243,18 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .gj-choice--finish:hover{border-color:#16a9d3;box-shadow:0 12px 30px rgba(11,133,199,.16)}
 .gj-form select option.gj-transit-option{font-weight:900;color:#075d8b}
 .gj-form select option.gj-days-divider{color:#9aabba}
+
+
+/* V129 UX R3b · Days picker: transit is always visible at the bottom; 1,2,3... rise above it. */
+.gj-days-picker{position:relative;width:100%}
+.gj-days-picker__native{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}
+.gj-days-picker__trigger{width:100%;min-height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border:1px solid #cbd8e6;border-radius:12px;background:#fff;color:#12324d;font:inherit;text-align:left;cursor:pointer}
+.gj-days-picker__trigger:focus-visible{outline:3px solid rgba(17,156,203,.22);outline-offset:2px}
+.gj-days-picker__chevron{font-size:18px;color:#547189}
+.gj-days-picker__menu{position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:1200;max-height:min(430px,65vh);overflow-y:auto;background:#fff;border:1px solid #b9cadb;border-radius:14px;box-shadow:0 18px 45px rgba(15,48,73,.18);padding:6px}
+.gj-days-picker__option{display:block;width:100%;border:0;background:#fff;color:#12324d;text-align:left;padding:9px 12px;border-radius:8px;font:inherit;cursor:pointer}
+.gj-days-picker__option:hover,.gj-days-picker__option:focus-visible{background:#eef8fc;outline:none}
+.gj-days-picker__option[aria-selected="true"]{background:#e5f4fb;font-weight:800}
+.gj-days-picker__divider{height:1px;background:#b9cadb;margin:5px 8px}
+.gj-days-picker__option--transit{font-weight:900;color:#075d8b;background:#f1faff;position:sticky;bottom:0}
+.gj-days-picker__option--transit:hover,.gj-days-picker__option--transit:focus-visible{background:#dff3fb}
