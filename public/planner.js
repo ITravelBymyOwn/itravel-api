@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V147';
-const ITBMO_RUNTIME_ASSET='planner.js?v=266';
+const ITBMO_RUNTIME_BUILD='V148';
+const ITBMO_RUNTIME_ASSET='planner.js?v=267';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6550,7 +6550,7 @@ function _noteTemplateRatio_(rows=[]){
 
 function _auditSeverity_(error={}){
   const critical=new Set([
-    'MISSING_DAY','MISSING_TIE_REGIONAL_COMMITMENT','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
+    'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','NIGHT_OVERLAY_TOO_SHORT','MISSING_NIGHT_OVERLAY_EXECUTION','ORPHAN_NIGHT_CONTINUATION','SELECTED_ANCHOR_NOT_COMMITTED','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
     'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','WEEKDAY_DATE_MISMATCH',
@@ -6785,73 +6785,6 @@ function _v115CascadeShiftRisk_(affected=[],delta=0){
   const ends=(affected||[]).map(r=>_hhmmToMinutes_(r.end)).filter(v=>v!=null);
   if(delta>60&&starts.length&&ends.length&&Math.max(...ends)+delta>22*60+30)return {blocked:true,sensitive:affected,reason:'late_day_cascade'};
   return {blocked:false,sensitive:[],reason:null};
-}
-
-// V146 Causal Temporal Compiler (CTC). The model owns semantic intent and
-// approximate durations; code owns the flexible clock. CTC compiles each ordinary
-// authoritative planning window in model/source order, preserving durations and
-// natural slack while enforcing causal precedence. Fixed/reservation-hard rows are
-// immutable anchors. NIGHT_OVERLAY/cross-midnight windows are deliberately excluded.
-// A window is committed transactionally only when the whole chain is feasible;
-// otherwise the legacy scoped semantic-repair path receives the untouched rows.
-function _v146CausalTemporalCompile_(city,rows=[],contract={}){
-  const out=JSON.parse(JSON.stringify(rows||[]));
-  const groups=new Map();
-  for(let index=0;index<out.length;index++){
-    const r=out[index];
-    if(!Number.isFinite(Number(r?._v146_source_order)))r._v146_source_order=index;
-    const day=Number(r?.day||0);
-    const windowId=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'').trim();
-    if(!day||!windowId)continue;
-    const key=`${day}|${windowId}`;
-    if(!groups.has(key))groups.set(key,{day,windowId,rows:[]});
-    groups.get(key).rows.push(r);
-  }
-  let compiledWindows=0,movedRows=0,maxShift=0;
-  const infeasible=[];
-  for(const group of groups.values()){
-    const chain=[...group.rows].sort((a,b)=>Number(a._v146_source_order||0)-Number(b._v146_source_order||0));
-    if(chain.length<2)continue;
-    const routeDay=(contract?.route_days||[]).find(d=>Number(d?.day)===group.day);
-    const window=(routeDay?.location_windows||[]).find(w=>String(w?.window_id||'')===group.windowId)||null;
-    const role=String(window?.role||chain[0]?._itbmo_window_role||chain[0]?.commerce_context?._itbmo_window_role||'').toUpperCase();
-    const crosses=Boolean(window?.crosses_midnight||chain.some(r=>r?._itbmo_window_crosses_midnight||r?.commerce_context?._itbmo_window_crosses_midnight));
-    if(crosses||role==='NIGHT_OVERLAY'||chain.some(_v114IsNightOverlayRow_))continue;
-
-    const wStart=_hhmmToMinutes_(window?.start),wEnd=_hhmmToMinutes_(window?.end);
-    const proposal=[]; let cursor=null,reason=null;
-    for(const r of chain){
-      const start=_hhmmToMinutes_(r?.start),end=_hhmmToMinutes_(r?.end);
-      if(start==null||end==null){reason='invalid_clock';break;}
-      let duration=end-start;if(duration<=0)duration+=1440;
-      if(duration<=0||duration>1440){reason='invalid_duration';break;}
-      const hard=_v115IsHardRow_(r)||String(r?.calendar_sensitivity||r?.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high';
-      let target=start;
-      if(hard){
-        if(cursor!=null&&target<cursor){reason='hard_anchor_collision';break;}
-      }else{
-        if(wStart!=null&&target<wStart)target=wStart;
-        if(cursor!=null&&target<cursor)target=cursor;
-      }
-      const targetEnd=target+duration;
-      if(wEnd!=null&&targetEnd>wEnd){reason='window_capacity';break;}
-      proposal.push({row:r,start:target,end:targetEnd,shift:target-start,hard});
-      cursor=targetEnd;
-    }
-    if(reason){
-      infeasible.push({day:group.day,window_id:group.windowId,reason});
-      console.info(`[ITBMO V146 CTC INFEASIBLE] ${city} · day ${group.day} · ${group.windowId} · ${reason}`);
-      continue;
-    }
-    for(const x of proposal){
-      if(x.shift!==0){x.row.start=_minutesToHHMM_(x.start);x.row.end=_minutesToHHMM_(x.end);movedRows++;maxShift=Math.max(maxShift,Math.abs(x.shift));}
-      x.row._v146_ctc_compiled=true;
-      if(x.row.commerce_context&&typeof x.row.commerce_context==='object')x.row.commerce_context._v146_ctc_compiled=true;
-    }
-    compiledWindows++;
-    if(proposal.some(x=>x.shift!==0))console.info(`[ITBMO V146 CTC] ${city} · day ${group.day} · ${group.windowId} · moved ${proposal.filter(x=>x.shift!==0).length} row(s) · max +${Math.max(0,...proposal.map(x=>x.shift))} min`);
-  }
-  return {rows:out,compiledWindows,movedRows,maxShift,infeasible};
 }
 
 function _v111CompileTimeline_(city,rows=[],contract={}){
@@ -8114,7 +8047,7 @@ function _v3HardBlockingCodes_(){
   // direct user-constraint violation. Quality/opportunity findings never trigger
   // regeneration by themselves.
   return new Set([
-    'MISSING_DAY','MISSING_PHYSICAL_WINDOW','MISSING_TIE_REGIONAL_COMMITMENT','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
+    'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','WRONG_OVERNIGHT_BASE',
     'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT'
@@ -8340,11 +8273,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
-  // V146: compile flexible daytime clocks from causal/source order before legacy DIC.
-  // The legacy compiler remains as a conservative fallback for windows CTC cannot
-  // prove feasible; CTC does not add model/API calls and never touches night overlays.
-  const ctc=_v146CausalTemporalCompile_(city,out,contract); out=ctc.rows;
-  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115/V146: causal clock first, then canonical row semantics.
+  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115: timeline first, then canonical row semantics.
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
@@ -9277,182 +9206,6 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // must physically depart from its overnight base. This checks only the first
     // generated row of each REGIONAL owner-day; it does not rewrite chronology,
     // fixed transfers, day-trip ownership or any healthy downstream row.
-    // V134 · TIE SELECTED-ANCHOR EXECUTION INTEGRITY GATE.
-    // The authoritative semantic commitment is experience_inventory, not raw
-    // route_manifest prose. The manifest is an execution corridor and may legally
-    // contain movement/connective entries. Re-inferring "experience vs transport"
-    // from those labels caused V131/V132 false positives. TIE already made that
-    // semantic decision explicitly in experience_inventory, so consume it directly.
-    //
-    // Contract:
-    //   1) selected DEFINING/MAJOR experiences owned by a REGIONAL day must appear
-    //      as a real experience row on that owner day;
-    //   2) route_manifest remains authoritative for corridor order/priority/dwell,
-    //      but is never independently promoted into a sightseeing commitment;
-    //   3) a transport row/title/text mention cannot satisfy an experience;
-    //   4) OPTIONAL/supporting corridor material remains disposable.
-    // This closes the original missing-anchor hole without destination dictionaries,
-    // transport regexes or a second semantic classifier.
-    const missingTieRegionalCommitments=[];
-    if(String(unit?.unit_type||'').startsWith('REGIONAL')){
-      for(const day of unitDays){
-        const directive=(unit?.tie_structure?.day_directives||[]).find(d=>Number(d?.day)===Number(day))||null;
-        const manifest=Array.isArray(directive?.route_manifest)
-          ? directive.route_manifest
-          : (unitDays.length===1&&Array.isArray(unit?.tie_structure?.route_manifest)?unit.tie_structure.route_manifest:[]);
-        // V141 · GOLDEN NIGHT-OVERLAY AUTHORITY. A selected experience whose
-        // owner-day execution is already represented by an authoritative TIE night
-        // overlay is NOT a daytime REGIONAL commitment. V129 deliberately executes
-        // aurora as a NIGHT_OVERLAY (with complete owner-day/cross-midnight chain),
-        // and MISSING_NIGHT_OVERLAY_EXECUTION is the sole gate for that contract.
-        // Requiring the same experience again here created the V140 aurora repair/
-        // retry loop. This is generic to TIE overlays; no destination is hardcoded.
-        const ownerNightOverlays=(unit?.tie_structure?.night_overlays||[]).filter(o=>Number(o?.preferred_day||0)===Number(day));
-        const representedByNightOverlay=(item)=>ownerNightOverlays.some(o=>
-          (_tieAuroraOverlay_(o)&&_isAuroraActivityRow_({activity:String(item?.experience||'')})) ||
-          _arePoiAliases_(String(item?.experience||''),String(o?.identity||o?.type||''))
-        );
-        const requiredInventory=(unit?.tie_structure?.experience_inventory||[]).filter(item=>
-          item?.selected===true &&
-          Number(item?.owner_day||0)===Number(day) &&
-          ['defining','major'].includes(String(item?.significance||'').toLowerCase()) &&
-          String(item?.experience||'').trim() &&
-          !representedByNightOverlay(item)
-        );
-        if(!requiredInventory.length) continue;
-
-        const dayRows=(rows||[]).filter(r=>Number(r?.day)===Number(day));
-        const realExperienceRows=dayRows.filter(r=>{
-          // Judge the semantic action from activity prose itself. A legitimate visit
-          // may carry transport metadata/duration and therefore look "pure transport"
-          // to physical-row classifiers; conversely "Traslado a X" must not satisfy X.
-          const rowKind=String(r?.kind||'').trim().toLowerCase();
-          const activityRole=_v110SemanticRole_({activity:String(r?.activity||'')});
-          return rowKind!=='transport' && activityRole==='experience';
-        });
-        // V142: safe lexical containment for a concrete anchor embedded inside a
-        // broader TIE commitment label (e.g. "Ollantaytambo y tramo central...").
-        // Require the complete normalized concrete phrase (>=5 chars) to occur in
-        // the commitment or vice versa; generic/broad place labels never qualify.
-        // This is deterministic semantic recognition, not a destination dictionary.
-        const v142ConcreteContainment=(a,b)=>{
-          const ca=_canonicalText_(a),cb=_canonicalText_(b);
-          if(!ca||!cb||ca.length<5||cb.length<5)return false;
-          if(_v111BroadPlace_(a)||_v111BroadPlace_(b))return false;
-          return ca.includes(cb)||cb.includes(ca);
-        };
-        const rowMaterializes=(anchorName)=>realExperienceRows.some(r=>
-          _arePoiAliases_(anchorName,String(r?.to||'')) ||
-          _arePoiAliases_(anchorName,String(r?.activity||'')) ||
-          _arePoiAliases_(anchorName,`${r?.to||''} ${r?.activity||''}`) ||
-          v142ConcreteContainment(anchorName,String(r?.to||'')) ||
-          v142ConcreteContainment(anchorName,String(r?.activity||''))
-        );
-        // V147 · MANIFEST-TO-ROW EVIDENCE. Composite TIE commitments are semantic
-        // families/corridors, while route_manifest may use descriptive stop labels
-        // and the generated row may use the concrete POI name. Exact alias matching
-        // alone therefore produced false MISSING_TIE_REGIONAL_COMMITMENT repairs.
-        // Keep atomic named anchors strict; only multi-token manifest labels gain a
-        // conservative lexical bridge (>=2 distinctive shared tokens and >=50% of
-        // the smaller token set). This cannot make a missing single named anchor
-        // such as Ollantaytambo disappear behind another stop.
-        const v147MeaningfulTokens=(value)=>{
-          const stop=new Set(['activity','actividad','visit','visita','tour','recorrido','experience','experiencia','area','zona','region','regional','landscape','paisaje','the','and','with','from','toward','hacia','con','del','de','la','las','los','el','y','en','of','to']);
-          return [...new Set(_canonicalText_(value).split(' ').filter(t=>t.length>=4&&!stop.has(t)))];
-        };
-        const v147ManifestStopMaterialized=(stopName)=>{
-          if(rowMaterializes(stopName)) return true;
-          const a=v147MeaningfulTokens(stopName);
-          if(a.length<2) return false;
-          return realExperienceRows.some(r=>{
-            const b=v147MeaningfulTokens(`${r?.to||''} ${r?.activity||''}`);
-            if(b.length<2) return false;
-            const B=new Set(b); let common=0;
-            a.forEach(t=>{if(B.has(t))common++;});
-            return common>=2 && common/Math.min(a.length,b.length)>=0.5;
-          });
-        };
-        const materializedAsExperience=(experienceName)=>{
-          // Atomic selected experiences still require a direct real-experience match.
-          if(rowMaterializes(experienceName)) return true;
-
-          // V134 · COMPOSITE EXPERIENCE COVERAGE. TIE may intentionally express one
-          // selected experience as a family/circuit (for example "A with B and C")
-          // while route_manifest carries its concrete CORE/HIGH anchors separately.
-          // In that case the itinerary is semantically complete when at least two
-          // concrete manifest anchors belonging to that selected experience are each
-          // materialized as real experience rows. This consumes TIE's own structure;
-          // it does not infer destinations, transport classes or language keywords.
-          // Requiring >=2 components prevents an atomic anchor from being satisfied
-          // by one partial/name-overlap row. Supporting/OPTIONAL stops never count.
-          let components=manifest.filter(stop=>
-            ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
-            String(stop?.name||'').trim() &&
-            _arePoiAliases_(experienceName,String(stop.name||''))
-          );
-          // V139: TIE can name a regional circuit semantically ("coast/cascades/
-          // formations") while route_manifest names its concrete POIs. When that
-          // owner-day has exactly ONE selected defining/major commitment, the
-          // manifest itself is the authoritative decomposition of that commitment.
-          // Require at least two CORE/HIGH concrete anchors and require ALL of them
-          // to exist as real experience rows. This is stricter than fuzzy prose
-          // matching and avoids destination dictionaries while eliminating the
-          // false Costa Sur/Snaefellsnes repair loop seen in V138.
-          if(components.length<2 && requiredInventory.length===1){
-            const transportRows=dayRows.filter(r=>{
-              const rowKind=String(r?.kind||'').trim().toLowerCase();
-              return rowKind==='transport'||['transfer','return'].includes(_v110SemanticRole_(r));
-            });
-            const materializedAsMovement=(name)=>transportRows.some(r=>
-              _arePoiAliases_(name,String(r?.to||'')) ||
-              _arePoiAliases_(name,String(r?.from||'')) ||
-              _arePoiAliases_(name,`${r?.from||''} ${r?.to||''} ${r?.activity||''}`)
-            );
-            // Consume the complete CORE/HIGH executable manifest, but ignore an
-            // entry that the generated itinerary proves is connective movement
-            // rather than an experience (the V131 railway false-positive class).
-            // A genuinely missing anchor has no such movement evidence and remains
-            // required, so the original Ollantaytambo-type omission is still caught.
-            components=manifest.filter(stop=>
-              ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
-              String(stop?.name||'').trim() &&
-              !(materializedAsMovement(String(stop.name||''))&&!rowMaterializes(String(stop.name||'')))
-            );
-          }
-          if(components.length<2) return false;
-          // V141: for a single selected defining/major regional commitment, TIE may
-          // name the semantic circuit broadly while route_manifest enumerates its
-          // concrete CORE/HIGH POIs. Requiring EVERY manifest component made a
-          // healthy circuit fail when one supporting HIGH stop was legitimately
-          // absent. Two independently materialized CORE/HIGH experience anchors are
-          // sufficient evidence that the broad composite commitment was executed.
-          // Atomic/multi-commitment days still require their direct inventory match,
-          // so a genuinely missing named anchor (e.g. one commitment among several)
-          // remains detectable.
-          const materializedCount=components.filter(stop=>v147ManifestStopMaterialized(String(stop.name||''))).length;
-          return requiredInventory.length===1 ? materializedCount>=2 : components.every(stop=>v147ManifestStopMaterialized(String(stop.name||'')));
-        };
-
-        for(const item of requiredInventory){
-          const experience=String(item.experience||'').trim();
-          if(materializedAsExperience(experience)) continue;
-          const manifestStop=manifest.find(stop=>
-            ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
-            _arePoiAliases_(experience,String(stop?.name||''))
-          )||null;
-          missingTieRegionalCommitments.push({
-            code:'MISSING_TIE_REGIONAL_COMMITMENT',
-            day:Number(day),
-            stay_unit_id:unit.id,
-            commitment:experience,
-            priority:String(manifestStop?.priority||'CORE').toUpperCase(),
-            significance:String(item?.significance||'').toLowerCase(),
-            minimum_dwell_minutes:Number(manifestStop?.minimum_dwell_minutes||0)||null,
-            instruction:'Restore this TIE-selected defining/major regional experience as a real experience row on its owner day. Preserve other healthy defining/major anchors and the coherent corridor; reclaim OPTIONAL/DROP_FIRST/supporting material first if capacity is needed. Transport, titles, notes and textual mentions do not satisfy this selected experience.'
-          });
-        }
-      }
-    }
     const regionalFirstOrigin=[];
     if(String(unit?.unit_type||'').startsWith('REGIONAL')){
       for(const day of unitDays){
@@ -9476,7 +9229,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
     const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
-    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...missingTieRegionalCommitments,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
+    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
@@ -12341,11 +12094,7 @@ function _v39VisibleDuration_(row={}){
 }
 
 function _v3VisibleTransportLabel_(value){
-  // V139 presentation invariant: normalize structured mobility at the final
-  // traveler-facing boundary too. normalizeRow already flattens it, but local
-  // repair/merge may reintroduce an object after normalization. Never allow JS
-  // object coercion to leak as "[object Object]" into Planner/PDF/exports.
-  const raw=_v126TransportText_(value);
+  const raw=String(value||'').trim();
   if(!raw)return '';
   if(/^recomi[eé]ndame$/i.test(raw)||/^recommend$/i.test(raw)||/^recommend me$/i.test(raw)) return getLang()==='es'?'Por definir · ITBMO te ayudará a elegir':'To be decided · ITBMO will help you choose';
   return raw.replace(/\/(recomendado|recommended)/ig,'').replace(/\s{2,}/g,' ').trim();
