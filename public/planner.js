@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V145';
-const ITBMO_RUNTIME_ASSET='planner.js?v=264';
+const ITBMO_RUNTIME_BUILD='V146';
+const ITBMO_RUNTIME_ASSET='planner.js?v=265';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6787,6 +6787,73 @@ function _v115CascadeShiftRisk_(affected=[],delta=0){
   return {blocked:false,sensitive:[],reason:null};
 }
 
+// V146 Causal Temporal Compiler (CTC). The model owns semantic intent and
+// approximate durations; code owns the flexible clock. CTC compiles each ordinary
+// authoritative planning window in model/source order, preserving durations and
+// natural slack while enforcing causal precedence. Fixed/reservation-hard rows are
+// immutable anchors. NIGHT_OVERLAY/cross-midnight windows are deliberately excluded.
+// A window is committed transactionally only when the whole chain is feasible;
+// otherwise the legacy scoped semantic-repair path receives the untouched rows.
+function _v146CausalTemporalCompile_(city,rows=[],contract={}){
+  const out=JSON.parse(JSON.stringify(rows||[]));
+  const groups=new Map();
+  for(let index=0;index<out.length;index++){
+    const r=out[index];
+    if(!Number.isFinite(Number(r?._v146_source_order)))r._v146_source_order=index;
+    const day=Number(r?.day||0);
+    const windowId=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'').trim();
+    if(!day||!windowId)continue;
+    const key=`${day}|${windowId}`;
+    if(!groups.has(key))groups.set(key,{day,windowId,rows:[]});
+    groups.get(key).rows.push(r);
+  }
+  let compiledWindows=0,movedRows=0,maxShift=0;
+  const infeasible=[];
+  for(const group of groups.values()){
+    const chain=[...group.rows].sort((a,b)=>Number(a._v146_source_order||0)-Number(b._v146_source_order||0));
+    if(chain.length<2)continue;
+    const routeDay=(contract?.route_days||[]).find(d=>Number(d?.day)===group.day);
+    const window=(routeDay?.location_windows||[]).find(w=>String(w?.window_id||'')===group.windowId)||null;
+    const role=String(window?.role||chain[0]?._itbmo_window_role||chain[0]?.commerce_context?._itbmo_window_role||'').toUpperCase();
+    const crosses=Boolean(window?.crosses_midnight||chain.some(r=>r?._itbmo_window_crosses_midnight||r?.commerce_context?._itbmo_window_crosses_midnight));
+    if(crosses||role==='NIGHT_OVERLAY'||chain.some(_v114IsNightOverlayRow_))continue;
+
+    const wStart=_hhmmToMinutes_(window?.start),wEnd=_hhmmToMinutes_(window?.end);
+    const proposal=[]; let cursor=null,reason=null;
+    for(const r of chain){
+      const start=_hhmmToMinutes_(r?.start),end=_hhmmToMinutes_(r?.end);
+      if(start==null||end==null){reason='invalid_clock';break;}
+      let duration=end-start;if(duration<=0)duration+=1440;
+      if(duration<=0||duration>1440){reason='invalid_duration';break;}
+      const hard=_v115IsHardRow_(r)||String(r?.calendar_sensitivity||r?.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high';
+      let target=start;
+      if(hard){
+        if(cursor!=null&&target<cursor){reason='hard_anchor_collision';break;}
+      }else{
+        if(wStart!=null&&target<wStart)target=wStart;
+        if(cursor!=null&&target<cursor)target=cursor;
+      }
+      const targetEnd=target+duration;
+      if(wEnd!=null&&targetEnd>wEnd){reason='window_capacity';break;}
+      proposal.push({row:r,start:target,end:targetEnd,shift:target-start,hard});
+      cursor=targetEnd;
+    }
+    if(reason){
+      infeasible.push({day:group.day,window_id:group.windowId,reason});
+      console.info(`[ITBMO V146 CTC INFEASIBLE] ${city} · day ${group.day} · ${group.windowId} · ${reason}`);
+      continue;
+    }
+    for(const x of proposal){
+      if(x.shift!==0){x.row.start=_minutesToHHMM_(x.start);x.row.end=_minutesToHHMM_(x.end);movedRows++;maxShift=Math.max(maxShift,Math.abs(x.shift));}
+      x.row._v146_ctc_compiled=true;
+      if(x.row.commerce_context&&typeof x.row.commerce_context==='object')x.row.commerce_context._v146_ctc_compiled=true;
+    }
+    compiledWindows++;
+    if(proposal.some(x=>x.shift!==0))console.info(`[ITBMO V146 CTC] ${city} · day ${group.day} · ${group.windowId} · moved ${proposal.filter(x=>x.shift!==0).length} row(s) · max +${Math.max(0,...proposal.map(x=>x.shift))} min`);
+  }
+  return {rows:out,compiledWindows,movedRows,maxShift,infeasible};
+}
+
 function _v111CompileTimeline_(city,rows=[],contract={}){
   let out=JSON.parse(JSON.stringify(rows||[]));
   let shifts=0;
@@ -8273,7 +8340,11 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
-  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115: timeline first, then canonical row semantics.
+  // V146: compile flexible daytime clocks from causal/source order before legacy DIC.
+  // The legacy compiler remains as a conservative fallback for windows CTC cannot
+  // prove feasible; CTC does not add model/API calls and never touches night overlays.
+  const ctc=_v146CausalTemporalCompile_(city,out,contract); out=ctc.rows;
+  const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115/V146: causal clock first, then canonical row semantics.
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
