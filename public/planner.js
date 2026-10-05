@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V148';
-const ITBMO_RUNTIME_ASSET='planner.js?v=267';
+const ITBMO_RUNTIME_BUILD='V149';
+const ITBMO_RUNTIME_ASSET='planner.js?v=268';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -994,7 +994,7 @@ async function refreshPendingVerification(){
         stopPendingVerificationWatch();
         setAccountMessage(authCopy('confirmationComplete'),'success');
         renderAuthState();
-        setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+        enterFreshPlannerAfterAuth();
       }
     }
   }catch(err){ console.warn('ITBMO confirmation watch unavailable:',err); }
@@ -1145,7 +1145,7 @@ async function loginITBMOUser(){
   try{
     const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); return;
     }
     setAccountMessage(authCopy('loginFail'),'error');
   }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1162,7 +1162,7 @@ async function continueAsGuest(){
   try{
     const {response,data}=await postUserAction({action:'guest',name,email,...authTrackingPayload(),...legalPayload('guest')});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); return;
     }
     if(response.status===409 && data?.account_exists) setAccountMessage(authCopy('guestHasAccount'),'error');
     else if(response.status===403 && data?.guest_mismatch) setAccountMessage(authCopy('guestMismatch'),'error');
@@ -1199,7 +1199,7 @@ async function completeEmailConfirmation(accessToken){
   try{
     const {response,data}=await postUserAction({action:'complete_auth',access_token:accessToken});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); enterFreshPlannerAfterAuth(); return;
     }
     setAccountMessage(authCopy('confirmationFail'),'error');
   }catch(err){ console.error('ITBMO confirmation error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1267,7 +1267,7 @@ async function restoreITBMOSession({broadcast=true}={}){
         storeSessionToken(token,Boolean(currentUser.is_registered),{broadcast});
         authReady=true;
         renderAuthState();
-        if(!openRequestedMyTripsView()) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+        if(!openRequestedMyTripsView()) enterFreshPlannerAfterAuth();
         return;
       }
 
@@ -1294,7 +1294,7 @@ async function restoreITBMOSession({broadcast=true}={}){
   authReady=true;
   renderAuthState();
   if(currentUser){
-    if(!openRequestedMyTripsView()) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+    if(!openRequestedMyTripsView()) enterFreshPlannerAfterAuth();
   }
 }
 
@@ -1391,6 +1391,15 @@ function clearPlannerUIForLogout(){
   if(journeyHistoryGrid) journeyHistoryGrid.innerHTML='';
 
   updateAddCityButtonState();
+}
+
+// V149 UX · A fresh entry/login starts with a neutral Planner. Existing paid trips
+// remain available from My Trips; no previous planning draft is auto-hydrated.
+// This is UI/session lifecycle only and never deletes or mutates server-side trips.
+function enterFreshPlannerAfterAuth(){
+  clearPlannerUIForLogout();
+  renderAuthState();
+  document.body.classList.remove('itbmo-builder-closed-clean');
 }
 
 async function logoutITBMOUser(){
@@ -4338,8 +4347,8 @@ ${buildIntake()}
         notice:{
           title:es ? 'Esta consulta está fuera de tu viaje' : 'This question is outside your trip',
           message:es
-            ? `Info Chat está disponible para las ciudades de este itinerario: ${cities.join(', ') || 'las ciudades seleccionadas'}.${outside.length ? ` ${outside.join(', ')} no forma parte de este itinerario.` : ''} Los lugares, excursiones y day trips razonablemente relacionados con tus ciudades sí están incluidos.`
-            : `Info Chat is available for the cities in this itinerary: ${cities.join(', ') || 'your selected cities'}.${outside.length ? ` ${outside.join(', ')} is not part of this itinerary.` : ''} Places, excursions and reasonable day trips connected to your itinerary cities are included.`,
+            ? `El Asistente de viaje está disponible para las ciudades de este itinerario: ${cities.join(', ') || 'las ciudades seleccionadas'}.${outside.length ? ` ${outside.join(', ')} no forma parte de este itinerario.` : ''} Los lugares, excursiones y day trips razonablemente relacionados con tus ciudades sí están incluidos.`
+            : `Travel Concierge is available for the cities in this itinerary: ${cities.join(', ') || 'your selected cities'}.${outside.length ? ` ${outside.join(', ')} is not part of this itinerary.` : ''} Places, excursions and reasonable day trips connected to your itinerary cities are included.`,
           code:'INFO_CHAT_OUT_OF_SCOPE'
         }
       };
@@ -13498,21 +13507,21 @@ function _infoChatCopy_(){
   const es = getLang()==='es';
   return es ? {
     locked:'Disponible después del pago',
-    unlocked:'Info Chat incluido',
-    exhausted:'Límite de Info Chat alcanzado',
-    lockedUsage:'Info Chat bloqueado',
+    unlocked:'Asistente de viaje incluido',
+    exhausted:'Límite del Asistente de viaje alcanzado',
+    lockedUsage:'Asistente de viaje bloqueado',
     remaining:(n)=>`${n} consulta${n===1?'':'s'} disponible${n===1?'':'s'}`,
     placeholder:'Pregunta sobre las ciudades de tu viaje…',
-    lockedPlaceholder:'Info Chat se habilita después del pago',
+    lockedPlaceholder:'El Asistente de viaje se habilita después del pago',
     exhaustedPlaceholder:'Has utilizado las 10 consultas incluidas'
   } : {
     locked:'Available after payment',
-    unlocked:'Info Chat included',
-    exhausted:'Info Chat limit reached',
-    lockedUsage:'Info Chat locked',
+    unlocked:'Travel Concierge included',
+    exhausted:'Travel Concierge limit reached',
+    lockedUsage:'Travel Concierge locked',
     remaining:(n)=>`${n} quer${n===1?'y':'ies'} remaining`,
     placeholder:'Ask about the cities in your trip…',
-    lockedPlaceholder:'Info Chat unlocks after payment',
+    lockedPlaceholder:'Travel Concierge unlocks after payment',
     exhaustedPlaceholder:'You have used the 10 included queries'
   };
 }
@@ -13541,7 +13550,7 @@ function setInfoChatEntitlement({authorized=false, remaining=0, used=0, tripId=n
     btn.setAttribute('aria-disabled', String(!authorized || exhausted));
     btn.classList.toggle('is-locked',!authorized);
     btn.classList.toggle('is-unlocked',authorized && !exhausted);
-    btn.textContent = !authorized ? '🔒 Info Chat' : (exhausted ? '✓ Info Chat · 10/10' : `💬 Info Chat · ${safeRemaining}`);
+    btn.textContent = getLang()==='es' ? (!authorized ? '🔒 Asistente de viaje' : (exhausted ? '✓ Asistente de viaje · 10/10' : `💬 Asistente de viaje · ${safeRemaining}`)) : (!authorized ? '🔒 Travel Concierge' : (exhausted ? '✓ Travel Concierge · 10/10' : `💬 Travel Concierge · ${safeRemaining}`));
     btn.title = !authorized ? copy.locked : (exhausted ? copy.exhausted : copy.remaining(safeRemaining));
     btn.style.pointerEvents = (!authorized || exhausted) ? 'none' : 'auto';
     btn.style.opacity = (!authorized || exhausted) ? '0.62' : '1';
@@ -13940,8 +13949,8 @@ function showPostPaymentWelcome(){
     <div class="itbmo-postpay-icon">✓</div>
     <h3>${es?'¡Gracias por tu pago!':'Thank you for your payment!'}</h3>
     <p>${es
-      ? 'Info Chat ya está habilitado para ayudarte a investigar y resolver dudas sobre tu viaje. Antes de generar el itinerario, te pediremos algunos datos de hospedaje, transporte, preferencias y restricciones para personalizar cada destino y estancia.'
-      : 'Info Chat is now enabled to help you research and answer questions about your trip. Before generating the itinerary, we will ask for a few lodging, transport, preference and restriction details to personalize each destination and stay.'}</p>
+      ? 'El Asistente de viaje ya está habilitado para ayudarte a investigar y resolver dudas sobre tu viaje. Antes de generar el itinerario, te pediremos algunos datos de hospedaje, transporte, preferencias y restricciones para personalizar cada destino y estancia.'
+      : 'Travel Concierge is now enabled to help you research and answer questions about your trip. Before generating the itinerary, we will ask for a few lodging, transport, preference and restriction details to personalize each destination and stay.'}</p>
     <button type="button">${es?'Personalizar mi viaje →':'Personalize my trip →'}</button>
   </div>`;
   document.body.appendChild(overlay);
@@ -14600,8 +14609,8 @@ async function sendInfoMessage(){
     showInfoChatNotice(
       es ? 'Esta ciudad no está en tu itinerario' : 'This city is not in your itinerary',
       es
-        ? `Info Chat está disponible para ${_infoCityListText_()}. ${obviousOutsideCity} no forma parte de este itinerario. No se consumió ninguna consulta.`
-        : `Info Chat is available for ${_infoCityListText_()}. ${obviousOutsideCity} is not part of this itinerary. No query was used.`
+        ? `El Asistente de viaje está disponible para ${_infoCityListText_()}. ${obviousOutsideCity} no forma parte de este itinerario. No se consumió ninguna consulta.`
+        : `Travel Concierge is available for ${_infoCityListText_()}. ${obviousOutsideCity} is not part of this itinerary. No query was used.`
     );
     return;
   }
@@ -14915,7 +14924,7 @@ function applyTravelBuilderWorkspaceCopy(){
     'planner-create-status-copy':'Completa los pasos anteriores para comenzar.',
     'planner-info-chat-kicker':'INVESTIGA ANTES DE DECIDIR',
     'planner-info-chat-title':'¿Te falta contexto sobre tu destino?',
-    'planner-info-chat-copy':'Usa Info Chat para consultar zonas, transporte, barrios, gastronomía y otros datos útiles antes de definir tus preferencias.'
+    'planner-info-chat-copy':'Usa el Asistente de viaje para consultar zonas, transporte, barrios, gastronomía y otros datos útiles antes de definir tus preferencias.'
   } : {
     'planner-stage-travelers-label':'Travelers',
     'planner-stage-route-label':'Route',
@@ -14936,7 +14945,7 @@ function applyTravelBuilderWorkspaceCopy(){
     'planner-create-status-copy':'Complete the previous steps to begin.',
     'planner-info-chat-kicker':'RESEARCH BEFORE YOU DECIDE',
     'planner-info-chat-title':'Need more context about your destination?',
-    'planner-info-chat-copy':'Use Info Chat to ask about areas, transportation, neighborhoods, food and other useful details before defining your preferences.'
+    'planner-info-chat-copy':'Use Travel Concierge to ask about areas, transportation, neighborhoods, food and other useful details before defining your preferences.'
   };
   Object.entries(values).forEach(([id,value])=>{
     const el=qs('#'+id);
@@ -15225,6 +15234,7 @@ function _tripStoryResetRoute_(story){
 }
 let _tripStoryBuilderSession_=null;
 function openTripStoryBuilder(){
+  document.body.classList.remove('itbmo-builder-closed-clean');
   // V95: opening/restoring the full builder always owns the route UI. Remove any
   // orphan launcher restored by planner boot before creating or restoring it.
   document.querySelectorAll('.trip-story-minimized-fab').forEach(x=>x.remove());
@@ -15323,7 +15333,7 @@ function openTripStoryBuilder(){
     _tripStorySetMinimizedState_(true,captureUIState());
     minimizedFab=_tripStoryCreateResumeFab_(restore);
   };
-  const close=()=>{minimized=false;saveBuilderSession();_tripStorySetMinimizedState_(false);_tripStorySetWorkspaceResume_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;};
+  const close=()=>{minimized=false;saveBuilderSession();_tripStorySetMinimizedState_(false);_tripStorySetWorkspaceResume_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');document.body.classList.add('itbmo-builder-closed-clean');_tripStoryBuilderSession_=null;};
   _tripStoryBuilderSession_={overlay,restore,minimize,close,get minimized(){return minimized;}};
   // V97: last-chance checkpoint before any full-page workspace navigation.
   const checkpointBeforeNavigation=()=>{try{if(overlay.isConnected)saveBuilderSession();}catch(_){}};
@@ -15398,10 +15408,11 @@ function openTripStoryBuilder(){
       const st=story.stays[activeStay];
       const dt=dayTripDraft||_tripStoryEnsureDayTrip_({day:1,countryCode:st.countryCode,country:st.country,place:'',outbound:{},return:{}});
       dayTripDraft=dt;
-      active.innerHTML=shell(es?'EXCURSIÓN DE UN DÍA':'DAY TRIP',es?`Una excursión desde ${_tripStoryEsc_(st.place)}`:`A day trip from ${_tripStoryEsc_(st.place)}`,es?'Dinos dónde y qué día. Los horarios y el transporte sólo son necesarios si ya los conoces.':'Tell us where and which day. Times and transport are only needed if you already know them.',`<div class="gj-form"><label>${es?'Indica el lugar que visitarás':'Place you will visit'}${destinationField(dt.place,'data-dt-place')}</label><label>${es?'¿Qué día?':'Which day?'}<select data-dt-day>${Array.from({length:st.days},(_,n)=>`<option value="${n+1}" ${dt.day===n+1?'selected':''}>${es?'Día':'Day'} ${n+1} · ${_tripStoryDMY_(_tripStoryDayDate_(st,n))}</option>`).join('')}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya conoces el transporte o los horarios de esta excursión?':'Do you already know the transport or times for this day trip?'}</b><div class="gj-segmented"><button type="button" data-dt-knowledge="resolve" class="${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-dt-knowledge="known" class="${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'is-selected':''}">${es?'Sí, ya los conozco':'Yes, I already know them'}</button></div></div><div data-dt-details class="gj-form gj-full" ${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'':'hidden'}><label>${es?'Transporte':'Transport'}<select data-dt-out-mode>${_tripStoryTransportOptions_(dt.outbound.transportMode)}</select></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(dt.place||'el destino')}`:`Transport departure time to ${_tripStoryEsc_(dt.place||'the destination')}`}<select data-dt-out-time>${_tripStoryTimeOptions_(dt.outbound.departureTime)}</select></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(st.place||'la ciudad base')}`:`Transport departure time back to ${_tripStoryEsc_(st.place||'the base city')}`}<select data-dt-return-time>${_tripStoryTimeOptions_(dt.return.departureTime)}</select></label></div></div>`,nextButton(es?'Guardar excursión':'Save day trip'));
+      active.innerHTML=shell(es?'EXCURSIÓN DE UN DÍA':'DAY TRIP',es?`Una excursión desde ${_tripStoryEsc_(st.place)}`:`A day trip from ${_tripStoryEsc_(st.place)}`,es?'Dinos dónde y qué día. Los horarios y el transporte sólo son necesarios si ya los conoces.':'Tell us where and which day. Times and transport are only needed if you already know them.',`<div class="gj-form"><label>${es?'Indica el lugar que visitarás':'Place you will visit'}${destinationField(dt.place,'data-dt-place')}</label><label>${es?'¿Qué día?':'Which day?'}<select data-dt-day>${Array.from({length:st.days},(_,n)=>`<option value="${n+1}" ${dt.day===n+1?'selected':''}>${es?'Día':'Day'} ${n+1} · ${_tripStoryDMY_(_tripStoryDayDate_(st,n))}</option>`).join('')}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya conoces el transporte o los horarios de esta excursión?':'Do you already know the transport or times for this day trip?'}</b><div class="gj-segmented"><button type="button" data-dt-knowledge="resolve" class="${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-dt-knowledge="known" class="${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'is-selected':''}">${es?'Sí, ya los conozco':'Yes, I already know them'}</button></div></div><div data-dt-details class="gj-form gj-full gj-resolvable-details"><label>${es?'Transporte':'Transport'}<select data-dt-out-mode>${_tripStoryTransportOptions_(dt.outbound.transportMode)}</select></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(dt.place||'el destino')}`:`Transport departure time to ${_tripStoryEsc_(dt.place||'the destination')}`}<select data-dt-out-time>${_tripStoryTimeOptions_(dt.outbound.departureTime)}</select></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(st.place||'la ciudad base')}`:`Transport departure time back to ${_tripStoryEsc_(st.place||'the base city')}`}<select data-dt-return-time>${_tripStoryTimeOptions_(dt.return.departureTime)}</select></label></div></div>`,nextButton(es?'Guardar excursión':'Save day trip'));
       bindLocation(active.querySelector('[data-dt-place]'),x=>{const changed=dt.place!==x.label;dt.place=x.label;if(x.countryCode){dt.countryCode=x.countryCode;dt.country=x.country||dt.country;}if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;}},'city',()=>dt.countryCode||st.countryCode,{global:true});
+      const dtKnown=Boolean(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime);active.querySelectorAll('[data-dt-details] select').forEach(x=>{x.disabled=!dtKnown;x.setAttribute('aria-disabled',String(!dtKnown));});active.querySelector('[data-dt-details]')?.classList.toggle('is-itbmo-resolved',!dtKnown);
       active.querySelector('[data-dt-day]').onchange=e=>{const next=Number(e.target.value),changed=dt.day!==next;dt.day=next;if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;dt.scheduleAdjustment=null;}};
-      active.querySelectorAll('[data-dt-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.dtKnowledge==='known';dt._itbmo_user_clock_authority=known;active.querySelectorAll('[data-dt-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelector('[data-dt-details]').hidden=!known;if(!known){dt.outbound.transportMode='';dt.outbound.departureTime='';dt.return.departureTime='';dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.scheduleAdjustment=null;}});
+      active.querySelectorAll('[data-dt-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.dtKnowledge==='known';dt._itbmo_user_clock_authority=known;active.querySelectorAll('[data-dt-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelectorAll('[data-dt-details] select').forEach(x=>{x.disabled=!known;x.setAttribute('aria-disabled',String(!known));});active.querySelector('[data-dt-details]')?.classList.toggle('is-itbmo-resolved',!known);if(!known){dt.outbound.transportMode='';dt.outbound.departureTime='';dt.return.departureTime='';dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.scheduleAdjustment=null;}});
       active.querySelector('[data-dt-out-mode]').onchange=e=>dt.outbound.transportMode=e.target.value;
       active.querySelector('[data-dt-out-time]').onchange=e=>dt.outbound.departureTime=e.target.value;
       active.querySelector('[data-dt-return-time]').onchange=e=>dt.return.departureTime=e.target.value;
@@ -15410,9 +15421,9 @@ function openTripStoryBuilder(){
     }
     if(phase==='movement'){
       const st=story.stays[activeStay],prev=story.stays[activeStay-1];
-      active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?'Sólo dinos cuándo puedes comenzar. Si ya tienes el transporte, agrégalo; si no, ITBMO resolverá la logística.':'Just tell us when you can start. Add transport if you already have it; otherwise ITBMO will resolve the logistics.',`<div class="gj-form"><label>${es?`Fecha de traslado desde ${_tripStoryEsc_(prev?.place||'el destino anterior')}`:`Transfer date from ${_tripStoryEsc_(prev?.place||'the previous destination')}`}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(st.place||'el destino siguiente')}`:`Transport departure time to ${_tripStoryEsc_(st.place||'the next destination')}`}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya tienes este traslado definido?':'Do you already have this transfer defined?'}</b><div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full" data-move-details ${st.transportStatus==='user_defined'?'':'hidden'}><label>${es?'Medio de transporte':'Transport'}<select data-move="transportMode">${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?`Fecha de llegada a ${_tripStoryEsc_(st.place||'nuevo destino')} (opcional)`:`Arrival date in ${_tripStoryEsc_(st.place||'new destination')} (optional)`}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label><label>${es?`Hora de inicio de recorridos en ${_tripStoryEsc_(st.place||'nuevo destino')}`:`Time to start exploring ${_tripStoryEsc_(st.place||'new destination')}`} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-ready-help aria-expanded="false">ⓘ ${es?'Ver instrucciones':'View instructions'}</button><span class="gj-help-bubble" data-ready-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-ready-help-close aria-label="${es?'Cerrar':'Close'}">×</button><b>${es?'¿Qué hora debes indicar?':'Which time should you enter?'}</b><span>${es?`Indica la hora a la que ya estarás listo para comenzar a conocer ${_tripStoryEsc_(st.place||'el nuevo destino')}, después de llegar, trasladarte y dejar tu equipaje si fuera necesario.`:`Enter the time when you will actually be ready to start exploring ${_tripStoryEsc_(st.place||'the new destination')}, after arriving, transferring and leaving your luggage if needed.`}</span></span></span><select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label></div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
-      const departureTimeControl=active.querySelector('[data-move="departureTime"]');if(departureTimeControl){departureTimeControl.disabled=false;departureTimeControl.removeAttribute('disabled');departureTimeControl.setAttribute('aria-required','true');}const readyHelp=active.querySelector('[data-ready-help]'),readyBubble=active.querySelector('[data-ready-help-bubble]');if(readyHelp&&readyBubble){const closeReadyHelp=()=>{readyBubble.hidden=true;readyHelp.setAttribute('aria-expanded','false');};readyHelp.onclick=e=>{e.preventDefault();e.stopPropagation();const willOpen=readyBubble.hidden;active.querySelectorAll('.gj-help-bubble').forEach(x=>x.hidden=true);readyBubble.hidden=!willOpen;readyHelp.setAttribute('aria-expanded',willOpen?'true':'false');if(willOpen)setTimeout(()=>document.addEventListener('click',closeReadyHelp,{once:true}),0);};active.querySelector('[data-ready-help-close]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeReadyHelp();});readyBubble.addEventListener('click',e=>e.stopPropagation());}
-      active.querySelectorAll('[data-move-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.moveKnowledge==='known';st.transportStatus=known?'user_defined':'route_to_resolve';active.querySelectorAll('[data-move-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelector('[data-move-details]').hidden=!known;if(!known){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}if(departureTimeControl){departureTimeControl.disabled=false;departureTimeControl.removeAttribute('disabled');}persist();});active.querySelectorAll('[data-move]').forEach(x=>x.onchange=()=>{st[x.dataset.move]=x.value;persist();});active.querySelector('[data-save-movement]').onclick=()=>{const depDate=active.querySelector('[data-move="departureDate"]')?.value||'';const depTime=active.querySelector('[data-move="departureTime"]')?.value||'';st.departureDate=depDate;st.departureTime=depTime;if(!depDate||!depTime){active.querySelector('[data-move="departureDate"]')?.classList.toggle('is-invalid',!depDate);active.querySelector('[data-move="departureTime"]')?.classList.toggle('is-invalid',!depTime);return;}const prevEnd=_tripStoryStayEnd_(prev);if(prevEnd&&depDate<prevEnd){alert(es?`La salida de ${prev.place} hacia ${st.place} no puede ser el ${_tripStoryDMY_(depDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}. Usa ${_tripStoryDMY_(prevEnd)} o una fecha posterior.`:`The departure from ${prev.place} to ${st.place} cannot be ${_tripStoryDMY_(depDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}. Use ${_tripStoryDMY_(prevEnd)} or a later date.`);active.querySelector('[data-move="departureDate"]')?.classList.add('is-invalid');return;}if(st.transportStatus!=='user_defined'){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}else{active.querySelectorAll('[data-move]').forEach(x=>st[x.dataset.move]=x.value);}persist();phase='decision';render();};return;
+      active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?'Sólo dinos cuándo puedes comenzar. Si ya tienes el transporte, agrégalo; si no, ITBMO resolverá la logística.':'Just tell us when you can start. Add transport if you already have it; otherwise ITBMO will resolve the logistics.',`<div class="gj-form"><label>${es?`Fecha de traslado desde ${_tripStoryEsc_(prev?.place||'el destino anterior')}`:`Transfer date from ${_tripStoryEsc_(prev?.place||'the previous destination')}`}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(st.place||'el destino siguiente')}`:`Transport departure time to ${_tripStoryEsc_(st.place||'the next destination')}`}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya tienes este traslado definido?':'Do you already have this transfer defined?'}</b><div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full gj-resolvable-details" data-move-details><label>${es?'Medio de transporte':'Transport'}<select data-move="transportMode">${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?`Fecha de llegada a ${_tripStoryEsc_(st.place||'nuevo destino')} (opcional)`:`Arrival date in ${_tripStoryEsc_(st.place||'new destination')} (optional)`}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label><label>${es?`Hora de inicio de recorridos en ${_tripStoryEsc_(st.place||'nuevo destino')}`:`Time to start exploring ${_tripStoryEsc_(st.place||'new destination')}`} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-ready-help aria-expanded="false">ⓘ ${es?'Ver instrucciones':'View instructions'}</button><span class="gj-help-bubble" data-ready-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-ready-help-close aria-label="${es?'Cerrar':'Close'}">×</button><b>${es?'¿Qué hora debes indicar?':'Which time should you enter?'}</b><span>${es?`Indica la hora a la que ya estarás listo para comenzar a conocer ${_tripStoryEsc_(st.place||'el nuevo destino')}, después de llegar, trasladarte y dejar tu equipaje si fuera necesario.`:`Enter the time when you will actually be ready to start exploring ${_tripStoryEsc_(st.place||'the new destination')}, after arriving, transferring and leaving your luggage if needed.`}</span></span></span><select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label></div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
+      const departureTimeControl=active.querySelector('[data-move="departureTime"]');if(departureTimeControl){departureTimeControl.disabled=false;departureTimeControl.removeAttribute('disabled');departureTimeControl.setAttribute('aria-required','true');}const moveKnown=st.transportStatus==='user_defined';active.querySelectorAll('[data-move-details] select,[data-move-details] input').forEach(x=>{x.disabled=!moveKnown;x.setAttribute('aria-disabled',String(!moveKnown));});active.querySelector('[data-move-details]')?.classList.toggle('is-itbmo-resolved',!moveKnown);const readyHelp=active.querySelector('[data-ready-help]'),readyBubble=active.querySelector('[data-ready-help-bubble]');if(readyHelp&&readyBubble){const closeReadyHelp=()=>{readyBubble.hidden=true;readyHelp.setAttribute('aria-expanded','false');};readyHelp.onclick=e=>{e.preventDefault();e.stopPropagation();const willOpen=readyBubble.hidden;active.querySelectorAll('.gj-help-bubble').forEach(x=>x.hidden=true);readyBubble.hidden=!willOpen;readyHelp.setAttribute('aria-expanded',willOpen?'true':'false');if(willOpen)setTimeout(()=>document.addEventListener('click',closeReadyHelp,{once:true}),0);};active.querySelector('[data-ready-help-close]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeReadyHelp();});readyBubble.addEventListener('click',e=>e.stopPropagation());}
+      active.querySelectorAll('[data-move-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.moveKnowledge==='known';st.transportStatus=known?'user_defined':'route_to_resolve';active.querySelectorAll('[data-move-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelectorAll('[data-move-details] select,[data-move-details] input').forEach(x=>{x.disabled=!known;x.setAttribute('aria-disabled',String(!known));});active.querySelector('[data-move-details]')?.classList.toggle('is-itbmo-resolved',!known);if(!known){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}if(departureTimeControl){departureTimeControl.disabled=false;departureTimeControl.removeAttribute('disabled');}persist();});active.querySelectorAll('[data-move]').forEach(x=>x.onchange=()=>{st[x.dataset.move]=x.value;persist();});active.querySelector('[data-save-movement]').onclick=()=>{const depDate=active.querySelector('[data-move="departureDate"]')?.value||'';const depTime=active.querySelector('[data-move="departureTime"]')?.value||'';st.departureDate=depDate;st.departureTime=depTime;if(!depDate||!depTime){active.querySelector('[data-move="departureDate"]')?.classList.toggle('is-invalid',!depDate);active.querySelector('[data-move="departureTime"]')?.classList.toggle('is-invalid',!depTime);return;}const prevEnd=_tripStoryStayEnd_(prev);if(prevEnd&&depDate<prevEnd){alert(es?`La salida de ${prev.place} hacia ${st.place} no puede ser el ${_tripStoryDMY_(depDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}. Usa ${_tripStoryDMY_(prevEnd)} o una fecha posterior.`:`The departure from ${prev.place} to ${st.place} cannot be ${_tripStoryDMY_(depDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}. Use ${_tripStoryDMY_(prevEnd)} or a later date.`);active.querySelector('[data-move="departureDate"]')?.classList.add('is-invalid');return;}if(st.transportStatus!=='user_defined'){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}else{active.querySelectorAll('[data-move]').forEach(x=>st[x.dataset.move]=x.value);}persist();phase='decision';render();};return;
     }
     if(phase==='return'){
       const last=story.stays.at(-1);
