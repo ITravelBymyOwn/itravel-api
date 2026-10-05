@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V145';
-const ITBMO_RUNTIME_ASSET='planner.js?v=264';
+const ITBMO_RUNTIME_BUILD='V145.1';
+const ITBMO_RUNTIME_ASSET='planner.js?v=265';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -1443,7 +1443,7 @@ async function syncPlannerAuthFromAnotherTab(event){
   }
 
   if(token && (!currentUser || announcedState==='signed_in')){
-    await restoreITBMOSession();
+    await restoreITBMOSession({broadcast:false});
   }
 }
 
