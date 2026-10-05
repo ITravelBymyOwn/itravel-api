@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V132';
-const ITBMO_RUNTIME_ASSET='planner.js?v=251';
+const ITBMO_RUNTIME_BUILD='V133';
+const ITBMO_RUNTIME_ASSET='planner.js?v=252';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -8043,7 +8043,7 @@ function _v3AuditSummary_(report={}){
 }
 
 function _v3HardBlockingCodes_(){
-  // V131: HARD also includes a semantic commitment that TIE explicitly made for
+  // V133: HARD also includes a selected defining/major commitment that TIE explicitly made for
   // a REGIONAL corridor but which never materialized as a real experience row.
   // This is integrity of the authoritative plan, not a quality/opportunity quota.
   return new Set([
@@ -8429,7 +8429,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v11-v132-semantic-regional-commitment';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v12-v133-selected-anchor-integrity';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -9206,20 +9206,22 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // must physically depart from its overnight base. This checks only the first
     // generated row of each REGIONAL owner-day; it does not rewrite chronology,
     // fixed transfers, day-trip ownership or any healthy downstream row.
-    // V132 · SEMANTIC TIE REGIONAL COMMITMENT INTEGRITY GATE.
-    // V131 correctly exposed the latent execution hole, but treated every CORE/HIGH
-    // manifest entry as a visit. TIE's manifest can also contain structural movement
-    // (rail/road/ferry/return legs). Those are physical-chain commitments, not POI
-    // dwell commitments, and must never be repaired into fake sightseeing rows.
+    // V133 · TIE SELECTED-ANCHOR EXECUTION INTEGRITY GATE.
+    // The authoritative semantic commitment is experience_inventory, not raw
+    // route_manifest prose. The manifest is an execution corridor and may legally
+    // contain movement/connective entries. Re-inferring "experience vs transport"
+    // from those labels caused V131/V132 false positives. TIE already made that
+    // semantic decision explicitly in experience_inventory, so consume it directly.
     //
     // Contract:
-    //   1) CORE/HIGH experience stops must materialize as real experience rows.
-    //   2) structural movement remains governed by continuity/transport QA.
-    //   3) a movement-shaped label is still an experience when TIE explicitly owns
-    //      it in experience_inventory (e.g. a scenic railway experience).
-    //   4) matching checks both concrete destination and activity prose; a broad
-    //      `to` field must not hide a clearly materialized named experience.
-    // OPTIONAL/DROP_FIRST remain disposable. No destination-specific knowledge.
+    //   1) selected DEFINING/MAJOR experiences owned by a REGIONAL day must appear
+    //      as a real experience row on that owner day;
+    //   2) route_manifest remains authoritative for corridor order/priority/dwell,
+    //      but is never independently promoted into a sightseeing commitment;
+    //   3) a transport row/title/text mention cannot satisfy an experience;
+    //   4) OPTIONAL/supporting corridor material remains disposable.
+    // This closes the original missing-anchor hole without destination dictionaries,
+    // transport regexes or a second semantic classifier.
     const missingTieRegionalCommitments=[];
     if(String(unit?.unit_type||'').startsWith('REGIONAL')){
       for(const day of unitDays){
@@ -9227,48 +9229,48 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
         const manifest=Array.isArray(directive?.route_manifest)
           ? directive.route_manifest
           : (unitDays.length===1&&Array.isArray(unit?.tie_structure?.route_manifest)?unit.tie_structure.route_manifest:[]);
-        const ownedInventory=(unit?.tie_structure?.experience_inventory||[]).filter(x=>x?.selected&&Number(x?.owner_day||0)===Number(day));
-        const isOwnedExperience=(name)=>ownedInventory.some(x=>_arePoiAliases_(name,String(x?.experience||'')));
-        const isStructuralMovement=(stop)=>{
-          const name=String(stop?.name||'').trim();
-          if(!name) return false;
-          if(isOwnedExperience(name)) return false;
-          const semanticRole=_v110SemanticRole_({activity:name});
-          if(['transfer','return'].includes(semanticRole)) return true;
-          const t=_canonicalText_(`${name} ${stop?.reason||''}`);
-          return /^(rail|railway|train|bus|coach|ferry|boat|road|car|drive|driving|transfer|transport|return|regreso|retorno|traslado|transporte|tren|ferrocarril|ferroviari|autobus|bus|ferry|barco|carretera|conduccion|conducir)\b/.test(t)
-            || /\b(transfer to|transport to|return to base|back to base|traslado a|traslado hacia|regreso a la base|retorno a la base)\b/.test(t);
-        };
-        const required=manifest.filter(stop=>
-          ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
-          String(stop?.name||'').trim() &&
-          !isStructuralMovement(stop)
+        const requiredInventory=(unit?.tie_structure?.experience_inventory||[]).filter(item=>
+          item?.selected===true &&
+          Number(item?.owner_day||0)===Number(day) &&
+          ['defining','major'].includes(String(item?.significance||'').toLowerCase()) &&
+          String(item?.experience||'').trim()
         );
-        if(!required.length) continue;
-        const experienceRows=(rows||[]).filter(r=>
-          Number(r?.day)===Number(day) &&
-          !_isUtilityRow_(r) &&
-          !_isPureTransportRow_(r) &&
-          _v110SemanticRole_(r)==='experience'
-        );
-        for(const stop of required){
-          const name=String(stop.name||'').trim();
-          const materialized=experienceRows.some(r=>
-            _arePoiAliases_(name,String(r?.to||'')) ||
-            _arePoiAliases_(name,String(r?.activity||'')) ||
-            _arePoiAliases_(name,`${r?.to||''} ${r?.activity||''}`)
-          );
-          if(!materialized){
-            missingTieRegionalCommitments.push({
-              code:'MISSING_TIE_REGIONAL_COMMITMENT',
-              day:Number(day),
-              stay_unit_id:unit.id,
-              commitment:name,
-              priority:String(stop?.priority||'').toUpperCase(),
-              minimum_dwell_minutes:Number(stop?.minimum_dwell_minutes||0)||null,
-              instruction:'Restore this TIE-committed CORE/HIGH regional experience as a real visit row on its owner day. Preserve healthy CORE/HIGH anchors and the coherent corridor; remove OPTIONAL/DROP_FIRST material first if capacity is needed. Structural transport is validated by physical-chain QA and must not be invented as a sightseeing row.'
-            });
-          }
+        if(!requiredInventory.length) continue;
+
+        const dayRows=(rows||[]).filter(r=>Number(r?.day)===Number(day));
+        const materializedAsExperience=(experienceName)=>dayRows.some(r=>{
+          // Judge the semantic action from activity prose itself. A legitimate visit
+          // may carry transport metadata/duration and therefore look "pure transport"
+          // to physical-row classifiers; conversely "Traslado a X" must not satisfy X.
+          // Feeding only activity into the existing semantic-role classifier cleanly
+          // separates those cases without destination or language-specific POI rules.
+          const rowKind=String(r?.kind||'').trim().toLowerCase();
+          const activityRole=_v110SemanticRole_({activity:String(r?.activity||'')});
+          if(rowKind==='transport' || activityRole!=='experience') return false;
+          // Match against concrete destination/activity only. Notes and transport are
+          // excluded so passing by or merely mentioning an anchor cannot satisfy it.
+          return _arePoiAliases_(experienceName,String(r?.to||'')) ||
+                 _arePoiAliases_(experienceName,String(r?.activity||'')) ||
+                 _arePoiAliases_(experienceName,`${r?.to||''} ${r?.activity||''}`);
+        });
+
+        for(const item of requiredInventory){
+          const experience=String(item.experience||'').trim();
+          if(materializedAsExperience(experience)) continue;
+          const manifestStop=manifest.find(stop=>
+            ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
+            _arePoiAliases_(experience,String(stop?.name||''))
+          )||null;
+          missingTieRegionalCommitments.push({
+            code:'MISSING_TIE_REGIONAL_COMMITMENT',
+            day:Number(day),
+            stay_unit_id:unit.id,
+            commitment:experience,
+            priority:String(manifestStop?.priority||'CORE').toUpperCase(),
+            significance:String(item?.significance||'').toLowerCase(),
+            minimum_dwell_minutes:Number(manifestStop?.minimum_dwell_minutes||0)||null,
+            instruction:'Restore this TIE-selected defining/major regional experience as a real experience row on its owner day. Preserve other healthy defining/major anchors and the coherent corridor; reclaim OPTIONAL/DROP_FIRST/supporting material first if capacity is needed. Transport, titles, notes and textual mentions do not satisfy this selected experience.'
+          });
         }
       }
     }
@@ -10953,7 +10955,20 @@ function bindJourneyHome(){
   });
 }
 
+function _plannerOwnsAutomaticGenerationRecovery_(){
+  // Automatic paid-generation recovery belongs only to the standalone Planner.
+  // preview-home embeds planner.html as an iframe for interactive product preview;
+  // loading the public website must never resume a paid generation in that frame.
+  // A generation explicitly started by the traveler inside the embedded Planner is
+  // unaffected: this guard applies only to automatic restore on page/session load.
+  try{
+    if(window.self!==window.top) return false;
+  }catch(_){ return false; }
+  return /(?:^|\/)planner\.html$/i.test(String(window.location.pathname||''));
+}
+
 async function restorePaidGenerationIfNeeded(){
+  if(!_plannerOwnsAutomaticGenerationRecovery_()) return;
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   const restoreEpoch=generationRunEpoch;
   try{
