@@ -9251,3 +9251,6 @@ body.itbmo-builder-closed-clean #reset-planner{display:block!important;}
 .gj-resolvable-details.is-itbmo-resolved{opacity:.72;}
 .gj-resolvable-details.is-itbmo-resolved select:disabled,
 .gj-resolvable-details.is-itbmo-resolved input:disabled{background:#f3f7fa!important;color:#647789!important;cursor:not-allowed;}
+
+/* V150 UX - visually emphasize the transit-only choice without changing its text or behavior. */
+select option[value="transit"]{font-weight:800;color:#0a7187;background:#e9f8fb}
