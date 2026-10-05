@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V151';
-const ITBMO_RUNTIME_ASSET='planner.js?v=270';
+const ITBMO_RUNTIME_BUILD='V152';
+const ITBMO_RUNTIME_ASSET='planner.js?v=271';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -905,6 +905,18 @@ function applyAuthPlannerGate(unlocked){
       el.setAttribute('aria-disabled',(setupLocked && !keepContainerInteractive)?'true':'false');
     }
   });
+
+  // V152 AUTH CTA CONTRACT: the large Trip Story entry CTA is available only
+  // while a server-validated account/guest session is active. Payment may still
+  // lock it later for an already-defined paid trip; auth must never override that.
+  const buildTripStory=qs('#build-trip-story');
+  if(buildTripStory){
+    const paymentLocked=buildTripStory.classList.contains('is-payment-locked');
+    const disabled=authLocked||paymentLocked;
+    buildTripStory.disabled=disabled;
+    buildTripStory.setAttribute('aria-disabled',String(disabled));
+    buildTripStory.classList.toggle('is-auth-locked',authLocked);
+  }
 
   // These controls already have their own Planner-state rules.
   // Auth can force them OFF, but never force them ON.
@@ -8664,9 +8676,29 @@ function _tieAuroraOverlay_(overlay={}){
 function _tieOverlayWindow_(baseUnit,overlay={}){
   const day=Number(overlay?.preferred_day); if(!day) return null;
   const source=(baseUnit.windows||[]).find(w=>Number(w.day)===day); if(!source) return null;
-  const match=String(overlay?.start_window||'').match(/(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/);
-  if(!match) return null;
-  const start=match[1]; const startMin=_hhmmToMinutes_(start); const latestStartMin=_hhmmToMinutes_(match[2]); if(startMin==null||latestStartMin==null) return null;
+  const rawStartWindow=String(overlay?.start_window||'').trim();
+  const match=rawStartWindow.match(/(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/);
+  let start=null,startMin=null,latestStartMin=null;
+  if(match){
+    start=match[1];
+    startMin=_hhmmToMinutes_(start);
+    latestStartMin=_hhmmToMinutes_(match[2]);
+  }else if(!rawStartWindow || /^flexible$/i.test(rawStartWindow)){
+    // V152 · restore the V128 owner-day contract even when TIE legitimately uses
+    // the schema's `flexible` start_window. Previously the adapter discarded that
+    // overlay entirely, while its de-identified recovery context still reached D+1.
+    // That could produce a next-day "return after observation" with no executable
+    // parent night chain. Resolve only the CLOCK WINDOW here; TIE still owns WHAT,
+    // preferred_day, duration, mobility and recovery cost. The daytime window end
+    // is the natural earliest night boundary; cap only pathological daytime values.
+    const sourceEnd=_hhmmToMinutes_(source?.end);
+    const derived=(sourceEnd!=null&&sourceEnd>=17*60&&sourceEnd<=22*60)?sourceEnd:20*60;
+    startMin=derived;
+    latestStartMin=derived+60;
+    start=_minutesToHHMM_(startMin);
+    console.info('[ITBMO V152 NIGHT OVERLAY] flexible start resolved',{day,start,latest_start:_minutesToHHMM_(latestStartMin%1440),identity:overlay?.identity||overlay?.type||null});
+  }else return null;
+  if(startMin==null||latestStartMin==null) return null;
   const fallbackDuration=_tieAuroraOverlay_(overlay)?300:120;
   const duration=Math.max(30,Math.min(480,Number(overlay?.duration_minutes)||fallbackDuration));
   const latestAbsolute=latestStartMin<startMin?latestStartMin+1440:latestStartMin;
@@ -13405,7 +13437,8 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     // Do not leave Trip Story controls carrying the previous paid-trip lock.
     setPostPaymentTripConfigurationLocked(false);
     const buildTripStory=qs('#build-trip-story');
-    if(buildTripStory){buildTripStory.disabled=false;buildTripStory.removeAttribute('aria-disabled');buildTripStory.classList.remove('is-payment-locked');}
+    if(buildTripStory) buildTripStory.classList.remove('is-payment-locked');
+    applyAuthPlannerGate(Boolean(authReady&&currentUser&&getStoredSessionToken()));
     updateSaveAvailability();
 
     // UX: enfocar primer input de ciudad
