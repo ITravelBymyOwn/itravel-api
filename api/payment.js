@@ -438,6 +438,10 @@ async function handleConfig(res) {
       price: pricing.base_price
     },
     configurable_promotions: true,
+    // V130.2: authoritative deployment-scoped signal for the Planner. Preview
+    // may bypass the payment UI; Production is always false here. Generation
+    // authorization remains enforced server-side by the same isAdminTestBypass().
+    preview_payment_bypass: String(process.env.VERCEL_ENV || "").toLowerCase() !== "production" && ITBMO_PREVIEW_PAYMENT_BYPASS,
     paypal_enabled: Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET),
     paypal_client_id: PAYPAL_CLIENT_ID || null,
     paypal_environment: PAYPAL_ENV,
