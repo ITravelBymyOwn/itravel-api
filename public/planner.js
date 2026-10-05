@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V140';
-const ITBMO_RUNTIME_ASSET='planner.js?v=258';
+const ITBMO_RUNTIME_BUILD='V141';
+const ITBMO_RUNTIME_ASSET='planner.js?v=260';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6903,6 +6903,13 @@ function _v115AdaptiveSemanticShield_(city,rows=[],contract={},totalDays=0){
 function _v138WindowMembership_(dayRows=[],contract={},day=0){
   const routeDay=(contract?.route_days||[]).find(d=>Number(d?.day)===Number(day));
   const windows=Array.isArray(routeDay?.location_windows)?routeDay.location_windows:[];
+  // V141: NIGHT_OVERLAY is a parallel owner-day clock contract, never a reason to
+  // fragment the ordinary daytime physical chain. V140 counted the night window
+  // when deciding whether a day had a single authoritative daytime window; on an
+  // aurora day that turned one daytime chain into multiple tiny groups and let
+  // ordinary overlaps escape deterministic solving. Preserve the sealed V129 night
+  // chain by excluding it from ordinary-window membership altogether.
+  const ordinaryWindows=windows.filter(w=>String(w?.role||'').toUpperCase()!=='NIGHT_OVERLAY');
   const entries=dayRows.map((row,index)=>{
     const explicit=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'').trim();
     let window=null;
@@ -6916,15 +6923,15 @@ function _v138WindowMembership_(dayRows=[],contract={},day=0){
   // but no explicit location_windows metadata. Solve that ordinary daytime chain
   // against open boundaries instead of falling through to local model repair.
   // NIGHT_OVERLAY remains excluded and keeps its sealed owner-day chronology.
-  if(!windows.length){
+  if(!ordinaryWindows.length){
     const id=`day-${Number(day)||1}-open-chain`,window={window_id:id,start:null,end:null};
     for(const e of entries)if(!_v114IsNightOverlayRow_(e.row)){e.id=id;e.window=window;}
     return entries;
   }
   // If the day has exactly one authoritative window, every ordinary physical row
   // belongs to it. This is the common BASE/regional shape and closes the V137 hole.
-  if(windows.length===1){
-    const only=windows[0],id=String(only?.window_id||'day-window');
+  if(ordinaryWindows.length===1){
+    const only=ordinaryWindows[0],id=String(only?.window_id||'day-window');
     for(const e of entries)if(!_v114IsNightOverlayRow_(e.row)){e.id=id;e.window=only;}
     return entries;
   }
@@ -7012,14 +7019,14 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       }
       if(result.changed){
         shifts+=result.moved;
-        console.info(`[ITBMO V140 SEMANTIC-ORDER TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
+        console.info(`[ITBMO V141 GOLDEN-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
       }else if(!result.feasible&&result.reason!=='night_chain'){
-        console.info(`[ITBMO V140 SEMANTIC-ORDER TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
+        console.info(`[ITBMO V141 GOLDEN-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
       }
     }
   }
   const continuity=_v138NormalizeReturnContinuity_(out);
-  if(continuity.length)console.info(`[ITBMO V140 RETURN CONTINUITY] ${city}`,continuity);
+  if(continuity.length)console.info(`[ITBMO V141 RETURN CONTINUITY] ${city}`,continuity);
   return {rows:out,shifts};
 }
 
@@ -8567,7 +8574,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v19-v140-semantic-order-temporal-convergence';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v20-v141-golden-night-overlay-and-chain-convergence';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -9367,11 +9374,24 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
         const manifest=Array.isArray(directive?.route_manifest)
           ? directive.route_manifest
           : (unitDays.length===1&&Array.isArray(unit?.tie_structure?.route_manifest)?unit.tie_structure.route_manifest:[]);
+        // V141 · GOLDEN NIGHT-OVERLAY AUTHORITY. A selected experience whose
+        // owner-day execution is already represented by an authoritative TIE night
+        // overlay is NOT a daytime REGIONAL commitment. V129 deliberately executes
+        // aurora as a NIGHT_OVERLAY (with complete owner-day/cross-midnight chain),
+        // and MISSING_NIGHT_OVERLAY_EXECUTION is the sole gate for that contract.
+        // Requiring the same experience again here created the V140 aurora repair/
+        // retry loop. This is generic to TIE overlays; no destination is hardcoded.
+        const ownerNightOverlays=(unit?.tie_structure?.night_overlays||[]).filter(o=>Number(o?.preferred_day||0)===Number(day));
+        const representedByNightOverlay=(item)=>ownerNightOverlays.some(o=>
+          (_tieAuroraOverlay_(o)&&_isAuroraActivityRow_({activity:String(item?.experience||'')})) ||
+          _arePoiAliases_(String(item?.experience||''),String(o?.identity||o?.type||''))
+        );
         const requiredInventory=(unit?.tie_structure?.experience_inventory||[]).filter(item=>
           item?.selected===true &&
           Number(item?.owner_day||0)===Number(day) &&
           ['defining','major'].includes(String(item?.significance||'').toLowerCase()) &&
-          String(item?.experience||'').trim()
+          String(item?.experience||'').trim() &&
+          !representedByNightOverlay(item)
         );
         if(!requiredInventory.length) continue;
 
@@ -9437,7 +9457,17 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
             );
           }
           if(components.length<2) return false;
-          return components.every(stop=>rowMaterializes(String(stop.name||'')));
+          // V141: for a single selected defining/major regional commitment, TIE may
+          // name the semantic circuit broadly while route_manifest enumerates its
+          // concrete CORE/HIGH POIs. Requiring EVERY manifest component made a
+          // healthy circuit fail when one supporting HIGH stop was legitimately
+          // absent. Two independently materialized CORE/HIGH experience anchors are
+          // sufficient evidence that the broad composite commitment was executed.
+          // Atomic/multi-commitment days still require their direct inventory match,
+          // so a genuinely missing named anchor (e.g. one commitment among several)
+          // remains detectable.
+          const materializedCount=components.filter(stop=>rowMaterializes(String(stop.name||''))).length;
+          return requiredInventory.length===1 ? materializedCount>=2 : components.every(stop=>rowMaterializes(String(stop.name||'')));
         };
 
         for(const item of requiredInventory){
