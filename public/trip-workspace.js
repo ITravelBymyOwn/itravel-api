@@ -1193,23 +1193,28 @@ function showEmpty(){
 function handoffToPlanner(){
   try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
 }
-function backPlanner(){
+function _returnToPlanner_(view=''){
   const params=new URLSearchParams();
   params.set('lang',lang);
+  if(view) params.set('view',view);
   if(data?.trip_id) params.set('trip_id',data.trip_id);
   handoffToPlanner();
-  window.location.replace(`./planner.html?${params.toString()}`);
+  const url=`./planner.html?${params.toString()}`;
+  // V150 UX: when Workspace was opened by Planner, return to that exact tab.
+  // This preserves any generation already running there. Only create/reuse the
+  // named Planner tab when the opener is no longer available.
+  try{
+    if(window.opener && !window.opener.closed){
+      if(view) window.opener.location.href=url;
+      window.opener.focus();
+      return;
+    }
+  }catch(_){}
+  const plannerWindow=window.open(url,'itbmo-planner');
+  if(plannerWindow){try{plannerWindow.focus();}catch(_){}}
 }
-function openMyTrips(){
-  const params=new URLSearchParams();
-  params.set('lang',lang);
-  params.set('view','my-trips');
-  if(data?.trip_id) params.set('trip_id',data.trip_id);
-  // Navigation is not logout. Keep the shared session untouched and let the
-  // Planner render the history gate from the same authenticated trip.
-  handoffToPlanner();
-  window.location.assign(`./planner.html?${params.toString()}`);
-}
+function backPlanner(){ _returnToPlanner_(''); }
+function openMyTrips(){ _returnToPlanner_('my-trips'); }
 
 function setupAllCitiesFloating(){
   const source=$('#tw-all-cities');
