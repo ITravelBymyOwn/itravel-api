@@ -13941,9 +13941,6 @@ function _removePaymentPreparingOverlaysNow_(){
 }
 
 function showPostPaymentWelcome(){
-  // UX CLEAN R2: a valid payment/admin bypass must own the modal handoff.
-  // Purge any stale checkout state before mounting the post-payment step.
-  closeCheckoutModal();
   _removePaymentPreparingOverlaysNow_();
   document.querySelector('.itbmo-postpay-overlay')?.remove();
   const es=getLang()==='es';
@@ -14019,8 +14016,6 @@ async function requestPlanningStart(){
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
     if(alreadyPaid){
       await _persistPostPaymentProgress_('preferences');
-      // UX CLEAN R2: never allow a stale checkout layer to survive an authorized bypass.
-      closeCheckoutModal();
       // V103: end the blocking payment-status layer before the next modal is
       // mounted. Do not rely on the 220 ms exit animation for modal handoff.
       _removePaymentPreparingOverlaysNow_();
@@ -15050,33 +15045,16 @@ function _bindTripStoryDaysPicker_(root){
   if(!native||!trigger||!menu)return;
   const close=()=>{menu.hidden=true;trigger.setAttribute('aria-expanded','false');};
   trigger.onclick=()=>{const opening=menu.hidden;if(opening){menu.hidden=false;trigger.setAttribute('aria-expanded','true');requestAnimationFrame(()=>{menu.scrollTop=menu.scrollHeight;});}else close();};
-  // UX R4: commit the choice on pointer-down. This runs before focus changes can
-  // close the upward-opening menu, while preserving the canonical <select> and
-  // its existing change handler as the single source of truth.
-  menu.addEventListener('pointerdown',event=>{
-    const btn=event.target.closest?.('[data-gj-day-value]');
-    if(!btn||!menu.contains(btn))return;
-    event.preventDefault();
-    const value=String(btn.dataset.gjDayValue||'');
-    if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
-    native.value=value;
-    // Keep the custom trigger synchronized with the canonical select BEFORE the
-    // existing ITBMO change flow runs. V129's original native select displayed
-    // its own selected value automatically; the custom visual trigger must do
-    // that explicitly.
-    const label=trigger.querySelector('span:first-child');
-    if(label)label.textContent=value==='transit'?(getLang()==='es'?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'):value;
-    menu.querySelectorAll('[data-gj-day-value]').forEach(option=>option.setAttribute('aria-selected',String(option.dataset.gjDayValue)===value?'true':'false'));
-    close();
-    native.dispatchEvent(new Event('change',{bubbles:true}));
-  });
-  // Keyboard/click fallback for accessibility and browsers without PointerEvent.
+  // UX CLEAN R3: selection is committed on click, after pointerup.
+  // Do not mutate/re-render the route during pointerdown: replacing this DOM
+  // before the browser finishes the gesture can produce click-through into the
+  // next route control/modal.
+  // Canonical selection path. The original V129 <select> remains the source of truth.
   menu.addEventListener('click',event=>{
     const btn=event.target.closest?.('[data-gj-day-value]');
     if(!btn||!menu.contains(btn))return;
     const value=String(btn.dataset.gjDayValue||'');
     if(value!=='transit'&&!/^(?:[1-9]|[12]\d|30)$/.test(value))return;
-    if(native.value===value){close();return;}
     native.value=value;
     const label=trigger.querySelector('span:first-child');
     if(label)label.textContent=value==='transit'?(getLang()==='es'?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'):value;
@@ -15406,7 +15384,7 @@ function openTripStoryBuilder(){
   overlay.querySelector('[data-gj-close]').onclick=close;
   const countryField=(value,code,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" data-country-code="${_tripStoryEsc_(code||'')}" placeholder="${es?'Escribe el país…':'Type country…'}"><div class="trip-story-suggestions" hidden></div></div>`;
   const destinationField=(value,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" placeholder="${es?'Escribe el destino…':'Type destination…'}"><div class="trip-story-suggestions" hidden></div></div>`;
-  const bindLocation=(input,onPick,kind='country',countryCode=()=>'',options={} )=>{if(!input)return;let timer;const closeMenu=()=>{const menu=input.parentElement?.querySelector('.trip-story-suggestions');if(menu)menu.hidden=true;};input.oninput=()=>{onPick({label:input.value,code:'',typing:true});clearTimeout(timer);const menu=input.parentElement.querySelector('.trip-story-suggestions'),q=input.value.trim();if(q.length<(kind==='country'?2:3)){menu.hidden=true;return;}if(kind==='country'){const items=_tripStoryCountrySuggestions_(q);menu.innerHTML=items.length?items.map(x=>`<button type="button">${_tripStoryEsc_(x.label)}</button>`).join(''):`<div>${es?'Puedes conservar lo escrito.':'You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:items[n].label,code:items[n].code});render();});}else{timer=setTimeout(async()=>{const items=await _tripStorySuggestions_(countryCode(),q,{global:Boolean(options.global)});if(input.value.trim()!==q)return;menu.innerHTML=items.length?items.slice(0,10).map(x=>`<button type="button">${_tripStoryEsc_(typeof x==='string'?x:x.label)}</button>`).join(''):`<div>${es?'No aparece en la lista. Puedes conservar lo escrito.':'Not listed. You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:typeof items[n]==='string'?items[n]:items[n].label});render();});},180);}};input.onblur=()=>setTimeout(closeMenu,140);input.onchange=()=>setTimeout(closeMenu,0);};
+  const bindLocation=(input,onPick,kind='country',countryCode=()=>'',options={} )=>{if(!input)return;let timer;input.oninput=()=>{onPick({label:input.value,code:'',typing:true});clearTimeout(timer);const menu=input.parentElement.querySelector('.trip-story-suggestions'),q=input.value.trim();if(q.length<(kind==='country'?2:3)){menu.hidden=true;return;}if(kind==='country'){const items=_tripStoryCountrySuggestions_(q);menu.innerHTML=items.length?items.map(x=>`<button type="button">${_tripStoryEsc_(x.label)}</button>`).join(''):`<div>${es?'Puedes conservar lo escrito.':'You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:items[n].label,code:items[n].code});render();});}else{timer=setTimeout(async()=>{const items=await _tripStorySuggestions_(countryCode(),q,{global:Boolean(options.global)});if(input.value.trim()!==q)return;menu.innerHTML=items.length?items.slice(0,10).map(x=>`<button type="button">${_tripStoryEsc_(typeof x==='string'?x:x.label)}</button>`).join(''):`<div>${es?'No aparece en la lista. Puedes conservar lo escrito.':'Not listed. You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:typeof items[n]==='string'?items[n]:items[n].label});render();});},180);}};const field=input.parentElement;field?.addEventListener('focusout',()=>setTimeout(()=>{if(!field.contains(document.activeElement)){const menu=field.querySelector('.trip-story-suggestions');if(menu)menu.hidden=true;}},0));};
   const travelerSnapshot=()=>{const cur=collectTravelerStateFromUI();return cur.ok?cur:{mode:String($travelerMode?.value||''),companions:[]};};
   let travelerDraft=resumeTravelerDraft||travelerSnapshot();
   const syncTravelers=()=>{if(!$travelerMode)return false;$travelerMode.value=travelerDraft.mode||'';$travelerMode.dispatchEvent(new Event('change',{bubbles:true}));if(travelerDraft.mode==='group'){$travelerProfiles.innerHTML='';(travelerDraft.companions||[]).forEach((x,i)=>{const card=createTravelerProfileCard(i+1);$travelerProfiles.appendChild(card);qs('.traveler-gender',card).value=x.gender||'';qs('.traveler-age-range',card).value=x.age_range||'';});renumberTravelerProfiles();setTravelerButtonsState();}writeLegacyTravelerCounts(collectTravelerStateFromUI().counts||{adults:1,young:0,children:0,infants:0,seniors:0});return collectTravelerStateFromUI().ok;};
