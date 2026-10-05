@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V138';
-const ITBMO_RUNTIME_ASSET='planner.js?v=257';
+const ITBMO_RUNTIME_BUILD='V139';
+const ITBMO_RUNTIME_ASSET='planner.js?v=258';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -6898,6 +6898,16 @@ function _v138WindowMembership_(dayRows=[],contract={},day=0){
     const id=explicit||String(window?.window_id||'').trim();
     return {row,index,id,window,explicit:Boolean(explicit)};
   });
+  // V139: absence of a route-window object does NOT mean absence of a physical
+  // chain. Regional/model-owned days often arrive with valid clocks and ordering
+  // but no explicit location_windows metadata. Solve that ordinary daytime chain
+  // against open boundaries instead of falling through to local model repair.
+  // NIGHT_OVERLAY remains excluded and keeps its sealed owner-day chronology.
+  if(!windows.length){
+    const id=`day-${Number(day)||1}-open-chain`,window={window_id:id,start:null,end:null};
+    for(const e of entries)if(!_v114IsNightOverlayRow_(e.row)){e.id=id;e.window=window;}
+    return entries;
+  }
   // If the day has exactly one authoritative window, every ordinary physical row
   // belongs to it. This is the common BASE/regional shape and closes the V137 hole.
   if(windows.length===1){
@@ -6947,14 +6957,30 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
     const day=Number(dayKey);if(!day)continue;
     const membership=_v138WindowMembership_(dayRows,contract,day);
     const groups=new Map();
+    let openRun=0,lastWasUnassigned=false;
     for(const e of membership){
-      if(!e.id||_v114IsNightOverlayRow_(e.row))continue;
-      if(!groups.has(e.id))groups.set(e.id,{rows:[],window:e.window});
-      const g=groups.get(e.id);g.rows.push(e.row);if(!g.window&&e.window)g.window=e.window;
+      if(_v114IsNightOverlayRow_(e.row)){lastWasUnassigned=false;continue;}
+      // V139: stamped planning_window_id is enough to define chain ownership even
+      // when the contract copy no longer carries the corresponding window object.
+      // Likewise, a contiguous ordinary-row run with no window metadata is still a
+      // mathematically solvable open chain. Never send those overlaps to Luna.
+      let id=e.id;
+      let window=e.window;
+      if(!id){
+        if(!lastWasUnassigned)openRun++;
+        id=`day-${day}-open-run-${openRun}`;
+        window={window_id:id,start:null,end:null};
+        lastWasUnassigned=true;
+      }else{
+        lastWasUnassigned=false;
+        if(!window)window={window_id:id,start:null,end:null};
+      }
+      if(!groups.has(id))groups.set(id,{rows:[],window});
+      const g=groups.get(id);g.rows.push(e.row);if(!g.window&&window)g.window=window;
     }
     for(const [windowId,g] of groups){
-      const chain=g.rows;if(chain.length<2||!g.window)continue;
-      const result=_v137SolveTemporalWindow_(chain,g.window);
+      const chain=g.rows;if(chain.length<2)continue;
+      const result=_v137SolveTemporalWindow_(chain,g.window||{});
       if(result.feasible){
         // A feasible solve is authoritative even when no clock needed movement.
         // Mark the complete chain so the legacy <=30 min micro-overlap helper cannot
@@ -6963,14 +6989,14 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       }
       if(result.changed){
         shifts+=result.moved;
-        console.info(`[ITBMO V138 FULL-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
+        console.info(`[ITBMO V139 FULL-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
       }else if(!result.feasible&&result.reason!=='night_chain'){
-        console.info(`[ITBMO V138 FULL-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
+        console.info(`[ITBMO V139 FULL-CHAIN TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
       }
     }
   }
   const continuity=_v138NormalizeReturnContinuity_(out);
-  if(continuity.length)console.info(`[ITBMO V138 RETURN CONTINUITY] ${city}`,continuity);
+  if(continuity.length)console.info(`[ITBMO V139 RETURN CONTINUITY] ${city}`,continuity);
   return {rows:out,shifts};
 }
 
@@ -7219,7 +7245,12 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       // Multiple local mobility recommendations are valid traveler guidance.
       // Timeline arithmetic already validates the declared duration range.
 
-      const profile=_activityProfile_(r);
+      // V139: category dwell applies only to an actual experience row. Utility,
+      // transfer and return notes may legitimately mention a "guided tour" or
+      // museum they connect to; classifying those rows as the experience itself
+      // created false CATEGORY_DWELL_TOO_SHORT repairs (for example a post-tour
+      // return with no activity duration). Canonical semantic role is the gate.
+      const profile=_v110SemanticRole_(r)==='experience'?_activityProfile_(r):null;
       const activityBounds=_activityDurationBounds_(r.duration);
       if(profile && (!activityBounds || activityBounds.min<profile.min)){
         errors.push({
@@ -8339,15 +8370,16 @@ function _v3FitDurationToInterval_(row={}){
   const [transportLabel,activityLabel]=_durationLabels_();
   if(_isPureTransportRow_(row)){
     const existing=_transportBoundsFromField_(row.transport||'');
-    const transport=existing?String(row.transport||'').trim():[String(row.transport||'').trim(),`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
+    const safeTransport=_v126TransportText_(row.transport);
+    const transport=existing?safeTransport:[safeTransport,`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
     return {...row,transport,duration:''};
   }
   const transport=_transportBoundsFromField_(row.transport||'') || _durationBoundsMinutes_(_extractDurationPart_(row.duration,'transport'));
   const transportMinutes=Math.max(0,Math.min(span-1,Number(transport?.max||0)));
   const activityMinutes=Math.max(1,span-transportMinutes);
   const transportField=transportMinutes>0 && !_transportBoundsFromField_(row.transport||'')
-    ? [String(row.transport||'').trim(),`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
-    : String(row.transport||'').trim();
+    ? [_v126TransportText_(row.transport),`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
+    : _v126TransportText_(row.transport);
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
@@ -8512,7 +8544,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v17-v138-full-chain-temporal-propagation';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v18-v139-deterministic-convergence';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -9347,11 +9379,40 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
           // it does not infer destinations, transport classes or language keywords.
           // Requiring >=2 components prevents an atomic anchor from being satisfied
           // by one partial/name-overlap row. Supporting/OPTIONAL stops never count.
-          const components=manifest.filter(stop=>
+          let components=manifest.filter(stop=>
             ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
             String(stop?.name||'').trim() &&
             _arePoiAliases_(experienceName,String(stop.name||''))
           );
+          // V139: TIE can name a regional circuit semantically ("coast/cascades/
+          // formations") while route_manifest names its concrete POIs. When that
+          // owner-day has exactly ONE selected defining/major commitment, the
+          // manifest itself is the authoritative decomposition of that commitment.
+          // Require at least two CORE/HIGH concrete anchors and require ALL of them
+          // to exist as real experience rows. This is stricter than fuzzy prose
+          // matching and avoids destination dictionaries while eliminating the
+          // false Costa Sur/Snaefellsnes repair loop seen in V138.
+          if(components.length<2 && requiredInventory.length===1){
+            const transportRows=dayRows.filter(r=>{
+              const rowKind=String(r?.kind||'').trim().toLowerCase();
+              return rowKind==='transport'||['transfer','return'].includes(_v110SemanticRole_(r));
+            });
+            const materializedAsMovement=(name)=>transportRows.some(r=>
+              _arePoiAliases_(name,String(r?.to||'')) ||
+              _arePoiAliases_(name,String(r?.from||'')) ||
+              _arePoiAliases_(name,`${r?.from||''} ${r?.to||''} ${r?.activity||''}`)
+            );
+            // Consume the complete CORE/HIGH executable manifest, but ignore an
+            // entry that the generated itinerary proves is connective movement
+            // rather than an experience (the V131 railway false-positive class).
+            // A genuinely missing anchor has no such movement evidence and remains
+            // required, so the original Ollantaytambo-type omission is still caught.
+            components=manifest.filter(stop=>
+              ['CORE','HIGH'].includes(String(stop?.priority||'').toUpperCase()) &&
+              String(stop?.name||'').trim() &&
+              !(materializedAsMovement(String(stop.name||''))&&!rowMaterializes(String(stop.name||'')))
+            );
+          }
           if(components.length<2) return false;
           return components.every(stop=>rowMaterializes(String(stop.name||'')));
         };
@@ -12264,7 +12325,11 @@ function _v39VisibleDuration_(row={}){
 }
 
 function _v3VisibleTransportLabel_(value){
-  const raw=String(value||'').trim();
+  // V139 presentation invariant: normalize structured mobility at the final
+  // traveler-facing boundary too. normalizeRow already flattens it, but local
+  // repair/merge may reintroduce an object after normalization. Never allow JS
+  // object coercion to leak as "[object Object]" into Planner/PDF/exports.
+  const raw=_v126TransportText_(value);
   if(!raw)return '';
   if(/^recomi[eé]ndame$/i.test(raw)||/^recommend$/i.test(raw)||/^recommend me$/i.test(raw)) return getLang()==='es'?'Por definir · ITBMO te ayudará a elegir':'To be decided · ITBMO will help you choose';
   return raw.replace(/\/(recomendado|recommended)/ig,'').replace(/\s{2,}/g,' ').trim();
