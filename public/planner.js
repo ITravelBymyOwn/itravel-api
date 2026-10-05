@@ -15028,7 +15028,7 @@ function _tripStoryDaysOptions_(selected=1,transitOnly=false){
   const es=getLang()==='es';
   // Transit is conceptually different from a stay duration, so keep it first and
   // unmistakable before the numeric choices. The disabled divider is visual only.
-  return `<option class="gj-transit-option" value="transit" ${transitOnly?'selected':''}>${es?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'}</option><option class="gj-days-divider" value="" disabled>──────────</option>`+Array.from({length:30},(_,i)=>`<option value="${i+1}" ${!transitOnly&&Number(selected)===i+1?'selected':''}>${i+1}</option>`).join('');
+  return Array.from({length:30},(_,i)=>30-i).map(day=>`<option value="${day}" ${!transitOnly&&Number(selected)===day?'selected':''}>${day}</option>`).join('')+`<option class="gj-days-divider" value="" disabled>──────────</option><option class="gj-transit-option" value="transit" ${transitOnly?'selected':''}>${es?'✦ SÓLO ESTARÉ DE TRÁNSITO':'✦ TRANSIT ONLY'}</option>`;
 }
 function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};}
 function _tripStoryDraftKey_(){const who=String(currentUser?.id||currentUser?.email||'guest').replace(/[^a-z0-9_.@-]/gi,'_');return `itbmo_trip_story_draft_v1_${who}`;}
