@@ -22,7 +22,7 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V142';
+const ITBMO_RUNTIME_BUILD='V143';
 const ITBMO_RUNTIME_ASSET='planner.js?v=261';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
@@ -6678,7 +6678,7 @@ function _v136HasTemporalAuthority_(r={}){
   return source==='USER_FIXED';
 }
 
-// V136 · Constraint-Based Temporal Solver. For each authoritative planning window,
+// V143 · consolidated deterministic temporal solver, rebased around V129. For each authoritative planning window,
 // preserve the model/TIE row order and every row duration, then project proposed
 // clocks onto the feasible set: s[i+1] >= s[i] + duration[i]. Explicit fixed rows
 // are equality constraints; planning-window edges are hard bounds. This is a pure
@@ -7019,14 +7019,13 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       const g=groups.get(id);g.rows.push(e.row);if(!g.window&&window)g.window=window;
     }
     for(const [windowId,g] of groups){
-      // V142: the proposed clock is the model's explicit schedule-order signal.
-      // V140/V141 preserved raw JSON order; when that order disagreed with the
-      // proposed timeline, the solver could prove its private sequence feasible yet
-      // the canonical audit (chronological order) still saw overlaps. Solve the same
-      // chronological sequence that QA publishes, using source order only as a stable
-      // tie-break. Location/content are untouched; NIGHT_OVERLAY never enters here.
-      const chain=g.rows.map((row,index)=>({row,index,start:_v114LogicalStartMinutes_(row)}))
-        .sort((a,b)=>(a.start??Number.MAX_SAFE_INTEGER)-(b.start??Number.MAX_SAFE_INTEGER)||a.index-b.index)
+      // V143 · SINGLE TEMPORAL AUTHORITY. Physical/semantic precedence comes from
+      // the V129/TIE generated chain captured before chronological normalization.
+      // Proposed clocks are preferences only. Sorting by a conflicting clock (V142)
+      // can invert activity -> transfer precedence and make the solver optimize the
+      // error itself. Use source precedence; the solver makes the clocks conform.
+      const chain=g.rows.map((row,index)=>({row,index,source:Number.isFinite(Number(row?._v143_source_order))?Number(row._v143_source_order):index}))
+        .sort((a,b)=>a.source-b.source||a.index-b.index)
         .map(x=>x.row);
       if(chain.length<2)continue;
       const result=_v137SolveTemporalWindow_(chain,g.window||{});
@@ -7038,14 +7037,14 @@ function _v111CompileTimeline_(city,rows=[],contract={}){
       }
       if(result.changed){
         shifts+=result.moved;
-        console.info(`[ITBMO V142 GOLDEN TEMPORAL CONVERGENCE] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
+        console.info(`[ITBMO V143 GOLDEN-CORE TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · chain ${chain.length} row(s) · moved ${result.moved} · max displacement ${result.max_shift} min`);
       }else if(!result.feasible&&result.reason!=='night_chain'){
-        console.info(`[ITBMO V142 GOLDEN TEMPORAL CONVERGENCE] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
+        console.info(`[ITBMO V143 GOLDEN-CORE TEMPORAL SOLVER] ${city} · day ${day} · ${windowId} · deterministic solve deferred · ${result.reason}`);
       }
     }
   }
   const continuity=_v138NormalizeReturnContinuity_(out);
-  if(continuity.length)console.info(`[ITBMO V142 RETURN CONTINUITY] ${city}`,continuity);
+  if(continuity.length)console.info(`[ITBMO V143 RETURN CONTINUITY] ${city}`,continuity);
   return {rows:out,shifts};
 }
 
@@ -8433,7 +8432,11 @@ function _v3FitDurationToInterval_(row={}){
 }
 
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
-  let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
+  // V143 · V129 GOLDEN-CORE REBASE. Preserve the model/TIE physical sequence before
+  // any legacy chronological sorting. This sequence is the precedence graph; clocks
+  // are variables to solve, never a substitute for semantic/physical order.
+  const sourceRows=(rows||[]).map((r,index)=>({...r,_v143_source_order:index}));
+  let out=_v3EnforceHardRouteFacts_(sourceRows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
