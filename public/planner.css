@@ -9233,3 +9233,13 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 
 /* V92 — minimized route builder must leave the Planner fully interactive. */
 .trip-story-overlay.is-minimized{display:none!important;pointer-events:none!important;visibility:hidden!important}
+
+
+/* V129 UX main-candidate refinements: presentation only; Golden Core untouched. */
+#build-guided-journey:disabled,#build-guided-journey.is-auth-locked{opacity:.48;filter:saturate(.55);cursor:not-allowed;box-shadow:none;transform:none;pointer-events:none}
+.gj-choice--finish{border-color:#7bcce4;background:linear-gradient(135deg,#f3fbff,#eefcff);box-shadow:0 10px 26px rgba(11,133,199,.10)}
+.gj-choice--finish>span{background:linear-gradient(135deg,#0c82d8,#11b7c8);color:#fff;box-shadow:0 6px 15px rgba(11,133,199,.18)}
+.gj-choice--finish b{color:#0b527e}
+.gj-choice--finish:hover{border-color:#16a9d3;box-shadow:0 12px 30px rgba(11,133,199,.16)}
+.gj-form select option.gj-transit-option{font-weight:900;color:#075d8b}
+.gj-form select option.gj-days-divider{color:#9aabba}
