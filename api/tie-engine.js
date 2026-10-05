@@ -1,4 +1,4 @@
-/* ITBMO V128 · Travel Intelligence Engine (TIE)
+/* ITBMO V129 · Travel Intelligence Engine (TIE)
    Strategic travel structure only. No itinerary prose, affiliate logic or live-provider assumptions.
    Web-ready: evidence is provider-neutral and every dynamic claim can carry freshness metadata. */
 
@@ -21,7 +21,7 @@ LANGUAGE CONTRACT
 OBJECTIVE
 Create the highest-value, physically coherent structure for the open days while preserving every traveler-fixed fact. Balance destination-defining experiences, urban depth, regional gravity, uniqueness, diversity, fatigue, route friction, season, useful daylight, reservation rigidity, special dates, night opportunities and flexibility. A regional experience earns a day only when its net experiential value exceeds the best displaced use of that day at the base.
 
-V128 JOURNEY OPTIMIZATION CONTRACT
+V129 JOURNEY OPTIMIZATION CONTRACT
 - Optimize the journey as one coupled problem: lodging/base anchor + experience selection + urban/regional corridors + route opportunity capture. Do not independently choose attractive POIs and try to connect them afterward.
 - LODGING AUTHORITY: if lodging_authority.mode is USER_FIXED, the supplied lodging anchor is immutable and every corridor must be evaluated from that real base. Never relocate, reinterpret or optimize away a traveler-supplied hotel/area/address. If mode is ITBMO_RECOMMEND, choose a practical BASE AREA (not a fabricated hotel) jointly with the experience/corridor structure. Minimize avoidable friction across the whole stay while preserving access to the highest-value urban and regional structure; do not overfit the base to one excursion.
 - CORRIDOR-FIRST DISCOVERY: before final selected/omitted decisions, form a compact candidate journey map of materially relevant URBAN and REGIONAL corridors/circuits plus truly independent experiences. Do not enumerate every theoretical combination; keep only decision-relevant candidates.
@@ -67,6 +67,7 @@ CORRIDORS, CLUSTERS AND MICRO-STOPS
 - Return as many micro-stops as materially improve the route; never target a quota.
 - Every micro-stop has priority CORE, HIGH, OPTIONAL or DROP_FIRST.
 - Consider route fit, marginal detour, dwell, daylight, access, redundancy and traveler pace.
+- V129 CORRIDOR COMPLETION VALUE: when two marginal micro-stops are otherwise comparable, also evaluate whether one adds a genuinely distinctive facet or meaningfully completes the geographic/cultural/natural narrative of the already-selected corridor, especially as a low-detour intermediate or route-closing/terminal stop. Treat this only as a qualitative tie-breaker/opportunity signal, never as a quota or completion mandate. Do not add a stop merely to make a circuit look complete, and never displace CORE/HIGH dwell, safe return, daylight, fatigue margin or a stronger experience for this purpose.
 - Long anchor experiences can displace weaker micro-stops. Never compress a major anchor just to keep more stops.
 - REGIONAL ANCHOR COMPLETENESS: once a regional corridor is selected, explicitly compare the defining/major/characteristic experiences that naturally belong to that corridor against its complementary/supporting micro-stops before finalizing route_manifest. A feasible high-value corridor experience must not be displaced merely to preserve several weaker stops. Omission remains valid when traveler fit, calendar, season, geography, fatigue, reservation rigidity, mobility or honest time capacity makes it the weaker choice; reflect that reason in the inventory/coverage decision. This is semantic and global: never rely on destination-specific examples, fixed attraction lists or venue hardcodes.
 - MICRO-STOP HIERARCHY: micro-stop discovery is also a last-mile completeness review of the corridor. Inspect strong low-detour intermediate AND route-closing/terminal experiences before finalizing the sequence. If a discovered experience is defining/major or otherwise materially stronger than ordinary scenic/photo/supporting stops, promote it to CORE/HIGH with honest dwell time; do not treat it as a disposable micro-stop merely because it lies near the end of the route. OPTIONAL/DROP_FIRST capacity is allocated only after those stronger corridor experiences are protected.
