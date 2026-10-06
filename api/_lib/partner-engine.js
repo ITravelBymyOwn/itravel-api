@@ -865,6 +865,23 @@ function signedVirtualOffer({partner,targetUrl,placement,need={},city='',resolut
 function twelveGoSlug(value=''){
   return clean(value,120).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
 }
+function twelveGoCommercialMode(value=''){
+  const key=normalizeKey(value);
+  if(/\b(train|rail|tren|ferrocarril)\b/.test(key))return 'train';
+  if(/\b(bus|coach|autobus|autocar)\b/.test(key))return 'bus';
+  if(/\b(ferry|ferri|ferris|boat|barco)\b/.test(key))return 'ferry';
+  if(/\b(van|minivan|shuttle|transfer|furgoneta)\b/.test(key))return 'van';
+  if(/\b(taxi|cab)\b/.test(key))return 'taxi';
+  if(/\b(plane|flight|air|avion|vuelo)\b/.test(key))return 'flight';
+  return '';
+}
+function twelveGoEndpointSane(value=''){
+  const text=clean(value,120).trim();
+  if(text.length<2)return false;
+  const key=normalizeKey(text);
+  if(!key||/^(area|zona|region|centro|center|downtown|hotel|parking|station|estacion|terminal|airport|aeropuerto)$/.test(key))return false;
+  return true;
+}
 function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
   const partner=virtualPartner('12go','12Go','transport'); const out=[]; const seen=new Set();
   for(const need of (Array.isArray(needs)?needs:[])){
@@ -877,24 +894,27 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
     // not necessarily a bookable market. Resolve each real intercity leg first.
     if(payload?.legs?.length){
       payload.legs.forEach((leg,index)=>{
+        // 12Go is intentionally independent from Omio, but it consumes only the
+        // same Route Resolver legs that ITBMO already marked commercial. Local
+        // access/walking/metro micro-legs must never become affiliate searches.
+        if(!leg?.commerce_eligible)return;
+        const mode=twelveGoCommercialMode(leg?.mode);
+        if(!mode)return;
         const origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
         const destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
-        if(origin&&destination)candidates.push({origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode:clean(leg?.mode,80)});
+        if(twelveGoEndpointSane(origin)&&twelveGoEndpointSane(destination)&&normalizeKey(origin)!==normalizeKey(destination))candidates.push({origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode});
       });
     }
-    if(!candidates.length&&payload?.parent?.origin&&payload?.parent?.destination)candidates.push({origin:payload.parent.origin,destination:payload.parent.destination,date:need?.travel_date||'',index:1,mode:''});
-    if(!candidates.length){
-      const m=String(need?.entity_name||need?.source_activity||'').match(/^\s*([^→]+?)\s*→\s*([^→]+?)\s*$/);
-      if(m)candidates.push({origin:m[1],destination:m[2],date:need?.travel_date||''});
-    }
+    // Do not synthesize a 12Go market from editorial parent labels or free text.
+    // If Route Resolver did not seal a commercial A→B leg, fail closed.
     for(const route of candidates){
-      const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b)continue;
+      const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b||normalizeKey(a)===normalizeKey(b))continue;
       const key=`${normalizeKey(a)}|${normalizeKey(b)}|${route.date||''}`; if(seen.has(key))continue; seen.add(key);
       const locale=normalizeLanguage(uiLanguage)==='es'?'es':'en';
       const base=`https://12go.asia/${locale}/travel/${encodeURIComponent(a)}/${encodeURIComponent(b)}/`;
       const targetUrl=appendParams(base,{date:route.date||undefined,z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
-      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:'verified_route_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80)},titleEs:label,titleEn:label,descriptionEs:'Consulta opciones de transporte disponibles para esta ruta en 12Go.',descriptionEn:'Check available transport options for this route on 12Go.',confidence:'medium'});
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:'context_route_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80)},titleEs:label,titleEn:label,descriptionEs:'Busca opciones para este tramo en 12Go. Horarios y disponibilidad se confirman directamente con el proveedor.',descriptionEn:'Search options for this leg on 12Go. Schedules and availability are confirmed directly with the provider.',confidence:'medium'});
       if(offer)out.push(offer);
     }
   }
@@ -918,7 +938,7 @@ function resolveRiseShieldTripOffer(){
 }
 
 function rankOffers(offers) {
-  const resolution = { workspace_feed_route: 43, workspace_canonical_route: 42, context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
+  const resolution = { workspace_feed_route: 43, workspace_canonical_route: 42, context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_route_search: 37, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
   return [...offers].sort((a, b) => {
     const ra = resolution[a?.resolution_type] || 0;
