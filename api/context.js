@@ -7,7 +7,7 @@ import OpenAI from "openai";
 import crypto from "crypto";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const MODEL = process.env.OPENAI_CONTEXT_MODEL || process.env.OPENAI_MODEL || "gpt-5-mini";
+const MODEL = process.env.OPENAI_CONTEXT_MODEL || "gpt-5.6-luna";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
@@ -21,12 +21,12 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.3";
+const CONTEXT_VERSION = "1.9-route-segments";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
 const CONTEXT_BATCH_TIMEOUT_MS = 45000;
-const CONTEXT_BATCH_RETRIES = 1;
+const CONTEXT_BATCH_RETRIES = 2;
 const ALLOWED_NEEDS = new Set([
   "ticket_required",
   "reservation_recommended",
@@ -202,9 +202,16 @@ function blocksAttractionAdmission(source, entityName = "", entityType = "other"
   const knownHub = /(?:^|\b)(?:roma termini|milano centrale|napoli centrale|venezia santa lucia|firenze santa maria novella|barcelona sants|madrid atocha|paris gare du nord|london st pancras)(?:\b|$)/i;
   if (transportHub.test(entity) || knownHub.test(entity)) return true;
 
-  // Lodging and food venues are not admission products.
-  const lodgingOrFood = /(?:^|\b)(?:hotel|hostel|alojamiento|accommodation|airbnb|resort|restaurant|ristorante|trattoria|osteria|pizzeria|cafe|coffee shop|bar|pub|gelateria|bakery|panaderia)(?:\b|$)/i;
-  if (lodgingOrFood.test(entity)) return true;
+  // Lodging and food venues are not admission products. A named restaurant may
+  // not contain the word "restaurant", so also inspect the source activity for
+  // explicit meal intent before allowing an admission classification.
+  const lodgingOrFood = /(?:^|\b)(?:hotel|hostel|alojamiento|accommodation|airbnb|resort|restaurant|restaurante|ristorante|trattoria|osteria|pizzeria|cafe|coffee shop|bar|pub|gelateria|bakery|panaderia)(?:\b|$)/i;
+  const mealIntent = /(?:^|\b)(?:desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|tapas|degustacion|gastronomic meal)(?:\b|$)/i;
+  if (lodgingOrFood.test(entity) || lodgingOrFood.test(activity) || mealIntent.test(activity)) return true;
+
+  // Ordinary public-space experiences should never become admission products.
+  const publicSpace = /(?:^|\b)(?:mercado|market|barrio|neighborhood|district|plaza|square|calle|street|paseo|walk|walking|recorrido a pie|mirador del valle|viewpoint|gran via|puerta del sol)(?:\b|$)/i;
+  if (publicSpace.test(entity) && !/(?:museum|museo|palace|palacio|alcazar|catedral|cathedral|tower|torre|interior)/i.test(entity)) return true;
 
   // Explicit non-admission intent.
   const nonAdmissionVisit = /(?:^|\b)(?:photo stop|parada fotografica|exterior|outside|fachada|shopping|compras|free time|tiempo libre)(?:\b|$)/i;
@@ -561,114 +568,85 @@ function accessEvidence(row) {
   return { hint: "", evidence: "" };
 }
 
+function rowPhysicalDestination(row, fallbackCity="") {
+  return clean(row?.physical_location || row?.commerce_context?.physical_destination || fallbackCity, 160);
+}
+
 function buildCandidates(trip, requestedCity) {
   const checkpoint = plain(trip?.itinerary_data);
   const itineraries = plain(checkpoint.itineraries);
-  const destinationNames = cityNames(trip);
-  const city = destinationNames.find(name => name.toLowerCase() === requestedCity.toLowerCase()) || "";
-
-  if (!city) return { city: "", candidates: [] };
-
-  const cityData = plain(itineraries[city]);
-  const byDay = plain(cityData.byDay);
+  const requestedKey = normalizeEntityKey(requestedCity);
   const candidates = [];
   const pendingContextNotes = new Map();
+  const physicalNames = new Set(cityNames(trip));
 
-  Object.keys(byDay)
-    .map(Number)
-    .filter(Number.isFinite)
-    .sort((a, b) => a - b)
-    .forEach(day => {
-      const rows = Array.isArray(byDay[day]) ? byDay[day] : [];
-      const substantive = rows
-        .map((row, index) => ({ row, index }))
-        .filter(({ row }) =>
-          row &&
-          typeof row === "object" &&
-          !isLowValueRow(row) &&
-          !isGenericTransferActivity(row?.activity)
-        );
+  for (const [sourceCity, rawCityData] of Object.entries(itineraries)) {
+    const byDay = plain(plain(rawCityData).byDay);
+    Object.values(byDay).forEach(rows => (Array.isArray(rows)?rows:[]).forEach(row=>{
+      const physical=rowPhysicalDestination(row,sourceCity);
+      if(physical) physicalNames.add(physical);
+      const cc=plain(row?.commerce_context);
+      if(cc.origin) physicalNames.add(clean(cc.origin,160));
+      if(cc.destination) physicalNames.add(clean(cc.destination,160));
+    }));
+  }
+  const destinationNames=[...physicalNames].filter(Boolean);
+  const matchedPhysicalName=destinationNames.find(name=>normalizeEntityKey(name)===requestedKey) || clean(requestedCity,160);
+  let matchedAny=false;
 
-      rows.forEach((row, index) => {
-        if (!row || typeof row !== "object") return;
-        if (isLowValueRow(row)) return;
+  for (const [sourceCity, rawCityData] of Object.entries(itineraries)) {
+    const byDay = plain(plain(rawCityData).byDay);
+    Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(day=>{
+      const rows=Array.isArray(byDay[day])?byDay[day]:[];
+      rows.forEach((row,index)=>{
+        if(!row||typeof row!=="object"||isLowValueRow(row)) return;
+        const cc=plain(row.commerce_context);
+        const semantic=clean(cc.semantic_type,80).toUpperCase();
+        const physical=rowPhysicalDestination(row,sourceCity);
+        const isTransport=semantic==="TRANSPORT";
+        const belongs=isTransport
+          ? normalizeEntityKey(cc.origin||row.from)===requestedKey
+          : normalizeEntityKey(physical)===requestedKey;
+        if(!belongs) return;
+        matchedAny=true;
 
-        const activity = normalizeActivity(row.activity, city);
-        if (!activity) return;
-
-        const transportInfo = detectTransportArrangement(row, destinationNames);
-        const genericTransfer = isGenericTransferActivity(row.activity);
-
-        if (genericTransfer && !transportInfo.significant) {
-          const destination = clean(row.to, 180);
-          const match = substantive.find(({ row: target }) =>
-            entityMatch(destination, target?.activity) ||
-            entityMatch(destination, target?.to) ||
-            entityMatch(activity, target?.activity)
-          );
-
-          if (match) {
-            const existingId = `${day}-${match.index + 1}`;
-            const existing = candidates.find(item => item.candidate_id === existingId);
-
-            if (existing) {
-              existing.context_notes = clean(
-                `${existing.context_notes || existing.notes || ""} ${clean(row.notes, 320)}`,
-                620
-              );
-              const evidence = accessEvidence({
-                activity: existing.activity,
-                notes: existing.context_notes
-              });
-              existing.access_hint = evidence.hint;
-              existing.access_evidence = evidence.evidence;
-            } else {
-              const pending = clean(
-                `${pendingContextNotes.get(existingId) || ""} ${clean(row.notes, 320)}`,
-                620
-              );
-              pendingContextNotes.set(existingId, pending);
-            }
-            return;
-          }
+        const activity=normalizeActivity(row.activity,physical||sourceCity);
+        if(!activity) return;
+        const transportInfo=detectTransportArrangement(row,destinationNames);
+        const genericTransfer=isGenericTransferActivity(row.activity);
+        if(genericTransfer&&!transportInfo.significant){
+          const destination=clean(row.to,180);
+          if(destination) pendingContextNotes.set(`${sourceCity}:${day}:${index+1}`,clean(row.notes,320));
+          return;
         }
-
-        const destination = clean(row.to, 180);
-        const entityHint = genericTransfer && destination ? destination : activity;
-
-        const candidateId = `${day}-${index + 1}`;
-        const ownNotes = clean(row.notes, 320).replace(/^valid:\s*/i, "");
-        const contextNotes = clean(
-          `${pendingContextNotes.get(candidateId) || ""} ${ownNotes}`,
-          620
-        );
+        const candidateId=`${normalizeEntityKey(sourceCity)||'unit'}-${day}-${index+1}`;
+        const destination=clean(row.to,180);
+        const entityHint=clean(cc.canonical_place,180)||destination||activity;
+        const ownNotes=clean(row.notes,320).replace(/^valid:\s*/i,"");
+        const contextNotes=clean(`${pendingContextNotes.get(candidateId)||""} ${ownNotes}`,620);
         pendingContextNotes.delete(candidateId);
-        const evidence = accessEvidence({ activity, notes: contextNotes });
-
+        const evidence=accessEvidence({activity,notes:contextNotes});
         candidates.push({
-          candidate_id: candidateId,
-          day,
-          activity,
-          entity_hint: entityHint,
-          notes: ownNotes,
-          context_notes: contextNotes,
-          from: clean(row.from, 160),
-          to: destination,
-          transport: clean(row.transport, 120),
-          intercity_hint: transportInfo.intercity,
-          transport_arrangement_hint: transportInfo.significant,
-          explicit_tour_hint: explicitTourHint(row),
-          access_hint: evidence.hint,
-          access_evidence: evidence.evidence
+          candidate_id:candidateId,day,activity,entity_hint:entityHint,notes:ownNotes,context_notes:contextNotes,
+          from:clean(row.from,160),to:destination,transport:clean(row.transport,120),
+          physical_destination:physical,source_planning_unit:sourceCity,
+          intercity_hint:transportInfo.intercity,transport_arrangement_hint:transportInfo.significant,
+          explicit_tour_hint:explicitTourHint(row),
+          commerce_semantic_type:semantic,
+          commerce_ticket_need:clean(cc.ticket_need,40).toLowerCase(),
+          commerce_guided_tour_value:clean(cc.guided_tour_value,40).toLowerCase(),
+          destination_priority:clean(cc.destination_priority,40).toLowerCase(),
+          commerce_canonical_place:clean(cc.canonical_place,180),
+          access_hint:evidence.hint||(semantic==='ATTRACTION_TICKET'?(String(cc.ticket_need||'').toLowerCase()==='required'?'ticket_required':'reservation_recommended'):''),
+          access_evidence:evidence.evidence||clean(cc.canonical_place||row.activity,260),
+          route_resolution:plain(cc.route_resolution)
         });
       });
     });
-
-  return {
-    city,
-    candidates: candidates.slice(0, MAX_CANDIDATES)
-  };
+  }
+  return {city:matchedAny?matchedPhysicalName:"",candidates:candidates.slice(0,MAX_CANDIDATES)};
 }
+
 function systemPrompt(language, itineraryLanguage = "") {
   const outputLanguage = normalizeUiLanguage(language) === "en" ? "English" : "Spanish";
   const sourceLanguage = itineraryLanguage || "unknown / mixed";
@@ -680,7 +658,7 @@ Your job is to identify what the traveler genuinely needs to arrange to execute 
 
 The itinerary source language metadata may be ${sourceLanguage}. It is a hint only, never an allow-list or a reason to reject content. Detect and understand the actual language directly from the supplied itinerary text, including languages not explicitly named by ITBMO, and write user_message only in ${outputLanguage}.
 
-Analyze only the supplied itinerary candidates. Never add attractions, routes, dates, times, or activities that are not present in the source.
+Analyze only the supplied itinerary candidates. Never add attractions, routes, dates, times, or activities that are not present in the source. Treat destination_priority=essential/high as a destination-defining signal: evaluate independent admission first and, when guidance materially adds value, a separate optional tour.
 
 Allowed need_type values:
 - ticket_required
@@ -696,9 +674,10 @@ ACCESS-FIRST RULES (CRITICAL):
 3. If advance booking is strongly useful but not mandatory, use reservation_recommended.
 4. If only one component requires payment/reservation (for example a dome climb or special interior), state that condition in user_message and do not imply the whole site requires it.
 5. candidate.access_hint and candidate.access_evidence are source-derived clues. Respect them unless the clue clearly refers to transport rather than attraction admission.
+5A. candidate.commerce_semantic_type, commerce_ticket_need, commerce_guided_tour_value and commerce_canonical_place are structured signals emitted by the itinerary engine. Treat them as stronger evidence than generic prose: ATTRACTION_TICKET with ticket_need=required must produce ticket_required; recommended/optional/unknown normally produces reservation_recommended when access is genuinely controlled. guided_tour_value=high may additionally produce guided_tour_optional, but never instead of the access need. FREE_SIGHT, RESTAURANT and LOGISTICS must not become ticket needs without contradictory explicit evidence.
 6. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
 7. When multiple itinerary rows on the same day are clearly parts of one commonly shared admission complex, avoid duplicate purchase needs. Anchor one need to the earliest relevant candidate, use a combined entity_name, and classify the duplicate access rows no_action. Do this only with high confidence.
-8. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact visit.
+8. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Think in EXPERIENCE CLUSTERS, never itinerary rows. Ordinary plazas, streets, neighborhoods, markets, viewpoints, exteriors and short walking stops are ingredients of an overview experience, not separate tour products. When two or more sightseeing rows in the same locality can naturally be covered by one walking/city/overview tour, return ONE guided_tour_optional anchored to the earliest candidate and classify the other tour alternatives no_action. Use attraction-specific guided tours only when that exact attraction is a genuinely distinct experience that materially benefits from guidance.
 9. Prefer no_action for plazas, streets, exterior photo stops, ordinary neighborhood walks, free public spaces, meals, hotel time, free time, and simple local movement unless the source itself clearly indicates an arrangement is needed.
 10. intercity_transport is only for actual movement between the trip's main destinations already visible in the source.
 11. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning. Never use it for ordinary walking or short local movement.
@@ -875,6 +854,16 @@ function categoryForNeed(needType) {
   return "none";
 }
 
+function encodedResolvedRoute(source){
+  const rr=plain(source?.route_resolution);
+  const legs=Array.isArray(rr?.legs)?rr.legs.filter(leg=>leg&&leg.origin&&leg.destination):[];
+  if(!legs.length)return [source?.from,source?.to].filter(Boolean).join(" → ");
+  const payload={v:1,parent:{origin:clean(source?.from,160),destination:clean(source?.to,160)},summary:clean(rr?.summary,420),legs:legs.slice(0,12).map((leg,index)=>({
+    index:index+1,direction:clean(leg.direction,24),origin:clean(leg.origin,160),destination:clean(leg.destination,160),mode:clean(leg.mode,40),departure_time:clean(leg.departure_time,16),arrival_time:clean(leg.arrival_time,16),estimated_minutes:Number(leg.estimated_minutes||0)||0,commerce_eligible:Boolean(leg.commerce_eligible),commercial_origin:clean(leg.commercial_origin,120),commercial_destination:clean(leg.commercial_destination,120),commercial_origin_es:clean(leg.commercial_origin_es,120),commercial_destination_es:clean(leg.commercial_destination_es,120),commercial_origin_en:clean(leg.commercial_origin_en,120),commercial_destination_en:clean(leg.commercial_destination_en,120),note:clean(leg.note,240)
+  }))};
+  return `ITBMO_ROUTE_V1|${encodeURIComponent(JSON.stringify(payload))}`;
+}
+
 function sanitizeClassifications(candidates, classifications, city) {
   const sourceById = new Map(candidates.map(item => [item.candidate_id, item]));
   const usedCandidateNeed = new Set();
@@ -891,6 +880,12 @@ function sanitizeClassifications(candidates, classifications, city) {
     const entityName = clean(raw?.entity_name, 180) || source.entity_hint || source.activity;
 
     if (needType === "no_action" || confidence === "low") continue;
+
+    const semantic = String(source.commerce_semantic_type || "").toUpperCase();
+    if ((needType === "ticket_required" || needType === "reservation_recommended") &&
+        ["RESTAURANT","LOGISTICS","FREE_SIGHT","NONE","TRANSPORT"].includes(semantic)) continue;
+    if (needType === "guided_tour_optional" &&
+        !["ATTRACTION_TICKET","TOUR_EXPERIENCE","FREE_SIGHT"].includes(semantic)) continue;
 
     if (
       (needType === "ticket_required" || needType === "reservation_recommended") &&
@@ -923,7 +918,7 @@ function sanitizeClassifications(candidates, classifications, city) {
       confidence,
       user_message: clean(raw?.user_message, 300),
       source_activity: source.activity,
-      source_route: [source.from, source.to].filter(Boolean).join(" → "),
+      source_route: (needType === "intercity_transport" || needType === "transport_arrangement") ? encodedResolvedRoute(source) : [source.from, source.to].filter(Boolean).join(" → "),
       transport: source.transport
     });
   }
@@ -968,6 +963,65 @@ function accessMessage(needType, entityName, language) {
   return entity ? `Reservar ${entity} con antelación puede facilitar esta visita planificada.` : "Reservar con antelación puede ser útil para esta visita.";
 }
 
+function localityFromCandidate(source, fallbackCity) {
+  const activity = clean(source?.activity, 240);
+  const match = activity.match(/^([^–—-]{2,80})\s*[–—-]\s*/);
+  return clean(match?.[1] || fallbackCity, 100) || fallbackCity;
+}
+
+function consolidateOptionalTours(candidates, needs, city, language) {
+  const sourceById = new Map(candidates.map(item => [item.candidate_id, item]));
+  const nonTours = (needs || []).filter(item => item.need_type !== "guided_tour_optional");
+  const tourNeeds = (needs || []).filter(item => item.need_type === "guided_tour_optional");
+  const groups = new Map();
+
+  for (const need of tourNeeds) {
+    const source = sourceById.get(String(need.id || "").split(":")[0]);
+    if (!source) continue;
+    const locality = localityFromCandidate(source, city);
+    const key = locality.toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ need, source, locality });
+  }
+
+  const consolidated = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      const { need, source } = group[0];
+      const generic = /(?:barrio|neighborhood|district|plaza|square|market|mercado|paseo|walk|mirador|viewpoint|traslado|transfer)/i.test(`${source.activity} ${need.entity_name}`);
+      if (!generic && (source.explicit_tour_hint || need.confidence === "high")) consolidated.push(need);
+      continue;
+    }
+    const first = group[0];
+    const locality = first.locality;
+    consolidated.push({
+      ...first.need,
+      id: `${first.source.candidate_id}:guided_tour_optional`,
+      entity_name: normalizeUiLanguage(language) === "en" ? `${locality} city tour` : `City tour en ${locality}`,
+      entity_type: "experience",
+      confidence: "high",
+      user_message: normalizeUiLanguage(language) === "en"
+        ? `A city tour can combine several of the ${locality} sights already included in your itinerary.`
+        : `Un city tour puede reunir varios de los lugares de ${locality} que ya están incluidos en tu itinerario.`,
+      source_activity: group.map(x => x.source.activity).slice(0, 4).join(" · ")
+    });
+  }
+  const output=[...nonTours, ...consolidated];
+  const hasOverview=output.some(item=>item?.need_type==="guided_tour_optional" && /\b(city tour|tour panoramico|highlights tour)\b/i.test(semanticNeedKey(item?.entity_name||"")));
+  const sightseeingCandidates=(candidates||[]).filter(source=>!source?.intercity_hint && !source?.transport_arrangement_hint && !/\b(check[- ]?in|check[- ]?out|hotel|alojamiento|breakfast|desayuno|lunch|almuerzo|dinner|cena|transfer|traslado)\b/i.test(`${source?.activity||""} ${source?.entity_hint||""}`));
+  if(!hasOverview && sightseeingCandidates.length>=1 && city){
+    const source=sightseeingCandidates[0];
+    output.push({
+      id:`${source.candidate_id}:guided_tour_optional:city-overview`,category:"tours",city,day:source.day,
+      entity_name:normalizeUiLanguage(language)==="en"?`${city} city tour`:`City tour en ${city}`,
+      entity_type:"experience",need_type:"guided_tour_optional",confidence:"high",
+      user_message:normalizeUiLanguage(language)==="en"?`Compare a destination-wide guided overview of ${city} with exploring independently.`:`Compara una visita panorámica guiada de ${city} con recorrer el destino por cuenta propia.`,
+      source_activity:source.activity,source_route:"",derived_by:"deterministic_city_overview"
+    });
+  }
+  return output;
+}
+
 function ensureEvidenceBackedAccessNeeds(candidates, needs, city, language) {
   const result = Array.isArray(needs) ? [...needs] : [];
   const accessByCandidate = new Set(
@@ -1003,6 +1057,50 @@ function ensureEvidenceBackedAccessNeeds(candidates, needs, city, language) {
   }
 
   return result;
+}
+
+function ensureGuidedAdmissionAlternatives(candidates, needs, city, language) {
+  const result=Array.isArray(needs)?[...needs]:[];
+  const sourceById=new Map((candidates||[]).map(x=>[x.candidate_id,x]));
+  const hasTourForCandidate=id=>result.some(n=>n?.need_type==='guided_tour_optional'&&String(n?.id||'').split(':')[0]===id);
+  for(const access of [...result]){
+    if(!['ticket_required','reservation_recommended'].includes(access?.need_type))continue;
+    const candidateId=String(access?.id||'').split(':')[0];
+    const source=sourceById.get(candidateId);
+    const guidedValue=String(source?.commerce_guided_tour_value||'').toLowerCase();
+    const attraction=clean(access?.entity_name||source?.entity_hint||source?.activity,180);
+    if(!attraction||hasTourForCandidate(candidateId))continue;
+    if(!['high','recommended','strong'].includes(guidedValue)&&!source?.explicit_tour_hint)continue;
+    result.push({id:`${candidateId}:guided_tour_optional:admission`,category:'tours',city,day:source?.day||access.day,
+      entity_name:normalizeUiLanguage(language)==='en'?`Guided ${attraction} tour with admission`:`Tour guiado de ${attraction} con entrada`,
+      entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',
+      user_message:normalizeUiLanguage(language)==='en'?`Compare visiting ${attraction} independently with a guided option that includes admission.`:`Compara la entrada para visitar ${attraction} por tu cuenta con una opción guiada que incluya el acceso.`,
+      source_activity:source?.activity||access.source_activity||attraction,source_route:access.source_route||'',derived_by:'deterministic_guided_admission_alternative'});
+  }
+  return result;
+}
+
+function semanticNeedKey(value) {
+  return clean(value,220).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/\b(city tour|tour panoramico|highlights tour|guided tour|visita guiada|tour de|entrada|ticket|interior|torres?|tower|patios?|salones?|apartamentos? reales?|royal apartments?)\b/g," ")
+    .replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();
+}
+
+function dedupeSemanticNeeds(needs=[]) {
+  const rank=item=>item?.need_type==="ticket_required"?4:item?.need_type==="reservation_recommended"?3:item?.confidence==="high"?2:1;
+  const out=[];
+  for(const item of needs){
+    const category=categoryForNeed(item?.need_type),key=semanticNeedKey(item?.entity_name||item?.source_activity);
+    const overview=item?.need_type==="guided_tour_optional"&&/\b(city tour|tour panoramico|highlights tour)\b/.test(semanticNeedKey(item?.entity_name));
+    const index=out.findIndex(existing=>{
+      if(categoryForNeed(existing?.need_type)!==category)return false;
+      const other=semanticNeedKey(existing?.entity_name||existing?.source_activity);
+      const otherOverview=existing?.need_type==="guided_tour_optional"&&/\b(city tour|tour panoramico|highlights tour)\b/.test(semanticNeedKey(existing?.entity_name));
+      return (overview&&otherOverview)||(key&&other&&(key===other||(Math.min(key.length,other.length)>=7&&(key.includes(other)||other.includes(key)))));
+    });
+    if(index<0)out.push(item);else if(rank(item)>rank(out[index]))out[index]=item;
+  }
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -1096,14 +1194,17 @@ export default async function handler(req, res) {
     let needs = [];
     if (candidates.length) {
       const itineraryLanguage = normalizeTripLanguage(body.trip_language) || tripContentLanguage(trip);
-      const classifications = await classifyCandidates(
-        city,
-        candidates,
-        uiLanguage,
-        itineraryLanguage
-      );
+      let classifications=[];
+      try {
+        classifications=await classifyCandidates(city,candidates,uiLanguage,itineraryLanguage);
+      } catch (classificationError) {
+        console.warn("[CONTEXT MODEL FALLBACK]",{city,message:classificationError?.message});
+      }
       needs = sanitizeClassifications(candidates, classifications, city);
+      needs = consolidateOptionalTours(candidates, needs, city, uiLanguage);
       needs = ensureEvidenceBackedAccessNeeds(candidates, needs, city, uiLanguage);
+      needs = ensureGuidedAdmissionAlternatives(candidates, needs, city, uiLanguage);
+      needs = dedupeSemanticNeeds(needs);
     }
 
     let persisted = false;

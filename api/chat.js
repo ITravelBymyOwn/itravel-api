@@ -8,12 +8,17 @@
 
 import OpenAI from "openai";
 import crypto from "crypto";
+import { buildTieSystemPrompt, validateTiePlan, TIE_SCHEMA_VERSION } from "./tie-engine.js";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
+// V2.10.9: use a stronger mini-tier model for first-pass itinerary construction,
+// while keeping bounded repair work on the fast/cost-efficient Luna tier.
+const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-luna";
+const REPAIR_MODEL = process.env.OPENAI_REPAIR_MODEL || "gpt-5.6-luna";
 
 /* =========================================================
    INFO CHAT ENTITLEMENT · payment gate + 10-query quota
@@ -370,7 +375,27 @@ function _infoTripCities_(trip) {
     .map(d=>String(d?.city || d?.name || "").trim())
     .filter(Boolean);
 
-  if (cities.length) return [...new Set(cities)];
+  // Travel Model V2 keeps main destinations backward-compatible while route
+  // stops/subdestinations live in structured JSON. Include those places in
+  // Info Chat scope so an overnight stay or user-fixed stop is never treated
+  // as an unrelated destination.
+  const travelModel = plannerInput?.post_payment_progress?.travel_model_v2
+    || plannerInput?.travel_model_v2
+    || null;
+  const routePlaces = Array.isArray(travelModel?.destinations)
+    ? travelModel.destinations.flatMap(d=>{
+        const out=[String(d?.city || "").trim()];
+        const segments=Array.isArray(d?.route?.segments) ? d.route.segments : [];
+        for(const seg of segments){
+          out.push(String(seg?.origin || "").trim());
+          out.push(String(seg?.destination || "").trim());
+        }
+        return out;
+      }).filter(Boolean)
+    : [];
+
+  const scoped=[...new Set([...cities,...routePlaces])];
+  if (scoped.length) return scoped;
 
   return String(trip?.trip_name || "")
     .split("·")
@@ -780,8 +805,7 @@ Apply these rules only when producing actual itinerary rows.
 3. REALISTIC EXPERIENCE DWELL — CATEGORY-BASED
 Before assigning a row duration, classify the experience:
 - destination thermal lagoon / major hot-spring or spa complex: normally 2h30–4h;
-- an iconic thermal lagoon comparable to Blue Lagoon: minimum 3h of actual experience time, plus
-  realistic arrival, parking, check-in, changing, shower and exit logistics when material;
+- a destination-defining thermal lagoon / major spa complex: protect substantial actual experience time plus realistic arrival, parking, check-in, changing, shower and exit logistics when material;
 - whale watching / wildlife cruise / marine safari: normally 2h30–4h of activity time, plus
   check-in, boarding and disembarkation logistics;
 - substantial guided walking or food tour: normally 2h30–4h;
@@ -796,7 +820,7 @@ If an experience cannot receive its useful minimum inside the user's window, mov
 day's scope or omit it. Never publish a misleadingly short visit.
 
 4. TIME MATHEMATICS AND TRANSFERS
-- Every visit row interval must contain transport plus activity.
+- Every row interval must be fully explained by the semantics that actually apply: movement time, activity dwell, or both. Never fabricate one merely because the other exists.
 - If the user did not provide an end time, the itinerary MUST normally reach at least approximately 19:00 local time. Treat 19:00 as a minimum planning requirement, not a ceiling. Finishing materially earlier requires a real constraint; continue later when high-value evening experiences materially improve the itinerary. Respect any explicit user end time as a hard boundary.
 - Day 1 starts AT the lodging at the user-provided time. Complete check-in/luggage drop before sightseeing and do not invent an inbound transfer.
 - On full days spanning lunch, include a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On regional/day-trip days, keep the meal on-route and preserve route continuity.
@@ -809,12 +833,9 @@ day's scope or omit it. Never publish a misleadingly short visit.
   sleeps elsewhere.
 - Estimate long returns conservatively from the actual final stop to the actual lodging/base.
 - Do not shorten a return simply to fit the requested end time; instead remove an optional stop.
-- Pure transfers and returns must use kind "transport" and exactly one duration line:
-  Transport: <realistic estimate or range>
-- Every row with a real visit/experience must use kind "activity" and exactly two duration lines:
-  Transport: <realistic estimate or range>
-  Activity: <realistic estimate or range>
-- Under one hour use minutes. From one hour onward use hours/minutes. Never use 0h or 0m.
+- Pure transfers and returns use kind "transport". Put the mode and its approximate door-to-door time together in transport (for example "Walk · ~15m" or "Bus · ~25m"); duration may be empty. Never invent an Activity duration for a movement-only row.
+- A real visit/experience uses kind "activity". Put genuine access/mobility and its approximate time together in transport. Put only the actual dwell in duration as "Activity: <realistic estimate or range>". If no meaningful movement is needed, transport may be empty.
+- Never generate synthetic 1-minute Transport or Activity values. Under one hour use minutes. From one hour onward use hours/minutes. Never use 0h or 0m.
 
 5. MACRO-ROUTES AND MICRO-STOPS
 - For a regional route, first inventory the strongest logical stops on that exact corridor.
@@ -1251,15 +1272,27 @@ function _v62NormalizeDuration_(row = {}) {
   const transport = _v62DurationBounds_(transportRaw);
   const activity = _v62DurationBounds_(activityRaw);
 
-  if (_v65IsPureTransportRow_(row) && transport) {
-    return `Transport: ${_v62FormatMinutes_(transport.min)}`;
+  if (_v65IsPureTransportRow_(row)) {
+    return "";
   }
 
-  if (transport && activity) {
-    return `Transport: ${_v62FormatMinutes_(transport.min)}\nActivity: ${_v62FormatMinutes_(activity.min)}`;
+  if (activity) {
+    return `Activity: ${_v62FormatMinutes_(activity.min)}`;
   }
 
   return _normalizeDurationText_(raw);
+}
+
+function _v62TransportWithDuration_(row = {}) {
+  let transport = String(row?.transport || "").replace(/\s+/g, " ").trim();
+  const raw = String(row?.duration || "");
+  const transportRaw = _v62ExtractDurationPart_(raw, ["Transport", "Transporte"]);
+  const declared = _v62DurationBounds_(transportRaw);
+  const alreadyTimed = _v62DurationBounds_(transport);
+  if (declared && !alreadyTimed) {
+    transport = [transport, _v62FormatMinutes_(declared.min)].filter(Boolean).join(" · ");
+  }
+  return transport;
 }
 
 function _v62NormalizeFinalParsed_(parsed) {
@@ -1290,7 +1323,7 @@ function _v62NormalizeFinalParsed_(parsed) {
             activity,
             from,
             to,
-            transport: String(row?.transport || "").replace(/\s+/g, " ").trim(),
+            transport: _v62TransportWithDuration_(row),
             duration: _v62NormalizeDuration_(row),
             notes: String(row?.notes || "").replace(/\s+/g, " ").trim(),
             kind: row?.kind ?? "",
@@ -1344,10 +1377,6 @@ function _v64ExperienceProfile_(row = {}) {
   const text = _v62NormKey_(
     `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`
   );
-
-  if (/\bblue lagoon\b|\bbl[aá]a l[oó]ni[dð]\b/.test(text)) {
-    return { type: "iconic_thermal_lagoon", minimumActivityMinutes: 180 };
-  }
 
   if (
     /\bthermal lagoon\b|\bhot springs?\b|\bthermal baths?\b|\bgeothermal spa\b|\bonsen\b|\bhammam\b|\bspa complex\b|\bbalneario\b|\btermas\b|\bbanos termales\b|\bbaños termales\b|\baguas termales\b|\blaguna termal\b/.test(text)
@@ -1728,7 +1757,7 @@ FINAL SURGICAL REPAIR:
 - NEVER create an umbrella row whose interval covers later rows. Each row is either one pure movement or one leg plus one activity.
 - Recalculate every affected row so pure movements contain only transport time, while visit rows contain transport + activity inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
-- Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
+- A destination-defining thermal lagoon/spa complex requires substantial realistic activity time plus arrival/check-in/changing/exit logistics; never compress a major anchor to preserve weaker stops.
 - Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
 - Long regional returns must be conservative; remove optional stops rather than shortening the return.
 - Aurora, when plausible, must be an ADDITIONAL opportunity note in the NOTES of the FINAL row of EVERY day in that city, not a standalone row. This applies even when auroras or an aurora tour were explicitly requested in Preferences. Each day should preserve a weather-dependent opportunity; only a genuinely confirmed fixed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may remain as a dedicated row.
@@ -1955,11 +1984,8 @@ GENERAL RULES:
   • This applies EVEN IF the names are translated, abbreviated, paraphrased, misspelled, or written differently.
   • Treat equivalent routes/areas across languages and naming variants as the SAME underlying itinerary.
   • Examples of equivalent duplicates:
-    - "Golden Circle" = "Golden Cycle" = "Círculo Dorado" = "Cercle d'Or" = "Circolo d'Oro"
-    - "South Coast" = "Costa Sur" = "Côte Sud" = "Costa Sul"
-    - "Snæfellsnes" = "Snaefellsnes Peninsula" = "Península de Snæfellsnes"
-    - "Reykjanes Peninsula" = "Península de Reykjanes"
-    - "Old Town" = "Centro histórico" = "Historic Center" = "Vieille Ville"
+    - translated or misspelled names of the same regional circuit count as one circuit
+    - "Old Town" = "Centro histórico" = "Historic Center" = "Vieille Ville" when they refer to the same district
     - "Waterfront" = "Riverside" = "Harbor area" = "Promenade" when they refer to the same local corridor
   • The planner MUST reason semantically/geographically, not only textually.
   • If a macro-region, flagship route, neighborhood corridor, or major circuit has already been used, do NOT reuse it unless:
@@ -2082,23 +2108,20 @@ MANDATORY ROW CONTRACT:
 - activity: ALWAYS "DESTINATION – SUB-STOP" (– or - with spaces). Generic like "museum", "park", "local restaurant" is forbidden.
   IMPORTANT (GLOBAL):
   - "DESTINATION" is NOT always the base city:
-    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza").
+    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the real macro-tour / regional-corridor NAME.
     • If it's NOT a day trip, "DESTINATION" can be the base city.
   - This also applies to transfers/returns:
-    • Day trip example: "South Coast – Return to Reykjavik"
-    • City example: "Budapest – Return to hotel"
+    • Day trip pattern: "<Regional circuit> – Return to <Base city>"
+    • City pattern: "<Base city> – Return to hotel"
   - CRITICAL GEOGRAPHIC SEMANTICS:
     • If the stop is clearly outside the base city, do NOT label it as "<Base city> – <Outside stop>" unless it is explicitly a departure or return row.
     • For out-of-city attractions, prefer the real area / corridor / macro-tour name as DESTINATION.
-    • Example: avoid "Reykjavik – Blue Lagoon" as the main visit row; prefer a real external area/macro-tour label.
+    • Do not label an out-of-city anchor as if it were inside the base city; prefer its real external area/corridor/macro-tour label.
 - duration and kind:
-  • A real visit/experience uses kind "activity" and EXACTLY 2 lines with \\n:
-    "Transport: <realistic estimate or ~range>"
-    "Activity: <realistic estimate or ~range>"
-  • A row that only moves the traveler from one place to another uses kind "transport" and EXACTLY 1 line:
-    "Transport: <realistic estimate or ~range>"
-  • Never invent check-in, settling, parking or arrival as an activity merely to fill the second line.
-  FORBIDDEN: "Transport: 0m" or "Activity: 0m"
+  • A real visit/experience uses kind "activity". Put genuine mobility + its estimate in transport and only the real dwell in duration: "Activity: <realistic estimate or ~range>". If no movement is meaningful, transport may be empty.
+  • A row that only moves the traveler uses kind "transport". Put mode + approximate time together in transport; duration may be empty.
+  • Never invent check-in, settling, parking, movement or arrival merely to populate a field.
+  FORBIDDEN: synthetic 1-minute values, "Transport: 0m" or "Activity: 0m"
 - notes: required (>=20 chars), motivating and useful:
   1) 1 emotional sentence
   2) 1 logistical tip
@@ -2183,49 +2206,6 @@ DAY TRIPS / MACRO-TOURS:
   • Each day must have a clearly distinct identity.
   • Do NOT use translated naming to disguise repetition.
 
-ICELAND CURATION (when relevant):
-  • From Reykjavik, prioritize high-value realistic day trips such as Golden Circle, South Coast, Reykjanes / Blue Lagoon area, Snæfellsnes, Silver Circle / Borgarfjörður, lava tunnel / geothermal route, whale watching / marine experience, and realistic Southwest / West Iceland options.
-  • For a 7-day Reykjavik itinerary in winter, avoid using 4+ days as pure urban museum/harbor/café filler.
-  • Keep pure Reykjavik city content limited unless the user specifically requested a city-only trip.
-  • For South Coast:
-    - If the route reaches the Reynisfjara / Vík area, Vík should normally be included unless there is a strong reason not to.
-    - Prefer a coherent progression such as Seljalandsfoss → Skógafoss → Vík and/or Reynisfjara → return.
-    - Reynisfjara must appear as a real row if that South Coast stretch is being used; do NOT leave it only in notes.
-  • For Snæfellsnes:
-    - Prefer specific iconic stops such as Kirkjufell, Arnarstapi/Hellnar, Djúpalónssandur, Lóndrangar, Búðir/Búðakirkja when appropriate.
-    - Avoid vague placeholders like only "National Park" if specific named stops are available.
-  • For Reykjanes / Blue Lagoon:
-    - Reserve Blue Lagoon and the Reykjanes corridor to ONE day only.
-    - Allocate at least 3h of actual lagoon activity plus realistic arrival/check-in/changing/exit
-      logistics.
-    - Only after protecting that time, select the best feasible subset from the full corridor
-      inventory, which may include Bridge Between Continents, Sandvík, Gunnuhver, Reykjanesviti,
-      Valahnúkur, Brimketill, Kleifarvatn and Seltún/Krýsuvík.
-    - Do not include all stops blindly: useful daylight, safety, access, route continuity and the
-      user's pace decide.
-    - Never create a second Reykjanes or second Blue Lagoon day elsewhere in the same trip.
-  • For Silver Circle / Borgarfjörður:
-    - Prefer real stops such as Borgarnes, Deildartunguhver, Hraunfossar, Barnafoss, Reykholt, and Krauma when they fit naturally.
-  • For lava tunnel / geothermal route:
-    - Prefer real stops such as Raufarhólshellir, Hveragerði, Hellisheiði, geothermal exhibition area, or nearby coherent geothermal/scenic stops.
-  • For whale watching / marine experience:
-    - Use it only if plausible for season, operating location and traveler profile.
-    - Normally protect at least 2h30 of actual marine-tour time plus check-in, boarding and return.
-    - Reserve the wildlife/marine anchor to one day only and do not repeat the same harbor filler
-      pattern on other days.
-  • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights when they would be exhausting and low quality.
-  • Do NOT repeat the same Iceland macro-route across different days.
-  • If Golden Circle was already used, do NOT create another Golden Circle variant later in the itinerary.
-  • If South Coast was already used, avoid rebuilding another equivalent South Coast corridor day.
-  • If Snæfellsnes was already used, do not recycle the same peninsula structure.
-  • If Reykjanes / Blue Lagoon area was already used, do not create a second equivalent Reykjanes day unless the route is truly different and there are no better alternatives.
-  • Prefer new geographic corridors before repeating known ones.
-  • Iceland itineraries must maximize geographic diversity across days.
-  • Regional Iceland days should feel dense, continuous, and exploratory:
-    - avoid giant dead gaps
-    - enrich routes with real scenic/geothermal/coastal micro-stops
-    - ensure the day feels like a full coherent expedition.
-
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
 - Prioritize plausible, safe, and reasonable options.
@@ -2296,6 +2276,8 @@ FORMAT:
 function _newUsageCollector_() {
   return {
     model: MODEL,
+    models: {},
+    configured_models: {default:MODEL,planner:PLANNER_MODEL,repair:REPAIR_MODEL},
     model_calls: 0,
     input_tokens: 0,
     output_tokens: 0,
@@ -2311,6 +2293,7 @@ function _accumulateUsage_(collector, resp) {
   const total = Number(usage?.total_tokens || (input + output)) || (input + output);
 
   collector.model = String(resp?.model || collector.model || MODEL);
+  collector.models[collector.model] = Number(collector.models[collector.model] || 0) + 1;
   collector.model_calls += 1;
   collector.input_tokens += input;
   collector.output_tokens += output;
@@ -2321,6 +2304,8 @@ function _usagePayload_(collector) {
   if (!collector) return null;
   return {
     model: String(collector.model || MODEL),
+    models: {...(collector.models || {})},
+    configured_models: {...(collector.configured_models || {})},
     model_calls: Number(collector.model_calls || 0),
     input_tokens: Number(collector.input_tokens || 0),
     output_tokens: Number(collector.output_tokens || 0),
@@ -2331,7 +2316,7 @@ function _usagePayload_(collector) {
 // ==============================
 // Model call (with soft timeout)
 // ==============================
-async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000, usageCollector = null) {
+async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000, usageCollector = null, modelOverride = null, reasoningEffort = "low") {
   const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
 
   const controller = new AbortController();
@@ -2340,9 +2325,9 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
   try {
    const resp = await client.responses.create(
   {
-    model: MODEL,
+    model: modelOverride || MODEL,
     reasoning: {
-      effort: "low",
+      effort: reasoningEffort,
     },
     input,
     max_output_tokens,
@@ -2378,7 +2363,72 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
-    const plannerUsage = mode === "planner" ? _newUsageCollector_() : null;
+    const plannerUsage = (mode === "planner" || mode === "planner_v3" || mode === "tie_structure") ? _newUsageCollector_() : null;
+
+    if (mode === "tie_structure") {
+      const request = body.tie_request && typeof body.tie_request === "object" ? body.tie_request : null;
+      if (!request || !Array.isArray(request.open_days) || !request.open_days.length) {
+        return res.status(400).json({error:"TIE_INVALID_REQUEST"});
+      }
+      const tiePrompt = `${buildTieSystemPrompt()}\n\nAUTHORITATIVE TIE REQUEST:\n${JSON.stringify(request)}`;
+      const raw = await callStructured(
+        [{role:"system",content:tiePrompt},{role:"user",content:"Return the validated strategic structure JSON only."}],
+        0.12, 5200, 90000, plannerUsage, PLANNER_MODEL, "medium"
+      );
+      let parsed = cleanToJSON(raw);
+      let validation = validateTiePlan(parsed, request);
+      // Exactly one semantic repair is allowed. Never create an unbounded TIE loop.
+      if (!validation.ok) {
+        const repair = await callStructured(
+          [{role:"system",content:`${tiePrompt}\n\nSTRUCTURAL VALIDATION ERRORS:\n${JSON.stringify(validation.errors)}\nRepair only these structural defects. Preserve strong experience choices. JSON only.`}],
+          0.08, 5200, 90000, plannerUsage, REPAIR_MODEL, "low"
+        );
+        parsed = cleanToJSON(repair);
+        validation = validateTiePlan(parsed, request);
+      }
+      if (!validation.ok) {
+        return res.status(200).json({ok:false,schema:TIE_SCHEMA_VERSION,error:{code:"TIE_STRUCTURE_INVALID",details:validation.errors},usage:_usagePayload_(plannerUsage)});
+      }
+      return res.status(200).json({ok:true,schema:TIE_SCHEMA_VERSION,plan:parsed,usage:_usagePayload_(plannerUsage)});
+    }
+
+    /* ROUTE RESOLVER · planning-grade multimodal logistics.
+       It estimates a physically plausible chain when the traveler has not
+       supplied transport/arrival. It never claims live schedules or bookings. */
+    if (mode === "route_resolver") {
+      const routeUsage = _newUsageCollector_();
+      const movements = Array.isArray(body.movements) ? body.movements.slice(0, 40) : [];
+      if (!movements.length) return res.status(200).json({ok:true,routes:[]});
+      const resolverLang = String(body.lang || lang || "en").toLowerCase().startsWith("es") ? "es" : "en";
+      const resolverPrompt = `You are ITBMO Route Resolver. Resolve each movement into a practical planning-grade multimodal route.\n\nAUTHORITATIVE INPUT:\n${JSON.stringify(movements)}\n\nRULES:\n- Preserve movement_id, origin, destination, departure_date and earliest_departure.\n- earliest_departure means the traveler is available to START the door-to-door movement at that time, not a booked train/flight time.\n- If user_mode is supplied, preserve it as the principal long-distance mode, but still resolve access/connection legs needed to make the route physically coherent.\n- If user_mode is NOT supplied, ITBMO is deciding the transport: optimize for the most direct practical origin-to-destination journey. Prefer a direct bookable intercity service over an indirect chain whenever a credible direct option exists. Compare train, flight, coach/bus and ferry as relevant; do not route through an intermediate city merely because that mode is possible. Minimize unnecessary changes and avoid consuming most of a travel day when a materially faster direct mode is ordinarily available. Local access legs to/from the selected terminal are allowed and do not make the commercial journey indirect.\n- For long main-destination movements, choose the principal mode from the optimized direct journey first; alternatives may mention slower/cheaper modes, but they must not replace the direct recommended route unless the user fixed that mode.\n- If user arrival date/time is supplied, preserve it. Otherwise estimate arrival date/time conservatively from a realistic door-to-door chain.\n- For places without a suitable airport/rail node, route through a sensible nearby hub. Multimodal routes are encouraged when appropriate.\n- Write every traveler-facing field (summary, leg note, alternative summary) in ${resolverLang === "es" ? "Spanish" : "English"}.\n- For daytrip movements, ALWAYS produce both an outbound chain AND a return chain on the same date. A daytrip route is invalid without at least one leg direction="outbound" and at least one leg direction="return". Preserve user_return_by when supplied. Also return return_departure_time and return_arrival_time at route level.\n- For multimodal main movements, split the door-to-door route into real physical legs rather than hiding the chain in one prose summary.\n- Mark each leg commerce_eligible=true only when it is a meaningful bookable intercity passenger segment (train, coach/bus, flight or ferry between distinct cities/hubs). Local taxi, metro, walking, hotel access and airport/station access legs must be false. This flag identifies segment granularity only; it does NOT claim provider availability.
+- For every commerce_eligible leg also return commercial_origin and commercial_destination as canonical CITY/MARKET names, never stations or airports. Also return commercial_origin_es/commercial_destination_es using normal Spanish market names and commercial_origin_en/commercial_destination_en using normal English market names. These are marketplace routing labels, not prose. Example: Paris → Brussels has ES Paris → Bruselas and EN Paris → Brussels. For non-commerce legs return these fields as empty strings.\n- Use robust geographic/transport knowledge only. Do NOT claim live schedules, exact current fares, availability, operators or flight numbers. Mark the result as a planning estimate that should be verified before booking.\n- Include up to 2 useful alternatives only when materially different.\n- Times should include realistic interchange/check-in/security/access buffers.\n- Return JSON only, schema: {"routes":[{"movement_id":"...","primary_mode":"train|plane|bus|car|ferry|transfer|other","departure_date":"YYYY-MM-DD","departure_time":"HH:MM","arrival_date":"YYYY-MM-DD","arrival_time":"HH:MM","return_departure_time":"HH:MM|null","return_arrival_time":"HH:MM|null","summary":"concise traveler-facing route","confidence":"planning_estimate","legs":[{"direction":"outbound|return|main","origin":"...","destination":"...","mode":"...","departure_time":"HH:MM","arrival_time":"HH:MM","estimated_minutes":0,"commerce_eligible":true,"commercial_origin":"city/market","commercial_destination":"city/market","commercial_origin_es":"mercado/ciudad ES","commercial_destination_es":"mercado/ciudad ES","commercial_origin_en":"city/market EN","commercial_destination_en":"city/market EN","note":"..."}],"alternatives":[{"summary":"...","estimated_minutes":0}]}]}`;
+      // A large all-routes JSON can exceed the output budget and then every
+      // client retry repeats the same oversized request. Bound each model reply
+      // to three movements, retaining the exact resolver prompt and schema.
+      const batches=[];
+      for(let i=0;i<movements.length;i+=3) batches.push(movements.slice(i,i+3));
+      const resolved=[];
+      for(let offset=0;offset<batches.length;offset+=2){
+        const results=await Promise.all(batches.slice(offset,offset+2).map(async batch=>{
+          const ids=new Set(batch.map(item=>String(item?.movement_id||'')));
+          const input=resolverPrompt.replace(JSON.stringify(movements),JSON.stringify(batch));
+          for(let attempt=0;attempt<2;attempt++){
+            const raw=await callStructured([{role:"user",content:input}],0.1,5000,120000,routeUsage,PLANNER_MODEL,"low");
+            let parsed=null;
+            try{parsed=JSON.parse(String(raw||'').replace(/^```json\s*/i,'').replace(/```$/,'').trim());}catch{}
+            const routes=parsed?.routes;
+            if(Array.isArray(routes) && routes.length===ids.size &&
+              routes.every(route=>ids.has(String(route?.movement_id||''))) &&
+              new Set(routes.map(route=>String(route.movement_id))).size===ids.size) return routes;
+            console.warn('[ROUTE RESOLVER] invalid batch response',{batch_size:batch.length,attempt:attempt+1,received:Array.isArray(routes)?routes.length:0,raw_length:String(raw||'').length});
+          }
+          return null;
+        }));
+        if(results.some(routes=>!routes)) return res.status(502).json({ok:false,code:"ROUTE_RESOLVER_INVALID_RESPONSE"});
+        results.forEach(routes=>resolved.push(...routes));
+      }
+      return res.status(200).json({ok:true,routes:resolved,usage:_usagePayload_(routeUsage)});
+    }
 
     /* CITY NORMALIZATION · isolated pre-save validation.
        It never changes the planner or Info Chat contracts. */
@@ -2561,6 +2611,127 @@ AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
           info_chat_limit:INFO_CHAT_MAX_QUERIES
         });
       }
+    }
+
+    /* =========================================================
+       ITBMO GENERATION ENGINE V3.1 · PHYSICAL STAY CONTRACT MODE
+       The browser compiles one continuous route into bounded physical-stay
+       windows. Each request plans only one physical stay (legacy planning-unit
+       contracts remain accepted). Deterministic code owns route movements,
+       merge, validation and scoped repair.
+       ========================================================= */
+    if (mode === "planner_v3") {
+      const override = detectLanguageOverride(clientMessages);
+      const languageLine = override
+        ? `Output language: ${override.toUpperCase()}. Keep JSON keys unchanged.`
+        : "Use the itinerary language explicitly requested in the generation contract.";
+
+      const V3_SYSTEM_PROMPT = `
+You are ITBMO Travel Intelligence V3.
+${languageLine}
+
+The client supplies a deterministic GENERATION CONTRACT. Treat dates, location windows, fixed movements, overnight bases, user-fixed times, preferences and restrictions in that contract as hard facts. Do not reinterpret them and never invent transport bookings, airports, flight/train details, reservation status or live conditions.
+
+IDENTITY MODEL (GLOBAL, DATA-DRIVEN):
+- The preferred contract is ITBMO_PHYSICAL_STAY_CONTRACT_V1. It represents one Trip Story STAY CARD inside a larger continuous trip.
+- The stay card is the generation unit. Its base_destination/physical_destination is the overnight anchor; an explicitly supplied Day Trip remains inside that same stay and MUST NOT become another generation unit.
+- allowed_physical_locations and planning_windows are authoritative. Each row must occur at the physical location of its matching planning_window. Preserve original global day numbers exactly.
+- boundary_context is awareness only: inbound/outbound intercity movements are deterministic route facts and MUST NOT be generated, shifted, embellished or replaced by this call.
+- Returning later to the same city is a different stay_unit_id; do not assume it is contiguous with an earlier stay.
+- Internal route places are discovered from the contract; never rely on predefined city lists or special cases.
+- Legacy ITBMO_GENERATION_CONTRACT_V3 remains supported: for that contract only, route_days define physical identity as before.
+
+Your job is tourism intelligence only: select excellent experiences, sequence them geographically, use available time well, respect realistic dwell/meal/rest needs, and create a distinctive, practical itinerary.
+
+DESTINATION INTELLIGENCE POLICY (UNIVERSAL):
+- Reason from the destination and contract data, never from hard-coded city lists. First identify the destination pattern that best fits each window: dense urban core, dispersed metropolis, heritage town, nature gateway, resort/island, rural region, small settlement or day-trip destination. Adapt density, transport, buffers and dwell time to that pattern.
+- Calendar coverage is not quality coverage. A day is not adequately planned merely because it contains a row: use a defensible share of every substantial tourism window, while allowing genuinely light arrival/departure, recovery, accessibility or user-requested rest periods. Never manufacture filler to make a correctly constrained window look busy.
+- Before scheduling, identify the destination's internationally recognized must-sees and destination-defining experiences using universal tourism judgment, never a hard-coded city list. Protect a reasonable set first, proportional to useful time; a substantial first visit must not omit a flagship without a real constraint or a stronger traveler-specific reason. Then add coherent neighborhoods, viewpoints, markets, cultural context, nature or evening experiences only when they improve the day. Balance icons with locally distinctive experiences instead of producing a generic checklist.
+- Cluster by geography and natural visit order. Account for door-to-door movement, entrances, security, queues, orientation, parking or transit interchange where relevant. Avoid zigzagging and do not schedule an activity at the instant a long transfer ends.
+- Match the travelers: pace, ages, mobility/accessibility needs, interests, food constraints, tolerance for early/late hours, jet lag and cumulative fatigue. Vary intensity across multi-day stays when the contract supports it.
+- Respect the actual date, weekday, season and plausible daylight. For outdoor, scenic, beach, wildlife, winter and night-sky activities, use timing and fallback notes appropriate to weather/daylight sensitivity. Do not claim live weather, availability or a year-specific event unless supplied by the contract.
+- Treat operating hours, closure days, holidays, timed entry and reservation requirements as execution constraints. Use robust planning knowledge, but never invent an exact current schedule or confirmed booking. When facts are date-sensitive, say concisely what the traveler must verify and provide a practical fallback when useful.
+- Follow local cultural rhythm, including realistic meal times, rest periods, worship/site etiquette and evening patterns. Meals should be placed in a useful area and support the route; never invent a restaurant reservation.
+- A day trip must be a complete round trip: plan outbound access, destination experience and return to the supplied overnight base. Never silently convert it into an overnight stay.
+- Arrival and departure days are planned only inside their real usable windows. Protect station/airport access and prudent buffers; check-in, check-out and luggage handling are logistics, not sightseeing anchors.
+- Notes are structured traveler guidance, not prose decoration. When relevant include: booking/ticket decision, timing sensitivity, practical access point, what to prioritize, accessibility or seasonal caveat, and one useful fallback. Keep commerce_context consistent with the row and never turn lodging, meals, transfers or free time into attraction products.
+
+QUALITY POLICY:
+- Use every substantial PLANNABLE location window productively; a long window normally needs multiple meaningful activities, not one token stop.
+- Aim for rich but realistic days, typically 5–8 meaningful sub-stops on a full unconstrained day when destination inventory and timing support it; never add filler merely to hit a quota.
+- Think at WHOLE-DAY level before writing rows: choose the strongest geographic corridor/theme for each physical day, then sequence concrete stops inside it. A full day must feel intentionally curated, not like a short list padded with meals.
+- Protect destination-defining anchors and must-sees first. Add secondary stops only when they materially improve the route and remain geographically coherent. Never repeat the same flagship POI, district experience or near-equivalent on another day.
+- A substantial museum, palace, archaeological complex, cathedral interior, major monument or comparable anchor needs credible dwell time. Never hide required visit time inside an unexplained gap and never emit token 1–10 minute activities except a genuinely explicit photo/micro-stop.
+- When a day spans lunch or dinner, place a realistic meal/rest interval where it naturally fits the route. Meals complement sightseeing; they do not substitute for missing tourism content.
+- For transfer days, independently optimize every meaningful pre-departure and post-arrival PLANNABLE window. Preserve access/buffer before the fixed movement, but do not throw away a useful morning or afternoon merely because a transfer exists later.
+- Prefer concrete named places. If a restaurant is not a user-fixed reservation, describe the meal by a useful neighborhood/area rather than inventing a specific restaurant or reservation.
+- Before returning JSON, internally verify each day for: coverage of its available windows, continuity From→To, no overlaps, credible dwell time, no unexplained large gaps, no duplicate anchors, and a useful ending. Correct defects before output rather than relying on downstream repair.
+- V67 execution-feasibility check: before committing an interior museum, cathedral/church, archaeological site, palace or other access-controlled anchor, reconcile the actual calendar date/weekday with robust known closure patterns. If the visit may be closed or restricted on that day, do not schedule the interior as if available: choose a defensible exterior/nearby alternative or another strong feasible anchor and state only the concise verification caveat that remains necessary. Never invent live hours or availability.
+- Never generate a boundary USER_FIXED movement for a physical-stay contract; keep all planning rows outside those immutable movement intervals. For a legacy planning-unit contract, preserve supplied USER_FIXED movement intervals exactly.
+- Before fixed rail/bus/ferry departures allow realistic access plus prudent boarding margin; airports require materially more when an airport movement is explicitly supplied.
+- After arrival, plan only the post-arrival planning_window supplied to this physical stay. Do not infer extra time outside it.
+- For legacy contracts only: if route_days[].terminal_arrival_only=true OR fixed_transfers[].terminal_arrival=true, stop planning at that boundary. For physical-stay contracts, terminal movements are outside the model call and deterministic code owns them.
+- Optimize geographic flow; avoid backtracking, duplicates and repeated major anchors across days.
+- Respect season, plausible daylight and actual calendar dates. Protect destination-defining special-date moments without inventing year-specific event details.
+- Use the lodging/overnight base as the geographic anchor where applicable.
+- Incorporate traveler profiles, pace, interests, must-sees and restrictions through actual choices.
+- Include realistic meal breaks when a long day spans meals.
+- The activity occurs at To. The next row starts from the prior row's To unless a fixed movement changes location.
+- Use one concrete To per row. For local mobility, recommend one default plus up to two genuinely useful alternatives when traveler context can change the best choice. Give every option its own realistic door-to-door estimate next to the mode and a concise deciding condition; do not repeat that estimate under a separate Transport duration label. Preserve user-fixed intercity movements exactly and never invent operators, stops, schedules or availability.
+- Never use generic destinations such as “nearby restaurant”, “local services” or “similar option”.
+- Keep transport and activity duration mathematically consistent with start/end times.
+- Preserve official proper names and write concise, useful concierge notes. Notes are the traveler-facing intelligence layer. For a meaningful attraction, normally provide 2–3 concrete execution insights selected from: whether advance/timed entry is prudent, what to prioritize inside a large site, the most relevant access/logistics point, seasonal/daylight considerations, a closure/hours caveat when genuinely relevant, and one useful fallback only when it adds value. Avoid generic filler ("great for photos", "enjoy the atmosphere", "buy souvenirs"), internal engine terminology, contract/window language and invented certainty.
+- Notes must also support commerce WITHOUT becoming commercial copy: if access is intrinsic, say clearly that an entrance/ticket is required or advisable; if guidance materially improves a complex visit, say why; if a transfer must be arranged, state the practical decision the traveler needs to make. Do not mention affiliate partners in itinerary notes.
+- Commerce metadata must be explicit enough for the contextual engine to act without re-interpreting prose. Classify paid/access-controlled attractions separately from free sights and logistics. A TOUR_EXPERIENCE is a genuinely guided/experiential product, not every sightseeing row. Preserve every known user-fixed mode. For local access, rank one recommended option plus only useful contextual alternatives, attach an estimate and condition to each, and keep the attraction's semantic identity intact. Never invent an operator, terminal, stop, schedule, reservation or availability.
+
+OUTPUT CONTRACT:
+Return JSON only:
+{"destination":"...","city_day":[{"city":"...","day":1,"rows":[...]}]}
+Every row must contain: day, start, end, from, to, activity, notes, kind. Include transport only when real movement/mobility information exists; include duration only when a real activity dwell exists. Empty transport/duration strings are valid when that concept does not apply.
+For non-transport rows also include commerce_context with: semantic_type (ATTRACTION_TICKET, TOUR_EXPERIENCE, RESTAURANT, FREE_SIGHT, LOGISTICS, NONE), ticket_need (required, recommended, optional, none, unknown), guided_tour_value (high, medium, low, none), canonical_place, destination_priority (essential, high, standard, supporting), and when useful transport_options=[{mode, estimated_minutes, recommended, condition}]. Multiple local access options never change the row's attraction/activity semantic_type to TRANSPORT. Mark true destination-defining must-sees essential/high so Context Intelligence can expose both independent admission and genuinely useful guided alternatives.
+For ITBMO_PHYSICAL_STAY_CONTRACT_V1 do NOT output intercity transport rows; deterministic code inserts them. For legacy contracts, fixed intercity transport rows include commerce_context with semantic_type=TRANSPORT, origin, destination, mode, departure and arrival. Never invent operator, station, airport, availability or booking status.
+Use HH:MM local time. For activity rows, duration contains only "Activity: ..."; mobility time belongs next to its mode in transport. For pure transport rows, duration may be empty because the movement time is written in transport.
+For a physical-stay contract, return only the global day numbers represented by planning_windows and only rows physically inside those windows. Day Trips listed by the contract are planned inside the parent stay using their own location windows; never treat them as separate stays. For a legacy planning-unit contract, include every requested planning-unit day from 1 through total_days.
+Do not output analysis, markdown, master-plan metadata or commentary outside JSON.
+`.trim();
+
+      const v3Task=String(body.v3_task || "generate").toLowerCase();
+      const v3IsRepair=v3Task.includes("repair") || v3Task.includes("qa");
+      const v3Model=v3IsRepair ? REPAIR_MODEL : PLANNER_MODEL;
+      const v3Effort=v3IsRepair ? "low" : "medium";
+      let raw = await callStructured(
+        [{ role:"system", content:V3_SYSTEM_PROMPT }, ...clientMessages],
+        0.22,
+        8200,
+        130000,
+        plannerUsage,
+        v3Model,
+        v3Effort
+      );
+      let parsed = cleanToJSON(raw);
+      if (!_hasRenderableItinerary_(parsed)) {
+        raw = await callStructured(
+          [{ role:"system", content:V3_SYSTEM_PROMPT + "\nRECOVERY: Return complete valid JSON only. For physical-stay contracts, preserve every supplied planning window/day and do not generate boundary movements. For legacy contracts, preserve every contract day and hard movement exactly." }, ...clientMessages],
+          0.12,
+          8600,
+          130000,
+          plannerUsage,
+          REPAIR_MODEL,
+          "medium"
+        );
+        parsed = cleanToJSON(raw);
+      }
+      if (!_hasRenderableItinerary_(parsed)) {
+        return res.status(200).json({
+          text:JSON.stringify({ok:false,error:{code:"V3_GENERATION_FAILED",retryable:true}}),
+          usage:_usagePayload_(plannerUsage)
+        });
+      }
+      parsed = _v65NormalizeEverySchema_(parsed);
+      return res.status(200).json({
+        text:JSON.stringify(parsed),
+        usage:_usagePayload_(plannerUsage)
+      });
     }
 
     const stage = detectPlannerStage(clientMessages);
@@ -2758,6 +2929,14 @@ MANDATORY FINAL-ITINERARY RECOVERY:
       const clientMessages = extractMessages(body);
       const stage = detectPlannerStage(clientMessages);
       const lang = detectUserLang(clientMessages);
+
+      // V3 is fail-closed. Never convert an API/model failure into the historical
+      // synthetic fallback itinerary; the browser owns isolated Stay recovery.
+      if (String(body?.mode || "").toLowerCase() === "planner_v3") {
+        return res.status(200).json({
+          text: JSON.stringify({ok:false,error:{code:"V3_GENERATION_FAILED",retryable:true}})
+        });
+      }
 
       // Do not fabricate city_day for a failed master-plan stage.
       if (stage === "master_plan") {

@@ -6,7 +6,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=113" />
+  <link rel="stylesheet" href="./planner.css?v=149" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -139,7 +139,7 @@
     <div class="planner-canvas-intro" id="planner-canvas-intro">
         <span class="planner-canvas-intro__eyebrow" id="planner-canvas-eyebrow">TU VIAJE EMPIEZA AQUÍ</span>
         <h2 id="planner-canvas-title">Menos formularios.<br><span>Más ganas de viajar.</span></h2>
-        <p id="planner-canvas-copy">Agrega hasta 3 ciudades, define quién viaja y deja que ITBMO conecte las piezas.</p>
+        <p id="planner-canvas-copy">Organiza tus estancias y excursiones en un recorrido de hasta 30 días efectivos; ITBMO conectará las piezas.</p>
         <div class="planner-canvas-orbit" aria-hidden="true">
           <span class="planner-canvas-orbit__ring"></span>
           <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--1"></span>
@@ -194,7 +194,7 @@
           <div id="account-user-badge" class="account-user-badge" style="display:none;"></div>
         </div>
 
-        <div id="account-guest">
+        <form id="account-guest" autocomplete="on" onsubmit="return false;">
           <div class="account-mode-actions account-mode-actions--premium" id="account-mode-actions">
             <button class="btn primary account-mode-btn account-mode-btn--register" id="account-register-toggle" type="button">Create account</button>
             <button class="btn ghost account-mode-btn account-mode-btn--login" id="account-login-toggle" type="button">Sign in</button>
@@ -317,7 +317,7 @@
           </div>
 
           <div id="account-message" class="account-message" aria-live="polite"></div>
-        </div>
+        </form>
 
         <div id="account-authenticated" class="account-authenticated account-authenticated--premium" style="display:none;">
           <div class="account-authenticated-copy">
@@ -338,6 +338,16 @@
       </section>
 
       <!-- ✅ Viajeros — titular desde cuenta + acompañantes -->
+      <section class="box guided-journey-entry" id="guided-journey-entry">
+        <div class="guided-journey-entry__copy">
+          <span>✦ ITBMO</span>
+          <h3>Tu viaje empieza aquí</h3>
+          <p>Una decisión sencilla cada vez. Verás cómo tu recorrido toma forma mientras lo construyes.</p>
+        </div>
+        <button type="button" id="build-guided-journey" class="guided-journey-entry__button is-auth-locked" disabled aria-disabled="true"><small>CREA TU VIAJE</small><b>Comenzar</b><span>→</span></button>
+      </section>
+
+      <div class="guided-journey-legacy" aria-hidden="true">
       <section class="box planner-stage-card planner-stage-card--travelers" id="travelers-box">
         <div class="planner-stage-card__head">
           <div class="planner-stage-card__index">01</div>
@@ -434,31 +444,35 @@
           <div class="planner-stage-card__index">02</div>
           <div>
             <span class="planner-stage-card__eyebrow" id="planner-route-eyebrow">CONSTRUYE TU RUTA</span>
-            <h3>Destinos</h3>
-            <p id="planner-route-guide">Agrega hasta 3 ciudades en el orden real del viaje. Para cada ciudad indica días, fecha de inicio y el tiempo útil que tendrás para explorar.</p>
+            <h3 id="planner-route-title">La historia de tu viaje</h3>
+            <p id="planner-route-guide">Cuéntanos tu viaje en el mismo orden en que lo vivirás. Empieza por cómo llegas, añade cada estancia y las excursiones de un día, y termina con tu regreso si ya lo conoces.</p>
           </div>
         </div>
         <div class="planner-route-tip">
           <span aria-hidden="true">✦</span>
-          <p id="planner-route-tip-copy"><strong>Usa tu tiempo útil, no la hora del vuelo.</strong> En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.</p>
+          <p id="planner-route-tip-copy"><strong>No necesitas tener boletos ni horarios definidos.</strong> Ciudad, aeropuerto, estación, terminal o puerto pueden añadirse cuando los conozcas; las horas son opcionales y podrás completarlas después.</p>
         </div>
-        <div id="city-list"></div>
-        <div class="row-actions">
-          <button class="btn ghost" id="add-city-btn">+ Agregar destino</button>
+        <div class="trip-story-launch" id="trip-story-launch">
+          <button class="trip-story-primary is-auth-locked" id="build-trip-story" type="button" disabled aria-disabled="true"><span class="trip-story-primary__spark">✦</span><span class="trip-story-primary__copy"><small>LA HISTORIA EMPIEZA AQUÍ</small><b>Construir mi viaje</b><em>Salida → estancias → excursiones → regreso</em></span><span class="trip-story-primary__arrow">→</span></button>
+          <div id="trip-story-summary" class="trip-story-summary" hidden></div>
         </div>
+        <div id="city-list" class="trip-story-compatibility" aria-hidden="true"></div>
+        <button class="btn ghost trip-story-compatibility" id="add-city-btn" type="button" aria-hidden="true">+ Agregar otro destino</button>
 
-        <div class="planner-route-actions" id="planner-route-actions">
+        <div class="planner-route-actions trip-story-compatibility" id="planner-route-actions" aria-hidden="true">
           <div class="planner-route-actions__copy">
             <span id="planner-save-eyebrow">CUANDO TU RUTA ESTÉ LISTA</span>
             <strong id="planner-save-title">Confirma la ruta para continuar.</strong>
             <small id="planner-save-subtitle">Después podrás iniciar la planificación sin perder de vista esta sección.</small>
           </div>
           <div class="planner-route-actions__buttons">
-            <button class="btn primary" id="save-destinations" disabled>Guardar destinos</button>
+            <button class="btn primary" id="save-destinations" disabled>Guardar recorrido</button>
             <button id="start-planning" class="btn primary planner-start-cta" disabled>Continuar: iniciar planificación →</button>
           </div>
         </div>
       </section>
+
+      </div><!-- /guided-journey-legacy -->
 
       <section class="box special-conditions preferences-stage is-stage-hidden planner-stage-card planner-stage-card--preferences" id="preferences-stage" aria-hidden="true">
         <div class="planner-stage-card__index">03</div>
@@ -470,22 +484,30 @@
           </p>
         </div>
 
-        <div class="preferences-stage-field-row">
+        <div class="preferences-stage-field-row preferences-stage-field-row--v2">
           <div class="preferences-stage-field-title" id="preferences-stage-field-title">
             Preferencias / Restricciones / Condiciones especiales
           </div>
           <button id="info-chat-floating" class="info-chat-floating is-locked" type="button"
-                title="Info Chat unlocks after payment" aria-disabled="true" disabled>
-            🔒 Info Chat
+                title="Travel Concierge unlocks after payment" aria-disabled="true" disabled>
+            🔒 Asistente de viaje
           </button>
         </div>
-        <textarea id="special-conditions" rows="4" placeholder="Ej.: Prefiero naturaleza y barrios locales, evitar museos largos, quiero probar gastronomía típica y necesito un ritmo tranquilo…"></textarea>
 
-        <div class="preferences-stage-actions">
+        <div id="preferences-v2-host" class="preferences-v2-host" aria-live="polite"></div>
+
+        <!-- Compatibility field: the V2 form compiles its structured data into this
+             existing contract so generation, persistence and recovery remain backward compatible. -->
+        <textarea id="special-conditions" class="itbmo-compatibility-field" rows="4" aria-hidden="true" tabindex="-1"></textarea>
+
+        <div class="preferences-stage-actions preferences-stage-actions--v2">
           <button class="btn primary preferences-continue" id="continue-with-astra" type="button">
-            Continuar con ITBMO →
+            Guardar preferencias
           </button>
-          <small id="preferences-stage-optional">Opcional · puedes continuar aunque no agregues información.</small>
+          <button class="btn primary preferences-generate-v2" id="generate-itineraries-v2" type="button" disabled hidden>
+            Generar mi itinerario ✨
+          </button>
+          <small id="preferences-stage-optional">Completa la información obligatoria de cada destino o estancia para continuar.</small>
         </div>
       </section>
 
@@ -546,13 +568,12 @@
         <div class="toolbar">
           <button class="btn" id="btn-pdf">Exportar PDF</button>
 
-          <!-- 🆕 MVP: CSV para Excel -->
-          <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
+          <!-- Excel real editable; el id se conserva por compatibilidad con listeners existentes. -->
+          <button class="btn" id="btn-csv">Exportar Excel editable</button>
           <button class="btn" id="btn-receipt">Comprobante de pago</button>
 
-          <button class="btn email-coming-soon" id="btn-email" type="button" disabled aria-disabled="true" aria-hidden="true" title="Coming soon" hidden style="display:none;">
-            <span class="email-action-label">Enviar por Email</span>
-            <span class="coming-soon-badge">Próximamente</span>
+          <button class="btn email-action" id="btn-email" type="button">
+            <span class="email-action-label">Enviar los 3 archivos por email</span>
           </button>
 
           <!-- ✅ MVP: ocultos (se reactivan después) -->
@@ -670,16 +691,30 @@
       <h3 id="support-title">Need a hand?</h3>
       <p id="support-copy">If something went wrong with your itinerary, payment or account, our team is here to help.</p>
 
-      <div class="support-help-grid">
-        <div><span>✓</span><strong id="support-item-1">Itinerary generation issues</strong></div>
-        <div><span>✓</span><strong id="support-item-2">Payments and refunds</strong></div>
-        <div><span>✓</span><strong id="support-item-3">Account assistance</strong></div>
-      </div>
-
-      <button id="support-email-button" class="btn primary support-email-button" type="button">
-        ✉ <span id="support-email-label">Contact Customer Support</span>
-      </button>
+      <form id="support-form" class="support-form">
+        <label><span id="support-category-label">Help topic</span><select id="support-category" required><option value="itinerary">Itinerary generation issues</option><option value="payment">Payments and refunds</option><option value="account">Account assistance</option><option value="other">Other</option></select></label>
+        <label><span id="support-contact-label">Your contact email</span><input id="support-contact-email" type="email" autocomplete="email" required></label>
+        <label><span id="support-message-label">Tell us what happened</span><textarea id="support-message" rows="5" maxlength="4000" required></textarea></label>
+        <div id="support-form-status" class="form-send-status" role="status" aria-live="polite"></div>
+        <button id="support-email-button" class="btn primary support-email-button" type="submit">✉ <span id="support-email-label">Enviar a Atención al Cliente</span></button>
+      </form>
       <p class="support-footnote" id="support-footnote">We’ll include your Trip ID automatically when available.</p>
+    </div>
+  </div>
+
+  <div id="itinerary-email-modal" class="support-modal" aria-hidden="true">
+    <div class="support-card email-delivery-card" role="dialog" aria-modal="true" aria-labelledby="itinerary-email-title">
+      <button id="itinerary-email-close" class="support-close" type="button" aria-label="Close">✕</button>
+      <div class="support-symbol">✉</div>
+      <div class="support-eyebrow">ITBMO · ENTREGA SEGURA</div>
+      <h3 id="itinerary-email-title">Email my trip</h3>
+      <p id="itinerary-email-copy">One email will include your itinerary PDF, editable Excel and receipt.</p>
+      <form id="itinerary-email-form" class="support-form">
+        <label><span id="itinerary-email-label">Recipient email</span><input id="itinerary-email-recipient" type="email" autocomplete="email" required></label>
+        <div class="email-attachment-list"><span>✓ PDF · Itinerario</span><span>✓ XLSX · Excel editable</span><span>✓ PDF · Comprobante</span></div>
+        <div id="itinerary-email-status" class="form-send-status" role="status" aria-live="polite"></div>
+        <button id="itinerary-email-submit" class="btn primary support-email-button" type="submit">Prepare and email all 3 files</button>
+      </form>
     </div>
   </div>
 
@@ -725,7 +760,7 @@
       <div class="checkout-includes">
         <div><span>✓</span><span id="checkout-inc-1">Complete personalized itinerary</span></div>
         <div><span>✓</span><span id="checkout-inc-2">ITBMO travel intelligence</span></div>
-        <div><span>✓</span><span id="checkout-inc-3">PDF & CSV exports</span></div>
+        <div><span>✓</span><span id="checkout-inc-3">PDF & Excel exports</span></div>
       </div>
 
       <div class="checkout-methods">
@@ -785,7 +820,7 @@
     <div class="info-chat-panel">
       <div class="info-chat-header">
         <div class="info-chat-heading">
-          <h3>Info Chat · ITBMO 🌍</h3>
+          <h3>Asistente de viaje · ITBMO 🌍</h3>
           <div id="info-chat-entitlement" class="info-chat-entitlement is-locked" aria-live="polite">
             <span id="info-chat-entitlement-icon">🔒</span>
             <span id="info-chat-entitlement-text">Available after payment</span>
@@ -806,12 +841,12 @@
       </div>
 
       <div id="info-chat-usage" class="info-chat-usage" aria-live="polite">
-        <span id="info-chat-usage-label">Info Chat locked</span>
+        <span id="info-chat-usage-label">Travel Concierge locked</span>
         <strong id="info-chat-remaining">0 / 10</strong>
       </div>
       <div id="info-chat-messages" class="chat-messages"></div>
       <div class="chat-input">
-        <textarea id="info-chat-input" placeholder="Info Chat unlocks after payment" rows="1" disabled></textarea>
+        <textarea id="info-chat-input" placeholder="Travel Concierge unlocks after payment" rows="1" disabled></textarea>
         <button id="info-chat-send" class="btn primary" disabled>Send</button>
       </div>
     </div>
@@ -850,7 +885,7 @@
         en: {
           planner_title: "Planner",
           destinations: "Destinations",
-          add_city: "+ Add destination",
+          add_city: "+ Add another destination",
           save_destinations: "Save destinations",
           reset_planning: "Reset planning",
           special_title: "Preferences / Restrictions / Special conditions",
@@ -882,16 +917,16 @@
           companion: "Companion",
           mvp_note: "*These profiles are used to adapt the itinerary to the ages and needs of the group.",
           itinerary_title: "Itinerary",
-          open_info_chat: "Open Info Chat",
+          open_info_chat: "Open Travel Concierge",
           start_planning: "Continue: start planning →",
           type_message: "Type your message...",
           send: "Send",
           export_pdf: "Export PDF",
-          export_csv: "Export CSV (Excel)",
+          export_csv: "Export editable Excel",
           export_receipt: "Payment receipt",
-          email: "Send by Email · Coming soon",
+          email: "Email all 3 files",
           choose_itinerary: "Choose this itinerary",
-          info_header: "Info Chat · ITBMO 🌍",
+          info_header: "Travel Concierge · ITBMO 🌍",
           info_placeholder: "Ask me anything...",
           loading_text: "✨ ITBMO is creating your full itinerary… This may take several minutes. Don’t close this tab: you’re saving hours of planning.",
           special_placeholder: "Write your preferences, restrictions or special conditions here…"
@@ -899,8 +934,8 @@
         es: {
           planner_title: "Planificador",
           destinations: "Destinos",
-          add_city: "+ Agregar destino",
-          save_destinations: "Guardar destinos",
+          add_city: "+ Agregar otro destino",
+          save_destinations: "Guardar recorrido",
           reset_planning: "Reiniciar planificación",
           special_title: "Preferencias / Restricciones / Condiciones especiales",
           travelers_title: "Viajeros",
@@ -931,16 +966,16 @@
           companion: "Acompañante",
           mvp_note: "*Estos perfiles se usan para adaptar el itinerario a las edades y necesidades del grupo.",
           itinerary_title: "Itinerario",
-          open_info_chat: "Open Info Chat",
+          open_info_chat: "Abrir Asistente de viaje",
           start_planning: "Continuar: iniciar planificación →",
           type_message: "Escribe tu mensaje...",
           send: "Enviar",
           export_pdf: "Exportar PDF",
-          export_csv: "Exportar CSV (Excel)",
+          export_csv: "Exportar Excel editable",
           export_receipt: "Comprobante de pago",
-          email: "Enviar por Email · Próximamente",
+          email: "Enviar los 3 archivos por email",
           choose_itinerary: "Elijo este itinerario",
-          info_header: "Info Chat · ITBMO 🌍",
+          info_header: "Asistente de viaje · ITBMO 🌍",
           info_placeholder: "Pregúntame lo que quieras…",
           loading_text: "✨ ITBMO está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.",
           special_placeholder: "Escribe aquí tus preferencias, restricciones o condiciones especiales…"
@@ -1153,6 +1188,9 @@
     })();
   </script>
 
+  <!-- ExcelJS (required for styled, editable XLSX export) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+
   <!-- jsPDF (required for PDF export) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
@@ -1193,7 +1231,8 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=116"></script>
+<script src="./travel-model-v2.js?v=13"></script>
+<script src="./planner.js?v=273"></script>
  
 </body>
 </html>

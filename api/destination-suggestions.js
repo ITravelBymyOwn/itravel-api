@@ -31,6 +31,40 @@ function matchRank(record, needle) {
   return best;
 }
 
+function countryLabel(code, lang="en") {
+  try { return new Intl.DisplayNames([String(lang).startsWith("es") ? "es" : "en"], { type:"region" }).of(code) || code; }
+  catch (_) { return code; }
+}
+
+function rankedRows(countryCode, query, lang = "en") {
+  const needle = normalizeSearch(query);
+  const rows = Array.isArray(DATA[countryCode]) ? DATA[countryCode] : [];
+  const displayLang = String(lang || "en").toLowerCase().startsWith("es") ? "es" : "en";
+  return rows.map(row=>({
+    city:String(row?.[displayLang] || row?.en || row?.es || "").trim(),
+    countryCode,
+    country:countryLabel(countryCode,displayLang),
+    rank:matchRank(row,needle),
+    tourismExtra:Number(row?.x||0),
+    population:Number(row?.p||0)
+  })).filter(x=>x.city&&x.rank<=3);
+}
+
+function globalSuggestions(query, lang="en") {
+  const displayLang=String(lang||"en").toLowerCase().startsWith("es")?"es":"en";
+  const ranked=[];
+  for(const code of Object.keys(DATA)) ranked.push(...rankedRows(code,query,displayLang));
+  ranked.sort((a,b)=>a.rank-b.rank||b.tourismExtra-a.tourismExtra||b.population-a.population||a.city.localeCompare(b.city,displayLang,{sensitivity:"base"}));
+  const seen=new Set(),results=[];
+  for(const item of ranked){
+    const key=`${normalizeSearch(item.city)}|${item.countryCode}`;
+    if(seen.has(key)) continue;
+    seen.add(key); results.push({city:item.city,country:item.country,countryCode:item.countryCode});
+    if(results.length>=12) break;
+  }
+  return results;
+}
+
 function localSuggestions(countryCode, query, lang = "en") {
   const needle = normalizeSearch(query);
   const rows = Array.isArray(DATA[countryCode]) ? DATA[countryCode] : [];
@@ -76,7 +110,15 @@ export default async function handler(req, res) {
   const query = String(req.query?.q || "").trim().slice(0, 120);
   const lang = String(req.query?.lang || "en").trim().toLowerCase().slice(0, 5);
 
-  if (!/^[A-Z]{2}$/.test(countryCode) || query.length < 3) {
+  if (query.length < 3) {
+    return res.status(200).json({ ok: true, suggestions: [], results: [] });
+  }
+
+  if (String(req.query?.global || "") === "1") {
+    return res.status(200).json({ ok:true, results:globalSuggestions(query,lang) });
+  }
+
+  if (!/^[A-Z]{2}$/.test(countryCode)) {
     return res.status(200).json({ ok: true, suggestions: [] });
   }
 

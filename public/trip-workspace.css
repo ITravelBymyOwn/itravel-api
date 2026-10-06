@@ -517,6 +517,9 @@ button,a {
   font-weight:900;
   cursor:pointer
 }
+.tw-details[hidden] {
+  display:none !important;
+}
 .tw-details {
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));
@@ -1589,6 +1592,8 @@ body{
 /* Partner solutions: blue action, warm benefit. */
 .tw-partner-offer{background:linear-gradient(135deg,rgba(249,253,255,.96),rgba(245,248,255,.93))!important;border-color:rgba(52,86,130,.18)!important;}
 .tw-partner-benefit{background:linear-gradient(135deg,rgba(255,244,232,.90),rgba(244,183,64,.11))!important;border-color:rgba(195,138,86,.17)!important;color:#80624f!important;}
+.tw-partner-offer[data-partner-slug="airalo"] .tw-partner-benefit,
+.tw-partner-offer[data-partner-slug="holafly"] .tw-partner-benefit{background:linear-gradient(135deg,#FFE49B,#FFD15E)!important;border-color:#D98720!important;color:#542B0D!important;font-size:11px!important;font-weight:950!important;box-shadow:0 3px 12px rgba(205,116,30,.18)!important;}
 .tw-partner-offer button,.tw-partner-option button{background:linear-gradient(135deg,#087BFA,#4E74D8)!important;box-shadow:0 9px 21px rgba(57,91,166,.15)!important;}
 
 /* Auth surfaces stay quiet but coherent. */
@@ -1611,3 +1616,27 @@ body{
 @media(prefers-reduced-motion:reduce){
   .tw-city-card,.tw-trip-wide__item,.tw-stop-card,.tw-prepare-card,.tw-context-item,.tw-context-toggle,.tw-partner-offer,#tw-overview-essentials-cta,.tw-prepare-jump-nav button{transition:none!important;}
 }
+
+
+/* ITBMO V2.10.21 · resolved multimodal movement hierarchy */
+.tw-route-segments{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid #e7f0f3}
+.tw-route-segment{padding:12px;border:1px solid #d7e8ee;border-radius:14px;background:linear-gradient(135deg,#fff,#f4fbfd)}
+.tw-route-segment__head{display:flex;align-items:flex-start;gap:10px}.tw-route-segment__head>span{width:24px;height:24px;display:grid;place-items:center;flex:0 0 24px;border-radius:999px;background:linear-gradient(135deg,#087bfa,#22b5c2);color:#fff;font-size:10px;font-weight:900}
+.tw-route-segment__head b{display:block;color:var(--ink);font-size:12px;line-height:1.35}.tw-route-segment__head small{display:block;margin-top:3px;color:#65818f;font-size:10px;font-weight:700}.tw-route-segment>p{margin:8px 0 0;color:#6a818d;font-size:11px;line-height:1.45}.tw-route-segment .tw-partner-options{margin-top:9px}.tw-route-segment__nooffer{display:block;margin-top:8px;color:#91a2aa;font-size:9.5px;font-weight:700}
+
+/* V2.10.22 · multimodal movement hierarchy */
+.tw-context-item:has(.tw-route-segments){grid-column:1/-1}
+.tw-context-item:has(.tw-route-segments)>h4{font-size:15px}
+@media(max-width:760px){.tw-route-segments{grid-template-columns:1fr}}
+
+/* The activity's own PDF note is available on matching preparation cards. */
+.tw-context-original-note{margin-top:12px;border:1px solid rgba(32,76,108,.11);border-radius:12px;background:#f6f9fc;padding:10px 12px}
+.tw-context-original-note summary{cursor:pointer;list-style:none;color:#5267be;font-size:12px;font-weight:900}
+.tw-context-original-note summary::-webkit-details-marker{display:none}
+.tw-context-original-note summary span:nth-child(2),.tw-context-original-note[open] summary span:first-child{display:none}
+.tw-context-original-note[open] summary span:nth-child(2){display:inline}
+.tw-context-original-note>div{margin-top:10px;padding-top:9px;border-top:1px solid rgba(32,76,108,.1)}
+.tw-context-original-note>div small{display:block;color:#78909e;font-weight:800;font-size:11px}
+.tw-context-original-note>div p{margin:4px 0 0;color:#183550;font-weight:650;white-space:normal}
+
+.tw-route-local{grid-column:1/-1;margin-top:10px;border-top:1px dashed #d9e8ed;padding-top:9px;color:#68808c}.tw-route-local summary{cursor:pointer;font-size:10px;font-weight:900;color:#39728a}.tw-route-local>div{display:grid;gap:2px;padding:7px 0;border-bottom:1px solid #eef4f6}.tw-route-local>div:last-child{border-bottom:0}.tw-route-local b{font-size:10px;color:var(--ink)}.tw-route-local span{font-size:9.5px;line-height:1.4}
