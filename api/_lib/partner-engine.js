@@ -3,7 +3,7 @@ import zlib from 'zlib';
 import crypto from 'crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
-const SAFE_SLUGS = new Set(['holafly', 'airalo', 'omio', 'viator', 'getyourguide']);
+const SAFE_SLUGS = new Set(['holafly', 'airalo', 'omio', 'viator', 'getyourguide', '12go', 'discovercars', 'riseandshield']);
 const SIGNING_SECRET = String(
   process.env.PARTNER_CLICK_SIGNING_SECRET || process.env.SUPABASE_SECRET_KEY || ''
 ).trim();
@@ -12,6 +12,9 @@ const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const VIATOR_PID = 'P00318254';
 const VIATOR_MCID = '42383';
 const GYG_PARTNER_ID = '3FZWELC';
+const TWELVEGO_PARTNER_ID = '17129424';
+const DISCOVERCARS_AID = 'itravelbymyown';
+const RISE_SHIELD_REF = 'yzyzndg';
 
 
 // Omio Product Feed is the only authority for route existence and deeplink
@@ -248,6 +251,9 @@ function allowedPartnerUrl(slug, rawUrl) {
     if (slug === 'omio') return host === 'omio.sjv.io' || host === 'www.omio.com' || host === 'www.omio.es';
     if (slug === 'holafly') return host === 'holafly.sjv.io' || host.endsWith('.holafly.com') || host === 'holafly.com';
     if (slug === 'airalo') return host === 'airalo.pxf.io' || host.endsWith('.airalo.com') || host === 'airalo.com';
+    if (slug === '12go') return host === '12go.asia' || host === 'www.12go.asia';
+    if (slug === 'discovercars') return host === 'discovercars.com' || host === 'www.discovercars.com';
+    if (slug === 'riseandshield') return host === 'riseandshield.com' || host === 'www.riseandshield.com';
     return false;
   } catch (_) {
     return false;
@@ -305,6 +311,9 @@ function hasRequiredAttribution(slug, rawUrl) {
         url.searchParams.get('utm_medium') === 'online_publisher' &&
         Boolean(url.searchParams.get('cmp'));
     }
+    if (slug === '12go') return url.searchParams.get('z') === TWELVEGO_PARTNER_ID && url.searchParams.get('sub_id') === 'itbmo';
+    if (slug === 'discovercars') return url.searchParams.get('a_aid') === DISCOVERCARS_AID;
+    if (slug === 'riseandshield') return url.searchParams.get('ref') === RISE_SHIELD_REF && url.searchParams.get('tm_source') === 'itbmo';
     if (slug === 'omio') {
       if (url.hostname.toLowerCase() !== 'omio.sjv.io') return false;
       if (!/^\/c\/7727455\/\d+\/7385\/?$/.test(url.pathname)) return false;
@@ -834,6 +843,69 @@ async function resolveOmioTransportOffers(tripId,userId,city,uiLanguage,needs=[]
   return resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs,transportRoutes);
 }
 
+
+function virtualPartner(slug,name,category=''){
+  return {id:null,slug,name,category,status:'approved',enabled:true,metadata:{source:'itbmo_verified_affiliate'}};
+}
+function syntheticOfferId(slug,key='context'){ return `virtual:${slug}:${campaignPart(key)}`; }
+function signedVirtualOffer({partner,targetUrl,placement,need={},city='',resolutionType='verified_affiliate',titleEs='',titleEn='',descriptionEs='',descriptionEn='',confidence='high',travelDate=''}){
+  if(!allowedPartnerUrl(partner.slug,targetUrl)||!hasRequiredAttribution(partner.slug,targetUrl))return null;
+  return {
+    id:syntheticOfferId(partner.slug,`${placement}-${need?.id||city||'trip'}`),
+    partner_id:null,offer_key:`${partner.slug}-${placement}`,need_type:clean(need?.need_type,80),placement,
+    title_es:titleEs,title_en:titleEn,description_es:descriptionEs,description_en:descriptionEn,
+    confidence,enabled:true,metadata:{source:'verified_affiliate_adapter'},target_url:undefined,
+    need_id:clean(need?.id,120),entity_name:clean(need?.entity_name||need?.source_activity,180),city:clean(city||need?.city,160),
+    travel_date:clean(travelDate||need?.travel_date||need?.date,40)||null,resolution_type:resolutionType,
+    partner:{id:null,slug:partner.slug,name:partner.name},
+    offer_token:signResolvedOffer({template:null,partner,targetUrl,placement,need,city,resolutionType,travelDate:travelDate||need?.travel_date||'',partnerLocale:''})
+  };
+}
+function twelveGoSlug(value=''){
+  return clean(value,120).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+}
+function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
+  const partner=virtualPartner('12go','12Go','transport'); const out=[]; const seen=new Set();
+  for(const need of (Array.isArray(needs)?needs:[])){
+    if(!['intercity_transport','transport_arrangement'].includes(need?.need_type))continue;
+    if(/rental car|car rental|vehiculo rentado|coche de alquiler|auto de alquiler/i.test(`${need?.entity_name||''} ${need?.transport||''}`))continue;
+    const payload=parseResolvedRoutePayload(need?.source_route);
+    const candidates=[];
+    if(payload?.parent?.origin&&payload?.parent?.destination)candidates.push({origin:payload.parent.origin,destination:payload.parent.destination,date:need?.travel_date||''});
+    if(!candidates.length){
+      const m=String(need?.entity_name||need?.source_activity||'').match(/^\s*([^→]+?)\s*→\s*([^→]+?)\s*$/);
+      if(m)candidates.push({origin:m[1],destination:m[2],date:need?.travel_date||''});
+    }
+    for(const route of candidates){
+      const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b)continue;
+      const key=`${normalizeKey(a)}|${normalizeKey(b)}|${route.date||''}`; if(seen.has(key))continue; seen.add(key);
+      const locale=normalizeLanguage(uiLanguage)==='es'?'es':'en';
+      const base=`https://12go.asia/${locale}/travel/${encodeURIComponent(a)}/${encodeURIComponent(b)}/`;
+      const targetUrl=appendParams(base,{date:route.date||undefined,z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
+      const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:'verified_route_search',travelDate:route.date||'',titleEs:label,titleEn:label,descriptionEs:'Consulta opciones de transporte disponibles para esta ruta en 12Go.',descriptionEn:'Check available transport options for this route on 12Go.',confidence:'medium'});
+      if(offer)out.push(offer);
+    }
+  }
+  return out;
+}
+function resolveDiscoverCarsOffers(city,needs=[]){
+  const partner=virtualPartner('discovercars','DiscoverCars','car_rental'); const out=[];
+  for(const need of (Array.isArray(needs)?needs:[])){
+    const rental=/rental car|car rental|vehiculo rentado|coche de alquiler|auto de alquiler|carro de alquiler/i.test(`${need?.entity_name||''} ${need?.source_activity||''} ${need?.transport||''} ${need?.user_message||''}`);
+    if(need?.need_type!=='transport_arrangement'||!rental)continue;
+    const targetUrl=appendParams('https://www.discovercars.com/',{a_aid:DISCOVERCARS_AID,data1:'itbmo',data2:campaignPart(city||'workspace')});
+    const offer=signedVirtualOffer({partner,targetUrl,placement:'city_car_rental',need,city,resolutionType:'verified_car_rental',titleEs:`Vehículo para ${city}`,titleEn:`Rental car for ${city}`,descriptionEs:'Compara opciones de alquiler para ejecutar esta parte de tu itinerario por tu cuenta.',descriptionEn:'Compare rental options to complete this part of your itinerary independently.',confidence:'high'});
+    if(offer)out.push(offer);
+  }
+  return out;
+}
+function resolveRiseShieldTripOffer(){
+  const partner=virtualPartner('riseandshield','Rise & Shield','travel_insurance');
+  const targetUrl=appendParams('https://riseandshield.com/',{ref:RISE_SHIELD_REF,tm_source:'itbmo'});
+  return signedVirtualOffer({partner,targetUrl,placement:'trip_insurance',need:{id:'trip-insurance',need_type:'travel_insurance',entity_name:'Travel insurance'},resolutionType:'verified_trip_insurance',titleEs:'Seguro para tu viaje',titleEn:'Travel insurance for your trip',descriptionEs:'Explora una opción de protección para todo el viaje. Cobertura, elegibilidad y precio final se confirman directamente con el proveedor.',descriptionEn:'Explore a protection option for your whole trip. Coverage, eligibility and final price are confirmed directly with the provider.',confidence:'high'});
+}
+
 function rankOffers(offers) {
   const resolution = { workspace_feed_route: 43, workspace_canonical_route: 42, context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
@@ -917,6 +989,8 @@ export async function resolveTripOffers({ session_token, trip_id }) {
   ]);
   if (holafly) offers.push(holafly);
   if (airalo) offers.push(airalo);
+  const insurance=resolveRiseShieldTripOffer();
+  if(insurance) offers.push(insurance);
   return { session, offers: rankOffers(offers) };
 }
 
@@ -944,9 +1018,11 @@ export async function resolveCityOffers({
   const resolved = await Promise.allSettled([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
-    resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[])
+    resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[]),
+    Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,safeNeeds)),
+    Promise.resolve(resolveDiscoverCarsOffers(safeCity,safeNeeds))
   ]);
-  const labels=['viator','getyourguide','omio'];
+  const labels=['viator','getyourguide','omio','12go','discovercars'];
   const buckets=resolved.map((result,index)=>{
     if(result.status==='fulfilled')return Array.isArray(result.value)?result.value:[];
     console.warn(`[ITBMO PARTNER ISOLATION] ${labels[index]}`,result.reason?.message||result.reason);
