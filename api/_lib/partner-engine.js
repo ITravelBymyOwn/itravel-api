@@ -882,6 +882,45 @@ function twelveGoEndpointSane(value=''){
   if(!key||/^(area|zona|region|centro|center|downtown|hotel|parking|station|estacion|terminal|airport|aeropuerto)$/.test(key))return false;
   return true;
 }
+function twelveGoAbstractAccessNode(value=''){
+  const key=normalizeKey(clean(value,160));
+  if(!key)return false;
+  // Generic connection/access labels are useful to humans but are not stable
+  // commercial markets. They may be collapsed only when a contiguous ITBMO
+  // transport need provides a concrete trip base and a concrete opposite end.
+  const access=/(access|acceso|connection|conexion|enlace|transfer point|punto de embarque|boarding point)/.test(key);
+  const transport=/(rail|railway|ferrovi|train|tren|bus|coach|ferry|ferri|boat|port|puerto|airport|aeropuerto|terminal|station|estacion|shuttle)/.test(key);
+  return access&&transport;
+}
+function twelveGoResolvedMarket({leg,city,need,index=0}){
+  const mode=twelveGoCommercialMode(leg?.mode); if(!mode)return null;
+  let origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
+  let destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
+  const originAbstract=twelveGoAbstractAccessNode(origin),destinationAbstract=twelveGoAbstractAccessNode(destination);
+  const base=clean(city||need?.city,120);
+  let resolution='sealed_leg';
+  // Preserve the strict sealed-leg rule for ordinary A→B markets. The only
+  // compatibility bridge for older sealed trips is an abstract access node:
+  // BASE → ACCESS_NODE → DESTINATION (or reverse). In that case collapse the
+  // access node to the trip base; never manufacture a market from free text.
+  if(!leg?.commerce_eligible){
+    if(originAbstract&&!destinationAbstract&&twelveGoEndpointSane(base)&&normalizeKey(base)!==normalizeKey(destination)){
+      origin=base; resolution='collapsed_access_chain';
+    }else if(destinationAbstract&&!originAbstract&&twelveGoEndpointSane(base)&&normalizeKey(origin)!==normalizeKey(base)){
+      destination=base; resolution='collapsed_access_chain';
+    }else return null;
+  }else{
+    // Even on a commerce-eligible leg, never send an abstract access label to
+    // 12Go. Collapse it only when the opposite endpoint and trip base are sane.
+    if(originAbstract&&!destinationAbstract&&twelveGoEndpointSane(base)&&normalizeKey(base)!==normalizeKey(destination)){
+      origin=base; resolution='collapsed_access_chain';
+    }else if(destinationAbstract&&!originAbstract&&twelveGoEndpointSane(base)&&normalizeKey(origin)!==normalizeKey(base)){
+      destination=base; resolution='collapsed_access_chain';
+    }else if(originAbstract||destinationAbstract)return null;
+  }
+  if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
+  return {origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode,resolution};
+}
 function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
   const partner=virtualPartner('12go','12Go','transport'); const out=[]; const seen=new Set();
   for(const need of (Array.isArray(needs)?needs:[])){
@@ -894,15 +933,12 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
     // not necessarily a bookable market. Resolve each real intercity leg first.
     if(payload?.legs?.length){
       payload.legs.forEach((leg,index)=>{
-        // 12Go is intentionally independent from Omio, but it consumes only the
-        // same Route Resolver legs that ITBMO already marked commercial. Local
-        // access/walking/metro micro-legs must never become affiliate searches.
-        if(!leg?.commerce_eligible)return;
-        const mode=twelveGoCommercialMode(leg?.mode);
-        if(!mode)return;
-        const origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
-        const destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
-        if(twelveGoEndpointSane(origin)&&twelveGoEndpointSane(destination)&&normalizeKey(origin)!==normalizeKey(destination))candidates.push({origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode});
+        // 12Go stays independent from Omio. Ordinary legs still require the
+        // Route Resolver commerce seal. Older trips get one narrow compatibility
+        // bridge: collapse an abstract transport access node to the concrete trip
+        // base when the opposite endpoint is concrete and the mode is bookable.
+        const market=twelveGoResolvedMarket({leg,city,need,index});
+        if(market)candidates.push(market);
       });
     }
     // Do not synthesize a 12Go market from editorial parent labels or free text.
@@ -914,7 +950,7 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
       const base=`https://12go.asia/${locale}/travel/${encodeURIComponent(a)}/${encodeURIComponent(b)}/`;
       const targetUrl=appendParams(base,{date:route.date||undefined,z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
-      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:'context_route_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80)},titleEs:label,titleEn:label,descriptionEs:'Busca opciones para este tramo en 12Go. Horarios y disponibilidad se confirman directamente con el proveedor.',descriptionEn:'Search options for this leg on 12Go. Schedules and availability are confirmed directly with the provider.',confidence:'medium'});
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:'context_route_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60)},titleEs:label,titleEn:label,descriptionEs:'Busca opciones para este tramo en 12Go. Horarios y disponibilidad se confirman directamente con el proveedor.',descriptionEn:'Search options for this leg on 12Go. Schedules and availability are confirmed directly with the provider.',confidence:'medium'});
       if(offer)out.push(offer);
     }
   }
