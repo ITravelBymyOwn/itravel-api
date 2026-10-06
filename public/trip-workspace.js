@@ -150,10 +150,24 @@ function normalizeWorkspaceEntity(value){
 function workspaceEntityCore(value){
   return normalizeWorkspaceEntity(value).replace(/\b(city tour|tour panoramico|highlights tour|guided tour|visita guiada|tour de|entrada|ticket|interior|torres?|tower|patios?|salones?|apartamentos? reales?|royal apartments?)\b/g,' ').replace(/\s+/g,' ').trim();
 }
+function workspaceEntityTokens(value){
+  const stop=new Set(['de','del','la','las','el','los','y','and','the','of','en','in','conjunto','complex','sitio','site','templo','temple']);
+  return workspaceEntityCore(value).split(' ').filter(token=>token.length>2&&!stop.has(token));
+}
 function sameWorkspaceEntity(a,b){
   const x=workspaceEntityCore(a),y=workspaceEntityCore(b);
-  return Boolean(x&&y&&(x===y||(Math.min(x.length,y.length)>=7&&(x.includes(y)||y.includes(x)))));
+  if(!x||!y)return false;
+  if(x===y||(Math.min(x.length,y.length)>=7&&(x.includes(y)||y.includes(x))))return true;
+  // Canonical aliases such as “Qorikancha y conjunto de Santo Domingo” versus
+  // “Templo del Qorikancha” must collapse into one commercial decision without
+  // changing either itinerary row. Require a strong distinctive-token overlap.
+  const xt=workspaceEntityTokens(a),yt=workspaceEntityTokens(b);
+  if(!xt.length||!yt.length)return false;
+  const shared=xt.filter(token=>yt.includes(token));
+  const shortest=Math.min(xt.length,yt.length);
+  return shared.some(token=>token.length>=6) && shared.length/shortest>=0.5;
 }
+
 function dedupeContextualNeeds(items=[]){
   const rank=item=>item?.need_type==='ticket_required'?4:item?.need_type==='reservation_recommended'?3:item?.confidence==='high'?2:1;
   const out=[];
@@ -238,8 +252,12 @@ function tourAlternativesForCity(cityName,existingNeeds=[]){
     const canonical=String(cc?.canonical_place||row?.to||activity).trim();
     const item={day,index,row,activity,canonical,guided,semantic};
     if(!byDay.has(day))byDay.set(day,[]);byDay.get(day).push(item);
-    // Standalone guided value is reserved for genuinely complex/high-value anchors.
-    if(guided==='high'||semantic==='TOUR_EXPERIENCE'||priority==='essential'||priority==='high'){
+    // Standalone guided cards are reserved for explicit experiences or for
+    // complex ticketed anchors where a guide adds a genuinely different way to
+    // execute the visit. A free urban POI marked high-priority must not become a
+    // separate affiliate tour merely because it is important to the itinerary.
+    const standaloneGuided=semantic==='TOUR_EXPERIENCE'||(semantic==='ATTRACTION_TICKET'&&(guided==='high'||priority==='essential'||priority==='high'));
+    if(standaloneGuided){
       const key=normalizeWorkspaceEntity(canonical);
       if(key&&!existingKeys.has(key)){
         derived.push({id:`workspace-tour-anchor:${day}:${index+1}`,category:'tours',city:cityName,day,entity_name:canonical,entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',user_message:lang==='es'?`Una visita guiada puede aportar contexto y ayudarte a aprovechar mejor ${canonical}; compárala con la visita por tu cuenta.`:`A guided visit can add context and help you get more from ${canonical}; compare it with visiting independently.`,source_activity:activity,source_route:[row?.from,row?.to].filter(Boolean).join(' → '),transport:String(row?.transport||'').trim(),derived_by:'commerce_context_guided'});
@@ -247,17 +265,9 @@ function tourAlternativesForCity(cityName,existingNeeds=[]){
       }
     }
   });
-  // Build at most one coherent overview experience per sightseeing day instead
-  // of turning every itinerary row into a separate tour product.
-  for(const [day,items] of byDay.entries()){
-    const cluster=items.filter(x=>!['RESTAURANT','LOGISTICS','NONE'].includes(x.semantic));
-    if(cluster.length<2)continue;
-    const label=lang==='es'?`Tour panorámico de ${cityName}`:`${cityName} highlights tour`;
-    const key=normalizeWorkspaceEntity(label);
-    if(existingKeys.has(key))continue;
-    derived.push({id:`workspace-tour-cluster:${normalizeWorkspaceEntity(cityName)}:${day}`,category:'tours',city:cityName,day,entity_name:label,entity_type:'experience',need_type:'guided_tour_optional',confidence:'medium',user_message:lang==='es'?`Puede reunir en una experiencia guiada varios de los lugares que ya tienes previstos este día, manteniendo el foco en tu ruta.`:`A guided experience can combine several places already planned for this day while staying aligned with your route.`,source_activity:cluster.slice(0,4).map(x=>x.canonical||x.activity).join(' · '),source_route:'',derived_by:'itinerary_experience_cluster'});
-    existingKeys.add(key);
-  }
+  // The destination-wide City Tour already represents the broad urban overview.
+  // Do not manufacture additional same-day “panoramic” cards from individual
+  // POIs; explicit/complex guided anchors above remain eligible on their merits.
   return derived.slice(0,4);
 }
 function rentalTransportTextMatches(value){
