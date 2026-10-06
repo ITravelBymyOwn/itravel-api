@@ -1066,24 +1066,37 @@ export async function registerPartnerClick({ session_token, trip_id, offer_id, o
   }
 
   const clickId = crypto.randomUUID();
-  await supabaseFetch('/partner_clicks', {
-    method: 'POST',
-    body: JSON.stringify({
-      click_id: clickId,
-      partner_id: resolved.partner_id,
-      offer_id: resolved.offer_id,
-      user_id: session?.user_id || null,
-      session_id: session?.id || null,
-      trip_id: trip_id || null,
+  // V158: click telemetry must never block a verified affiliate navigation.
+  // Virtual adapters (Rise & Shield / 12Go / DiscoverCars) intentionally do not
+  // require a travel_partners DB row, so partner_id/offer_id can be null. Older
+  // partner_clicks schemas may reject those null FKs. The signed URL and required
+  // attribution have already been verified above; therefore logging is best-effort.
+  try {
+    await supabaseFetch('/partner_clicks', {
+      method: 'POST',
+      body: JSON.stringify({
+        click_id: clickId,
+        partner_id: resolved.partner_id,
+        offer_id: resolved.offer_id,
+        user_id: session?.user_id || null,
+        session_id: session?.id || null,
+        trip_id: trip_id || null,
+        placement: clean(resolved.placement || placement, 80),
+        city: clean(resolved.city, 160) || null,
+        need_type: clean(resolved.need_type, 80) || null,
+        entity_name: clean(resolved.entity_name, 180) || null,
+        travel_date: clean(resolved.travel_date, 40) || null,
+        target_url: clean(resolved.url, 1500),
+        resolution_type: clean(resolved.resolution_type, 40) || null
+      })
+    });
+  } catch (error) {
+    console.error('ITBMO partner click telemetry failed; navigation preserved', {
+      partner: resolved.partner_slug || '',
       placement: clean(resolved.placement || placement, 80),
-      city: clean(resolved.city, 160) || null,
-      need_type: clean(resolved.need_type, 80) || null,
-      entity_name: clean(resolved.entity_name, 180) || null,
-      travel_date: clean(resolved.travel_date, 40) || null,
-      target_url: clean(resolved.url, 1500),
-      resolution_type: clean(resolved.resolution_type, 40) || null
-    })
-  });
+      code: error?.message || 'PARTNER_CLICK_TELEMETRY_FAILED'
+    });
+  }
 
   return {
     ok: true,
