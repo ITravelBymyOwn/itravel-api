@@ -848,7 +848,7 @@ function virtualPartner(slug,name,category=''){
   return {id:null,slug,name,category,status:'approved',enabled:true,metadata:{source:'itbmo_verified_affiliate'}};
 }
 function syntheticOfferId(slug,key='context'){ return `virtual:${slug}:${campaignPart(key)}`; }
-function signedVirtualOffer({partner,targetUrl,placement,need={},city='',resolutionType='verified_affiliate',titleEs='',titleEn='',descriptionEs='',descriptionEn='',confidence='high',travelDate=''}){
+function signedVirtualOffer({partner,targetUrl,placement,need={},city='',resolutionType='verified_affiliate',titleEs='',titleEn='',descriptionEs='',descriptionEn='',confidence='high',travelDate='',routeSegment=null}){
   if(!allowedPartnerUrl(partner.slug,targetUrl)||!hasRequiredAttribution(partner.slug,targetUrl))return null;
   return {
     id:syntheticOfferId(partner.slug,`${placement}-${need?.id||city||'trip'}`),
@@ -857,6 +857,7 @@ function signedVirtualOffer({partner,targetUrl,placement,need={},city='',resolut
     confidence,enabled:true,metadata:{source:'verified_affiliate_adapter'},target_url:undefined,
     need_id:clean(need?.id,120),entity_name:clean(need?.entity_name||need?.source_activity,180),city:clean(city||need?.city,160),
     travel_date:clean(travelDate||need?.travel_date||need?.date,40)||null,resolution_type:resolutionType,
+    route_segment:routeSegment||undefined,
     partner:{id:null,slug:partner.slug,name:partner.name},
     offer_token:signResolvedOffer({template:null,partner,targetUrl,placement,need,city,resolutionType,travelDate:travelDate||need?.travel_date||'',partnerLocale:''})
   };
@@ -871,7 +872,17 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
     if(/rental car|car rental|vehiculo rentado|coche de alquiler|auto de alquiler/i.test(`${need?.entity_name||''} ${need?.transport||''}`))continue;
     const payload=parseResolvedRoutePayload(need?.source_route);
     const candidates=[];
-    if(payload?.parent?.origin&&payload?.parent?.destination)candidates.push({origin:payload.parent.origin,destination:payload.parent.destination,date:need?.travel_date||''});
+    // Prefer the same physical commercial A→B legs rendered by Workspace.
+    // A parent label such as “Cusco → Machu Picchu area → Cusco” is editorial,
+    // not necessarily a bookable market. Resolve each real intercity leg first.
+    if(payload?.legs?.length){
+      payload.legs.forEach((leg,index)=>{
+        const origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
+        const destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
+        if(origin&&destination)candidates.push({origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode:clean(leg?.mode,80)});
+      });
+    }
+    if(!candidates.length&&payload?.parent?.origin&&payload?.parent?.destination)candidates.push({origin:payload.parent.origin,destination:payload.parent.destination,date:need?.travel_date||'',index:1,mode:''});
     if(!candidates.length){
       const m=String(need?.entity_name||need?.source_activity||'').match(/^\s*([^→]+?)\s*→\s*([^→]+?)\s*$/);
       if(m)candidates.push({origin:m[1],destination:m[2],date:need?.travel_date||''});
@@ -883,7 +894,7 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
       const base=`https://12go.asia/${locale}/travel/${encodeURIComponent(a)}/${encodeURIComponent(b)}/`;
       const targetUrl=appendParams(base,{date:route.date||undefined,z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
-      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:'verified_route_search',travelDate:route.date||'',titleEs:label,titleEn:label,descriptionEs:'Consulta opciones de transporte disponibles para esta ruta en 12Go.',descriptionEn:'Check available transport options for this route on 12Go.',confidence:'medium'});
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:'verified_route_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80)},titleEs:label,titleEn:label,descriptionEs:'Consulta opciones de transporte disponibles para esta ruta en 12Go.',descriptionEn:'Check available transport options for this route on 12Go.',confidence:'medium'});
       if(offer)out.push(offer);
     }
   }
