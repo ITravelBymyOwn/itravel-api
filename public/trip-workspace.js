@@ -411,6 +411,8 @@ function contextualNeedsForCity(cityName,needs){
   // belong to a subdestination. Keep only needs that belong to this physical
   // workspace slice; transport is re-derived from the authoritative route.
   const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName)).filter(item=>transportNeedBelongsToOriginWorkspace(item,cityName)).filter(item=>{
+    const text=normalizeWorkspaceEntity(`${item?.entity_name||''} ${item?.source_activity||''}`);
+    if(/\b(hotel|alojamiento|accommodation|check in|check out|desayuno|almuerzo|cena|breakfast|lunch|dinner|airport|aeropuerto|station|estacion|terminal)\b/i.test(text) && ['ticket_required','reservation_recommended','guided_tour_optional'].includes(item?.need_type))return false;
     // City Tour is transversal: Context may discover one on a particular day,
     // but Workspace renders exactly one destination-wide card above daily tours.
     if(item?.need_type!=='guided_tour_optional')return true;
@@ -478,9 +480,19 @@ function sectionSort(items=[],sectionType=''){
     return String(a?.entity_name||a?.source_activity||'').localeCompare(String(b?.entity_name||b?.source_activity||''),lang==='es'?'es':'en',{sensitivity:'base'});
   });
 }
+function isMandatoryItineraryTour(item){
+  if(item?.need_type!=='guided_tour_optional')return false;
+  const derived=String(item?.derived_by||'');
+  // Context-authored tours without a Workspace derivation originate in the itinerary
+  // and must never be hidden. Destination overview is also intentionally visible.
+  return !derived || derived==='physical_destination_overview';
+}
 function initialSectionLimit(items=[],sectionType=''){
-  if(sectionType==='tickets') return items.length; // access needs are execution-critical: never hide them behind 'Ver más'
-  if(sectionType==='tours') return Math.min(items.length,4);
+  if(sectionType==='tickets') return items.length; // Required/recommended access stays exhaustive.
+  if(sectionType==='tours'){
+    const mandatory=items.filter(isMandatoryItineraryTour).length;
+    return Math.min(items.length,Math.max(4,mandatory));
+  }
   if(sectionType==='transport') return Math.min(items.length,3);
   return items.length;
 }
@@ -566,10 +578,10 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       ? esc(item.source_summary)
       : item.derived_by==='trip_sequence'
         ? (lang==='es'?'Basado en el orden de tus destinos':'Based on your destination order')
-        : `${esc(t.basedOn)} · ${esc(t.dayLabel)} ${esc(item.day)}${dayDate(city,item.day)?` · ${esc(dayDate(city,item.day))}`:''}`;
+        : item.day ? esc(t.basedOn) : '';
     const originalNote=originalNoteForNeed(item,city);
     return `
-    <article class="tw-context-item"${index>=visibleCount?' hidden data-context-extra="1"':''}>
+    <article class="tw-context-item${isRentalTransportNeed(item)?' tw-context-item--mobility-decision':''}${isMandatoryItineraryTour(item)?' tw-context-item--must':''}"${index>=visibleCount?' hidden data-context-extra="1"':''}>
       <div class="tw-context-item-top">
         ${scopeOrDay}
         <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : contextLabel(item))}</span>
@@ -577,7 +589,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
       ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
       ${originalNote?`<details class="tw-context-original-note"><summary><span>${esc(t.details)} ＋</span><span>${esc(t.hide)} −</span></summary><div><small>${esc(t.notes)}</small><p>${esc(originalNote)}</p></div></details>`:''}
-      <small class="tw-context-source">${sourceCopy}</small>
+      ${sourceCopy?`<small class="tw-context-source">${sourceCopy}</small>`:''}
       ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && !parseResolvedRouteSource(item.source_route)
         ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`
         : ''}
@@ -585,7 +597,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
         // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
         // outer need-card association suppress a valid feed offer after the UI
         // changed from one simple card to a parent card containing 1..N legs.
-        ? renderResolvedTransportSegments(item,offers)
+        ? `${renderResolvedTransportSegments(item,offers)}${partnerOptions(matched.filter(offer=>(offer?.partner?.slug||'')!=='omio'))}`
         : partnerOptions(matched)}
     </article>`;
   }).join('')}</div>`;
@@ -807,18 +819,21 @@ function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').fo
 });}
 async function loadTripPartnerOffers(){tripPartnerOffers=await fetchPartnerOffers('resolve_trip');renderTripPartnerOffers();}
 function renderTripPartnerOffers(){
-  const offers=tripPartnerOffers.filter(x=>x.placement==='trip_connectivity');
-  const item=$('#tw-connectivity-status')?.closest('.tw-trip-wide__item');
-  if(!offers.length){ if(item) item.classList.remove('is-live'); return; }
-  if(!item)return;item.classList.add('is-live');$('#tw-connectivity-status').textContent=t.available;
-  item.querySelectorAll('.tw-partner-offer').forEach(el=>el.remove());
-  item.insertAdjacentHTML('beforeend',offers.map(offer=>offerCard(offer,'trip_connectivity')).join(''));bindPartnerOffers();
-  offers.forEach(offer=>{
-    if(!viewedOfferIds.has(offer.id)){
-      viewedOfferIds.add(offer.id);
-      window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',partner_slug:offer.partner?.slug||'',placement:'trip_connectivity'});
-    }
+  const groups=[
+    {placement:'trip_connectivity',status:'#tw-connectivity-status'},
+    {placement:'trip_insurance',status:'#tw-insurance-status'}
+  ];
+  groups.forEach(group=>{
+    const offers=tripPartnerOffers.filter(x=>x.placement===group.placement);
+    const status=$(group.status); const item=status?.closest('.tw-trip-wide__item');
+    if(!item)return;
+    item.querySelectorAll('.tw-partner-offer').forEach(el=>el.remove());
+    if(!offers.length){item.classList.remove('is-live');return;}
+    item.classList.add('is-live'); if(status)status.textContent=t.available;
+    item.insertAdjacentHTML('beforeend',offers.map(offer=>offerCard(offer,group.placement)).join(''));
+    offers.forEach(offer=>{const key=`${offer.id}:${group.placement}`;if(viewedOfferIds.has(key))return;viewedOfferIds.add(key);window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',partner_slug:offer.partner?.slug||'',placement:group.placement});});
   });
+  bindPartnerOffers();
 }
 function renderPrepare(){
   const c=esc(city);
@@ -859,7 +874,7 @@ function renderPrepare(){
   // Intercity mobility offers resolved by the Partner Engine are now shown in
   // the same contextual card as the authoritative A→B route. Local/POI mobility
   // remains informational because the server resolver only emits eligible routes.
-  const transportOffers=cityOffers.filter(x=>x.placement==='city_transport');
+  const transportOffers=cityOffers.filter(x=>x.placement==='city_transport'||x.placement==='city_car_rental');
   const activeSections=[
     contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets','tickets'),
     contextSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours','tours'),
