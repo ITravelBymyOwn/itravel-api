@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V154';
-const ITBMO_RUNTIME_ASSET='planner.js?v=273';
+const ITBMO_RUNTIME_BUILD='V156';
+const ITBMO_RUNTIME_ASSET='planner.js?v=274';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -12698,6 +12698,20 @@ async function getPaymentReceiptData(){
     if(data?.admin_bypass && !data?.payment){
       return {test:true,id:`ADMIN-${String(currentTripId).slice(0,8).toUpperCase()}`,provider:'admin_test_bypass',amount:'0.00',currency:'USD',paid_at:new Date().toISOString(),provider_transaction_id:null};
     }
+    if(data?.entitlement_source==='promotion' && data?.promotion_entitlement){
+      const promo=data.promotion_entitlement;
+      return {
+        promotion:true,
+        id:promo.id || `PROMO-${String(currentTripId).slice(0,8).toUpperCase()}`,
+        provider:'itbmo_promotion',
+        amount:String(promo.final_amount ?? '0.00'),
+        currency:String(promo.currency || 'USD').toUpperCase(),
+        paid_at:promo.consumed_at || new Date().toISOString(),
+        provider_transaction_id:null,
+        promotion_code:String(promo.code || 'PROMOTION').toUpperCase(),
+        discount_amount:Number(promo.discount_amount || 0)
+      };
+    }
     return data?.payment ? {...data.payment,test:false} : null;
   }catch(err){ console.warn('[RECEIPT STATUS]',err); return null; }
 }
@@ -12842,7 +12856,9 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
 
   const receiptNo = payment.test
     ? `ADMIN-TEST-${shortPaymentId}`
-    : `ITBMO-${dateForId}-${shortPaymentId}`;
+    : payment.promotion
+      ? `ITBMO-PROMO-${dateForId}-${shortPaymentId}`
+      : `ITBMO-${dateForId}-${shortPaymentId}`;
 
   const localeByLang = {
     es:'es-CR', en:'en-GB', pt:'pt-BR', fr:'fr-FR', de:'de-DE', it:'it-IT'
@@ -12855,10 +12871,12 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
 
   const amountValue = Number(payment.amount || 0);
   const currency = String(payment.currency || 'USD').toUpperCase();
-  const provider = payment.test ? 'ADMIN TEST' : String(payment.provider || 'PayPal').toUpperCase();
+  const provider = payment.test ? 'ADMIN TEST' : payment.promotion ? 'ITBMO PROMOTION' : String(payment.provider || 'PayPal').toUpperCase();
   const paymentStatus = payment.test
     ? c.test
-    : (String(payment.status || 'paid').toLowerCase()==='paid'
+    : payment.promotion
+      ? (lang==='es'?'PROMOCIÓN':lang==='pt'?'PROMOÇÃO':lang==='fr'?'PROMOTION':lang==='de'?'AKTION':lang==='it'?'PROMOZIONE':'PROMOTION')
+      : (String(payment.status || 'paid').toLowerCase()==='paid'
         ? c.paid
         : String(payment.status || '').toUpperCase());
 
@@ -12879,7 +12897,7 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
 
   doc.setFontSize(10);
   doc.setFont('helvetica','normal');
-  doc.text(c.title,W-M-22,66,{align:'right'});
+  doc.text(payment.promotion ? (lang==='es'?'COMPROBANTE PROMOCIONAL':lang==='pt'?'COMPROVANTE PROMOCIONAL':lang==='fr'?'REÇU PROMOTIONNEL':lang==='de'?'AKTIONSBELEG':lang==='it'?'RICEVUTA PROMOZIONALE':'PROMOTIONAL RECEIPT') : c.title,W-M-22,66,{align:'right'});
   doc.setFont('helvetica','bold');
   doc.setFontSize(12);
   doc.text(receiptNo,W-M-22,88,{align:'right'});
@@ -12888,7 +12906,7 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
   doc.setTextColor(7,34,66);
   doc.setFont('helvetica','bold');
   doc.setFontSize(22);
-  doc.text(c.summary,M,158);
+  doc.text(payment.promotion ? (lang==='es'?'Resumen de la promoción':lang==='pt'?'Resumo da promoção':lang==='fr'?'Résumé de la promotion':lang==='de'?'Aktionsübersicht':lang==='it'?'Riepilogo della promozione':'Promotion summary') : c.summary,M,158);
 
   const chipW = payment.test ? 100 : 82;
   if(payment.test){
@@ -12928,7 +12946,7 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
   doc.setFont('helvetica','bold');
   doc.setFontSize(11);
   doc.setTextColor(7,34,66);
-  doc.text(c.payment,M+17,cardY+24);
+  doc.text(payment.promotion ? (lang==='es'?'Promoción':lang==='pt'?'Promoção':lang==='fr'?'Promotion':lang==='de'?'Aktion':lang==='it'?'Promozione':'Promotion') : c.payment,M+17,cardY+24);
   doc.text(c.trip,M+cardW+gap+17,cardY+24);
 
   labelValue(M+17,cardY+49,c.date,dateText);
@@ -12948,13 +12966,13 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
   doc.setFont('helvetica','bold');
   doc.setFontSize(8.5);
   doc.setTextColor(75,112,134);
-  doc.text(c.transaction,M+17,refY+23);
+  doc.text(payment.promotion ? (lang==='es'?'CÓDIGO PROMOCIONAL':lang==='pt'?'CÓDIGO PROMOCIONAL':lang==='fr'?'CODE PROMOTIONNEL':lang==='de'?'AKTIONSCODE':lang==='it'?'CODICE PROMOZIONALE':'PROMOTIONAL CODE') : c.transaction,M+17,refY+23);
 
   doc.setFont('helvetica','normal');
   doc.setFontSize(11);
   doc.setTextColor(7,34,66);
   doc.text(
-    payment.test ? '—' : String(payment.provider_transaction_id || '—'),
+    payment.test ? '—' : payment.promotion ? String(payment.promotion_code || 'PROMOTION') : String(payment.provider_transaction_id || '—'),
     M+17,refY+45,{maxWidth:W-(M*2)-34}
   );
 
@@ -12968,7 +12986,7 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
   doc.setFontSize(9.5);
   doc.setTextColor(76,95,113);
   doc.text(
-    doc.splitTextToSize(payment.test ? c.testNote : c.realNote,W-(M*2)),
+    doc.splitTextToSize(payment.test ? c.testNote : payment.promotion ? (lang==='es' ? `Este comprobante confirma que el código promocional ${payment.promotion_code || 'ITBMO'} otorgó acceso a esta generación de itinerario con importe final USD 0.00. No se procesó ningún cargo monetario.` : lang==='pt' ? `Este comprovante confirma que o código promocional ${payment.promotion_code || 'ITBMO'} concedeu acesso a esta geração de itinerário com valor final USD 0.00. Nenhuma cobrança monetária foi processada.` : lang==='fr' ? `Ce reçu confirme que le code promotionnel ${payment.promotion_code || 'ITBMO'} a donné accès à cette génération d’itinéraire avec un montant final de 0,00 USD. Aucun débit monétaire n’a été traité.` : lang==='de' ? `Dieser Beleg bestätigt, dass der Aktionscode ${payment.promotion_code || 'ITBMO'} den Zugriff auf diese Reiseplangenerierung mit einem Endbetrag von 0,00 USD gewährt hat. Es wurde keine Zahlung belastet.` : lang==='it' ? `Questa ricevuta conferma che il codice promozionale ${payment.promotion_code || 'ITBMO'} ha consentito l’accesso a questa generazione di itinerario con importo finale di 0,00 USD. Non è stato elaborato alcun addebito.` : `This receipt confirms that promotional code ${payment.promotion_code || 'ITBMO'} granted access to this itinerary generation with a final amount of USD 0.00. No monetary charge was processed.`) : c.realNote,W-(M*2)),
     M,507
   );
 
@@ -12983,7 +13001,7 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
 
   doc.setFont('helvetica','normal');
   doc.setFontSize(9);
-  doc.text(doc.splitTextToSize(c.legal,W-(M*2)-34),M+17,607);
+  doc.text(doc.splitTextToSize(payment.promotion ? (lang==='es'?'Este documento acredita el acceso promocional a ITBMO y no constituye factura ni comprobante fiscal. No se procesó ningún cargo monetario. Para soporte: support@itravelbymyown.com':lang==='pt'?'Este documento comprova o acesso promocional ao ITBMO e não constitui nota fiscal ou documento fiscal. Nenhuma cobrança monetária foi processada. Suporte: support@itravelbymyown.com':lang==='fr'?'Ce document atteste de l’accès promotionnel à ITBMO et ne constitue pas une facture fiscale. Aucun débit monétaire n’a été traité. Support : support@itravelbymyown.com':lang==='de'?'Dieses Dokument bestätigt den Aktionszugang zu ITBMO und ist keine Steuerrechnung oder steuerliche Bescheinigung. Es wurde keine Zahlung belastet. Support: support@itravelbymyown.com':lang==='it'?'Questo documento attesta l’accesso promozionale a ITBMO e non costituisce fattura fiscale o documento fiscale. Non è stato elaborato alcun addebito. Supporto: support@itravelbymyown.com':'This document confirms promotional access to ITBMO and is not a tax invoice or fiscal document. No monetary charge was processed. Support: support@itravelbymyown.com') : c.legal,W-(M*2)-34),M+17,607);
 
   // Footer
   doc.setDrawColor(224,231,237);
@@ -13001,7 +13019,9 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
 
   const filename = payment.test
     ? `ITBMO-ADMIN-TEST-Receipt-${dateForId}.pdf`
-    : `ITBMO-Payment-Receipt-${dateForId}.pdf`;
+    : payment.promotion
+      ? `ITBMO-Promotion-Receipt-${dateForId}.pdf`
+      : `ITBMO-Payment-Receipt-${dateForId}.pdf`;
 
   const blob=doc.output('blob');
   if(options.download!==false) await deliverGeneratedFile(blob,filename);
