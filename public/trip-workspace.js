@@ -365,6 +365,69 @@ function contextualNeedBelongsToCitySlice(item,cityName){
     return (entity&&rowText.includes(entity))||(source&&rowText.includes(source))||(target.length>8&&rowText.includes(target));
   });
 }
+function workspaceRowsMatchingNeed(item,cityName){
+  const entity=normalizeWorkspaceEntity(item?.entity_name||'');
+  const source=normalizeWorkspaceEntity(String(item?.source_activity||'').replace(/^rev:\s*/i,''));
+  return workspaceRowsForCity(cityName).filter(({row})=>{
+    const activity=normalizeWorkspaceEntity(String(row?.activity||'').replace(/^rev:\s*/i,''));
+    const canonical=normalizeWorkspaceEntity(row?.commerce_context?.canonical_place||'');
+    const to=normalizeWorkspaceEntity(row?.to||'');
+    const values=[activity,canonical,to].filter(Boolean);
+    return values.some(v=>(entity&&sameWorkspaceEntity(entity,v))||(source&&sameWorkspaceEntity(source,v))||(entity&&v.includes(entity))||(source&&v.includes(source)));
+  });
+}
+function rowHasAdmissionEvidence(row){
+  const cc=row?.commerce_context||{};
+  const semantic=String(cc?.semantic_type||'').toUpperCase();
+  const ticket=String(cc?.ticket_need||'').toLowerCase();
+  const text=normalizeWorkspaceEntity(`${row?.activity||''} ${cc?.canonical_place||''} ${row?.notes||''}`);
+  if(['RESTAURANT','LOGISTICS','FREE_SIGHT','NONE','TRANSPORT'].includes(semantic))return false;
+  if(/\b(no se presupone|no requiere|sin necesidad de|acceso libre|entrada gratuita|free admission|no ticket)\b.{0,35}\b(reserva|reservar|entrada|ticket|admission|booking)?\b/i.test(text))return false;
+  if(semantic==='ATTRACTION_TICKET'&&['required','recommended','optional','unknown'].includes(ticket))return true;
+  return /\b(entrada|ticket|billete|boleto|admission)\b.{0,55}\b(pago|necesari|required|obligatori|reserva|reserv|anticipad|confirm|verific|acceso)\b|\b(requiere|requires?)\b.{0,35}\b(entrada|ticket|admission)\b/i.test(text);
+}
+function contextualCommerceNeedIsSane(item,cityName){
+  if(!['ticket_required','reservation_recommended','guided_tour_optional'].includes(item?.need_type))return true;
+  const text=normalizeWorkspaceEntity(`${item?.entity_name||''} ${item?.source_activity||''} ${item?.user_message||''}`);
+  // Generic commerce guardrails: infrastructure/access points, transit scenery,
+  // meals and accommodation are not attractions simply because Context emitted
+  // reservation language. This is intentionally destination-agnostic.
+  if(/\b(acceso ferroviario|railway access|punto ferroviario|railway point|plataforma ferroviaria|rail platform|estacionamiento|parking|terminal|aeropuerto|airport|hotel|alojamiento|accommodation)\b/i.test(text))return false;
+  if(/\b(paisaje agricola|agricultural landscape|corredor paisajistico|scenic corridor)\b/i.test(text)&&item?.need_type!=='guided_tour_optional')return false;
+  const matches=workspaceRowsMatchingNeed(item,cityName);
+  if(!matches.length)return true; // preserve legitimate server intelligence when no row can be bound safely.
+  if(item?.need_type==='ticket_required'||item?.need_type==='reservation_recommended')return matches.some(({row})=>rowHasAdmissionEvidence(row));
+  // Guided experiences may attach to real sights, but never to rows whose only
+  // semantic purpose is logistics/transport.
+  return matches.some(({row})=>!['LOGISTICS','TRANSPORT','RESTAURANT','NONE'].includes(String(row?.commerce_context?.semantic_type||'').toUpperCase()));
+}
+function regionalTourAlternativeForCity(cityName,existingNeeds=[]){
+  const existing=(Array.isArray(existingNeeds)?existingNeeds:[]).filter(x=>x?.need_type==='guided_tour_optional');
+  const byDay=new Map();
+  workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
+    const transport=normalizeWorkspaceEntity(row?.transport||'');
+    const guidedMobility=/\b(traslado guiado|guided transfer|tour organizado|organized tour|excursion organizada|guided transport)\b/i.test(transport);
+    const cc=row?.commerce_context||{};
+    const semantic=String(cc?.semantic_type||'').toUpperCase();
+    if(!byDay.has(day))byDay.set(day,{guidedMobility:false,anchors:[]});
+    const bucket=byDay.get(day);
+    if(guidedMobility)bucket.guidedMobility=true;
+    if(semantic==='ATTRACTION_TICKET'){
+      const name=String(cc?.canonical_place||row?.to||row?.activity||'').trim();
+      if(name&&!bucket.anchors.some(x=>sameWorkspaceEntity(x,name)))bucket.anchors.push(name);
+    }
+  });
+  const candidates=[];
+  for(const [day,bucket] of byDay){
+    if(!bucket.guidedMobility||bucket.anchors.length<2)continue;
+    const anchors=bucket.anchors.slice(0,3);
+    if(existing.some(x=>anchors.some(a=>sameWorkspaceEntity(x?.entity_name||'',a))&&/excursion|tour|circuit/i.test(normalizeWorkspaceEntity(x?.entity_name||''))))continue;
+    const label=lang==='es'?`Excursión organizada: ${anchors.join(' + ')}`:`Organized day tour: ${anchors.join(' + ')}`;
+    candidates.push({id:`workspace-regional-tour:${day}`,category:'tours',city:cityName,day,entity_name:label,entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',user_message:lang==='es'?`Tu itinerario ya conecta ${anchors.join(', ')} mediante vehículo privado o traslado guiado. Compara una excursión organizada como forma alternativa de ejecutar esta jornada, sin cambiar las visitas previstas.`:`Your itinerary already connects ${anchors.join(', ')} using private or guided transport. Compare an organized day tour as an alternative way to execute this day without changing the planned visits.`,source_activity:label,source_route:'',derived_by:'regional_execution_alternative'});
+  }
+  return candidates.slice(0,2);
+}
+
 function localTicketNeedsForCity(cityName,existing=[]){
   const existingKeys=new Set((existing||[]).filter(x=>x?.need_type==='ticket_required'||x?.need_type==='reservation_recommended').map(x=>normalizeWorkspaceEntity(x?.entity_name||x?.source_activity||'')));
   const out=[];
@@ -378,7 +441,7 @@ function localTicketNeedsForCity(cityName,existing=[]){
     const key=normalizeWorkspaceEntity(canonical);
     if(!key||existingKeys.has(key))return;
     const admissionText=normalizeWorkspaceEntity(`${activity} ${canonical} ${notes}`);
-    const explicitlyFree=/\b(sin necesidad de entrada|no requiere entrada|entrada gratuita|acceso gratuito|free admission|no ticket|outdoor free|al aire libre)\b/i.test(admissionText);
+    const explicitlyFree=/\b(sin necesidad de entrada|no requiere entrada|entrada gratuita|acceso gratuito|free admission|no ticket|outdoor free|al aire libre|no se presupone reserva|no se presupone una reserva|no reservation assumed)\b/i.test(admissionText);
     // Deterministic contradiction guard: server/model metadata cannot turn a
     // clearly free exterior, plaza, viewpoint or street into a paid ticket.
     if(explicitlyFree)return;
@@ -420,7 +483,7 @@ function contextualNeedsForCity(cityName,needs){
   // Server context for a main planning unit can contain rows that physically
   // belong to a subdestination. Keep only needs that belong to this physical
   // workspace slice; transport is re-derived from the authoritative route.
-  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName)).filter(item=>transportNeedBelongsToOriginWorkspace(item,cityName)).filter(item=>{
+  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName)).filter(item=>transportNeedBelongsToOriginWorkspace(item,cityName)).filter(item=>contextualCommerceNeedIsSane(item,cityName)).filter(item=>{
     const text=normalizeWorkspaceEntity(`${item?.entity_name||''} ${item?.source_activity||''}`);
     if(/\b(hotel|alojamiento|accommodation|check in|check out|desayuno|almuerzo|cena|breakfast|lunch|dinner|airport|aeropuerto|station|estacion|terminal)\b/i.test(text) && ['ticket_required','reservation_recommended','guided_tour_optional'].includes(item?.need_type))return false;
     // City Tour is transversal: Context may discover one on a particular day,
@@ -453,6 +516,11 @@ function contextualNeedsForCity(cityName,needs){
   // itinerary and deduplicate against server needs.
   const derivedTours=tourAlternativesForCity(cityName,merged);
   if(derivedTours.length) merged.push(...derivedTours);
+  // A regional day already written as private vehicle OR guided transfer is a
+  // legitimate execution decision. Offer one organized-day alternative built
+  // only from the itinerary's own paid anchors; never invent destinations.
+  const regionalTours=regionalTourAlternativeForCity(cityName,merged);
+  if(regionalTours.length) merged.push(...regionalTours);
   let finalNeeds=dedupeContextualNeeds(merged);
   // Deterministic product rule: every real tourist destination gets exactly one
   // destination-wide City Tour option. Never depend on the LLM classifier for it.
@@ -525,6 +593,11 @@ function omioOptions(offers=[]){
   if(!list.length)return'';
   return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}" data-partner-direct="${esc(offer.direct_url||'')}">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</button></div>`).join('')}</div>`;
 }
+function twelveGoOptions(offers=[]){
+  const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='12go');
+  if(!list.length)return'';
+  return `<div class="tw-partner-options tw-partner-options--12go">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="12go" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>12Go</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(lang==='es'?'Buscar opciones en 12Go':'Search options on 12Go')} →</button></div>`).join('')}</div>`;
+}
 function renderResolvedTransportSegments(item,matched=[]){
   const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
   const allLegs=route.legs||[];if(!allLegs.length)return'';
@@ -547,14 +620,25 @@ function renderResolvedTransportSegments(item,matched=[]){
     console.info('[ITBMO OMIO V63][CARD BIND]',{need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${markets.from} → ${markets.to}`,offer_need_id:offer?.need_id||'',offer_index:Number(seg.index||0),offer_route:`${seg.commercial_origin||''} → ${seg.commercial_destination||''}`,sameNeed,sameIndex,byIdentity,byRoute,matched,direct_url:!!offer?.direct_url});
     return matched;
   };
-  const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)));
+  const offerMatches12GoLeg=(offer,leg,index)=>{
+    if((offer?.partner?.slug||'')!=='12go')return false;
+    const markets=localizedMarkets(leg),seg=offer?.route_segment||{};
+    const sameNeed=String(offer?.need_id||'')===String(item?.id||'');
+    const sameIndex=Number(seg.index||0)===Number(leg.index||index+1);
+    const byIdentity=sameNeed&&sameIndex;
+    const byRoute=sameNeed&&seg.commercial_origin&&seg.commercial_destination&&norm(seg.commercial_origin)===norm(markets.from)&&norm(seg.commercial_destination)===norm(markets.to);
+    return !!(byIdentity||byRoute);
+  };
+  const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)||offerMatches12GoLeg(o,leg,index)));
   const localLegs=allLegs.filter((leg,index)=>!legs.includes(leg));
   const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
     const markets=localizedMarkets(leg),marketFrom=markets.from,marketTo=markets.to;
-    const legOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
-    console.info('[ITBMO OMIO V63][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:legOffers.length,button_expected:legOffers.length>0,stop_reason:legOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
+    const omioLegOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
+    const twelveGoLegOffers=(matched||[]).filter(o=>offerMatches12GoLeg(o,leg,index));
+    console.info('[ITBMO OMIO V63][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:omioLegOffers.length,button_expected:omioLegOffers.length>0,stop_reason:omioLegOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
+    console.info('[ITBMO 12GO V160][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='12go').length,matched_offers:twelveGoLegOffers.length,button_expected:twelveGoLegOffers.length>0});
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
-    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${legOffers.length?omioOptions(legOffers):''}</div>`;
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${omioLegOffers.length?omioOptions(omioLegOffers):''}${twelveGoLegOffers.length?twelveGoOptions(twelveGoLegOffers):''}</div>`;
   }).join('')}</div>`:'';
   const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
   return commercial+logistics;
@@ -607,7 +691,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
         // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
         // outer need-card association suppress a valid feed offer after the UI
         // changed from one simple card to a parent card containing 1..N legs.
-        ? `${renderResolvedTransportSegments(item,offers)}${partnerOptions(matched.filter(offer=>(offer?.partner?.slug||'')!=='omio'))}`
+        ? `${renderResolvedTransportSegments(item,offers)}${partnerOptions(matched.filter(offer=>!['omio','12go'].includes(offer?.partner?.slug||'')))}`
         : partnerOptions(matched)}
     </article>`;
   }).join('')}</div>`;
