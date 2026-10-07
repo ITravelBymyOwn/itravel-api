@@ -921,6 +921,32 @@ function twelveGoResolvedMarket({leg,city,need,index=0}){
   if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
   return {origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode,resolution};
 }
+function twelveGoLegacyRouteMarket(need={},city=''){
+  // Compatibility for pre-ITBMO_ROUTE_V1 travel needs. Historical trips stored
+  // source_route as human-readable A→B text, so the structured parser correctly
+  // returns null. Parse ONLY an explicit route separator; never infer A/B from a
+  // title or narrative sentence. Unicode/ASCII arrow variants are accepted so a
+  // typography character cannot silently suppress a valid provider candidate.
+  const raw=clean(need?.source_route,1000).trim();
+  if(!raw||raw.startsWith('ITBMO_ROUTE_V1|'))return null;
+  const parts=raw.split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).map(v=>clean(v,160).trim()).filter(Boolean);
+  if(parts.length!==2)return null;
+  const mode=twelveGoCommercialMode(need?.transport||need?.entity_name||need?.source_activity||'');
+  if(!mode)return null;
+  let [origin,destination]=parts;
+  const originAbstract=twelveGoAbstractAccessNode(origin),destinationAbstract=twelveGoAbstractAccessNode(destination);
+  const base=clean(city||need?.city,120);
+  let resolution='legacy_explicit_route';
+  if(originAbstract&&!destinationAbstract&&twelveGoEndpointSane(base)&&normalizeKey(base)!==normalizeKey(destination)){
+    origin=base; resolution='legacy_collapsed_access_chain';
+  }else if(destinationAbstract&&!originAbstract&&twelveGoEndpointSane(base)&&normalizeKey(origin)!==normalizeKey(base)){
+    destination=base; resolution='legacy_collapsed_access_chain';
+  }else if(originAbstract||destinationAbstract){
+    return null;
+  }
+  if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
+  return {origin,destination,date:need?.travel_date||'',index:1,mode,resolution};
+}
 function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
   const partner=virtualPartner('12go','12Go','transport'); const out=[]; const seen=new Set();
   for(const need of (Array.isArray(needs)?needs:[])){
@@ -934,15 +960,20 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
     if(payload?.legs?.length){
       payload.legs.forEach((leg,index)=>{
         // 12Go stays independent from Omio. Ordinary legs still require the
-        // Route Resolver commerce seal. Older trips get one narrow compatibility
-        // bridge: collapse an abstract transport access node to the concrete trip
-        // base when the opposite endpoint is concrete and the mode is bookable.
+        // Route Resolver commerce seal. Older structured trips get one narrow
+        // bridge for abstract access nodes.
         const market=twelveGoResolvedMarket({leg,city,need,index});
         if(market)candidates.push(market);
       });
+    }else{
+      // Pre-V1 persisted needs have no encoded legs. Accept only a literal A→B
+      // source_route and apply the same abstract-access safety gate. This is what
+      // lets previously generated trips benefit from a newly added provider.
+      const legacy=twelveGoLegacyRouteMarket(need,city);
+      if(legacy)candidates.push(legacy);
     }
-    // Do not synthesize a 12Go market from editorial parent labels or free text.
-    // If Route Resolver did not seal a commercial A→B leg, fail closed.
+    // Never synthesize a 12Go market from editorial parent labels or narrative
+    // free text. Structured legs or an explicit legacy A→B source are required.
     for(const route of candidates){
       const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b||normalizeKey(a)===normalizeKey(b))continue;
       const key=`${normalizeKey(a)}|${normalizeKey(b)}|${route.date||''}`; if(seen.has(key))continue; seen.add(key);
