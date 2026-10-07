@@ -1240,6 +1240,10 @@ async function resetITBMOPassword(){
   finally{ setAuthBusy(false); }
 }
 
+// V163 · canonical companion-surface identity. Named browsing contexts let
+// Workspace focus this live Planner without navigating/reloading it.
+try{if(window.top===window&&window.name!=='itbmo-planner')window.name='itbmo-planner';}catch(_){}
+
 function wantsMyTripsView(){
   return String(new URLSearchParams(window.location.search).get('view') || '').trim().toLowerCase()==='my-trips';
 }
@@ -1258,6 +1262,15 @@ function handleWorkspaceNavigationMessage(event){
   try{window.focus();}catch(_){}
 }
 window.addEventListener('message',handleWorkspaceNavigationMessage);
+window.addEventListener('storage',event=>{
+  if(event.key!=='itbmo_workspace_navigation_v2'||!event.newValue)return;
+  try{
+    const message=JSON.parse(event.newValue);
+    if(!message||message.type!=='ITBMO_WORKSPACE_NAVIGATE')return;
+    if(Date.now()-Number(message.sent_at||0)>15000)return;
+    handleWorkspaceNavigationMessage({origin:window.location.origin,data:message});
+  }catch(_){}
+});
 
 function openRequestedMyTripsView(){
   if(!wantsMyTripsView() || !currentUser || !getStoredSessionToken()) return false;
