@@ -376,15 +376,29 @@ function workspaceRowsMatchingNeed(item,cityName){
     return values.some(v=>(entity&&sameWorkspaceEntity(entity,v))||(source&&sameWorkspaceEntity(source,v))||(entity&&v.includes(entity))||(source&&v.includes(source)));
   });
 }
+function admissionEvidenceFromText(value=''){
+  const text=normalizeWorkspaceEntity(value);
+  if(!text)return {positive:false,negative:false};
+  // V162 · explicit contradiction wins. Keep the expressions broad enough for
+  // natural itinerary prose ("no se presupone una parada concreta ni una reserva")
+  // without turning generic words such as "confirmar" into admission evidence.
+  const negative=/\b(acceso libre|entrada gratuita|free admission|no ticket|sin entrada|no requiere entrada|no necesita entrada|sin necesidad de entrada)\b|\bno se presupone\b.{0,90}\b(parada|reserva|reservacion|entrada|ticket|booking)\b|\b(no requiere|no necesita|sin necesidad de)\b.{0,45}\b(reserva|reservacion|ticket|entrada|booking)\b/i.test(text);
+  const positive=/\b(entrada|ticket|billete|boleto|admission|acceso)\b.{0,65}\b(de pago|pago|necesari|required|obligatori|requiere|requerid|reserva|reserv|anticipad|confirm|verific)\b|\b(requiere|requires?|necesita|es necesaria|es necesario|debe comprar|hay que comprar)\b.{0,45}\b(entrada|ticket|billete|boleto|admission|acceso)\b/i.test(text);
+  return {positive,negative};
+}
 function rowHasAdmissionEvidence(row){
   const cc=row?.commerce_context||{};
   const semantic=String(cc?.semantic_type||'').toUpperCase();
   const ticket=String(cc?.ticket_need||'').toLowerCase();
-  const text=normalizeWorkspaceEntity(`${row?.activity||''} ${cc?.canonical_place||''} ${row?.notes||''}`);
-  if(['RESTAURANT','LOGISTICS','FREE_SIGHT','NONE','TRANSPORT'].includes(semantic))return false;
-  if(/\b(no se presupone|no requiere|sin necesidad de|acceso libre|entrada gratuita|free admission|no ticket)\b.{0,35}\b(reserva|reservar|entrada|ticket|admission|booking)?\b/i.test(text))return false;
-  if(semantic==='ATTRACTION_TICKET'&&['required','recommended','optional','unknown'].includes(ticket))return true;
-  return /\b(entrada|ticket|billete|boleto|admission)\b.{0,55}\b(pago|necesari|required|obligatori|reserva|reserv|anticipad|confirm|verific|acceso)\b|\b(requiere|requires?)\b.{0,35}\b(entrada|ticket|admission)\b/i.test(text);
+  const evidence=admissionEvidenceFromText(`${row?.activity||''} ${cc?.canonical_place||''} ${row?.notes||''}`);
+  if(evidence.negative)return false;
+  // Hard semantic exclusions cannot be overridden by incidental reservation
+  // language. FREE_SIGHT may be a classifier miss, so explicit admission prose
+  // is allowed to correct it deterministically.
+  if(['RESTAURANT','LOGISTICS','NONE','TRANSPORT'].includes(semantic))return false;
+  if(evidence.positive)return true;
+  if(semantic==='FREE_SIGHT')return false;
+  return semantic==='ATTRACTION_TICKET'&&['required','recommended','optional','unknown'].includes(ticket);
 }
 function contextualCommerceNeedIsSane(item,cityName){
   if(!['ticket_required','reservation_recommended','guided_tour_optional'].includes(item?.need_type))return true;
@@ -395,8 +409,19 @@ function contextualCommerceNeedIsSane(item,cityName){
   if(/\b(acceso ferroviario|railway access|punto ferroviario|railway point|plataforma ferroviaria|rail platform|estacionamiento|parking|terminal|aeropuerto|airport|hotel|alojamiento|accommodation)\b/i.test(text))return false;
   if(/\b(paisaje agricola|agricultural landscape|corredor paisajistico|scenic corridor)\b/i.test(text)&&item?.need_type!=='guided_tour_optional')return false;
   const matches=workspaceRowsMatchingNeed(item,cityName);
-  if(!matches.length)return true; // preserve legitimate server intelligence when no row can be bound safely.
-  if(item?.need_type==='ticket_required'||item?.need_type==='reservation_recommended')return matches.some(({row})=>rowHasAdmissionEvidence(row));
+  if(item?.need_type==='ticket_required'||item?.need_type==='reservation_recommended'){
+    // V162 · admission cards are itinerary-bound. If Context cannot bind the
+    // opportunity to a physical row, require strong admission evidence in the
+    // opportunity itself; otherwise fail closed instead of preserving a false
+    // positive merely because the server emitted it.
+    if(!matches.length){
+      const evidence=admissionEvidenceFromText(`${item?.entity_name||''} ${item?.source_activity||''} ${item?.user_message||''}`);
+      return evidence.positive&&!evidence.negative;
+    }
+    return matches.some(({row})=>rowHasAdmissionEvidence(row));
+  }
+  if(!matches.length)return true; // non-admission server intelligence may remain destination-wide.
+
   // Guided experiences may attach to real sights, but never to rows whose only
   // semantic purpose is logistics/transport.
   return matches.some(({row})=>!['LOGISTICS','TRANSPORT','RESTAURANT','NONE'].includes(String(row?.commerce_context?.semantic_type||'').toUpperCase()));
@@ -405,14 +430,14 @@ function regionalTourAlternativeForCity(cityName,existingNeeds=[]){
   const existing=(Array.isArray(existingNeeds)?existingNeeds:[]).filter(x=>x?.need_type==='guided_tour_optional');
   const byDay=new Map();
   workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
-    const transport=normalizeWorkspaceEntity(row?.transport||'');
-    const guidedMobility=/\b(traslado guiado|guided transfer|tour organizado|organized tour|excursion organizada|guided transport)\b/i.test(transport);
+    const mobilityEvidence=normalizeWorkspaceEntity(`${row?.transport||''} ${row?.notes||''}`);
+    const guidedMobility=/\b(traslado guiado|guided transfer|tour organizado|organized tour|excursion organizada|organized excursion|guided transport|vehiculo privado o traslado guiado|private vehicle or guided transfer)\b/i.test(mobilityEvidence);
     const cc=row?.commerce_context||{};
     const semantic=String(cc?.semantic_type||'').toUpperCase();
     if(!byDay.has(day))byDay.set(day,{guidedMobility:false,anchors:[]});
     const bucket=byDay.get(day);
     if(guidedMobility)bucket.guidedMobility=true;
-    if(semantic==='ATTRACTION_TICKET'){
+    if(rowHasAdmissionEvidence(row)){
       const name=String(cc?.canonical_place||row?.to||row?.activity||'').trim();
       if(name&&!bucket.anchors.some(x=>sameWorkspaceEntity(x,name)))bucket.anchors.push(name);
     }
@@ -440,20 +465,20 @@ function localTicketNeedsForCity(cityName,existing=[]){
     const canonical=String(cc?.canonical_place||row?.to||activity).trim();
     const key=normalizeWorkspaceEntity(canonical);
     if(!key||existingKeys.has(key))return;
-    const admissionText=normalizeWorkspaceEntity(`${activity} ${canonical} ${notes}`);
-    const explicitlyFree=/\b(sin necesidad de entrada|no requiere entrada|entrada gratuita|acceso gratuito|free admission|no ticket|outdoor free|al aire libre|no se presupone reserva|no se presupone una reserva|no reservation assumed)\b/i.test(admissionText);
-    // Deterministic contradiction guard: server/model metadata cannot turn a
-    // clearly free exterior, plaza, viewpoint or street into a paid ticket.
-    if(explicitlyFree)return;
-    // Ticket cards are fail-closed. Reservation language in a restaurant,
-    // lodging or logistics note is not attraction-admission evidence.
-    if(['RESTAURANT','LOGISTICS','FREE_SIGHT','NONE','TRANSPORT'].includes(semantic))return;
+    const evidence=admissionEvidenceFromText(`${activity} ${canonical} ${notes}`);
+    // Deterministic contradiction guard: explicit free/no-reservation prose wins
+    // over model metadata. Logistics/restaurants remain hard exclusions.
+    if(evidence.negative)return;
+    if(['RESTAURANT','LOGISTICS','NONE','TRANSPORT'].includes(semantic))return;
     const activityKey=normalizeWorkspaceEntity(activity);
     if(/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|restaurante|restaurant|brasserie|trattoria|cafe|alojamiento|hotel|check in|check out)\b/i.test(activityKey))return;
     const explicitRequired=semantic==='ATTRACTION_TICKET'&&ticket==='required';
     const explicitRecommended=semantic==='ATTRACTION_TICKET'&&['recommended','optional','unknown'].includes(ticket);
-    const noteRequired=/\b(entrada|ticket|billete|boleto).{0,45}\b(necesari|required|obligatori|imprescindible)\b|\b(requiere|requires?).{0,35}\b(entrada|ticket|admission)\b/i.test(notes);
-    const noteRecommended=/\b(reserva|reservar|booking|book|timed entry|entrada con hora|anticipad)\b/i.test(notes);
+    // Strong itinerary prose may repair a FREE_SIGHT/unknown classifier miss.
+    // This is what protects required-ticket recall without making the LLM the
+    // authority for commercial eligibility.
+    const noteRequired=evidence.positive&&/\b(necesari|required|obligatori|requiere|requires?|de pago|pago)\b/i.test(normalizeWorkspaceEntity(notes));
+    const noteRecommended=evidence.positive&&!noteRequired;
     if(!explicitRequired&&!explicitRecommended&&!noteRequired&&!noteRecommended)return;
     const needType=(explicitRequired||noteRequired)?'ticket_required':'reservation_recommended';
     out.push({id:`workspace-ticket:${day}:${index+1}`,category:'tickets',city:cityName,day,entity_name:canonical,entity_type:'attraction',need_type:needType,confidence:(explicitRequired||noteRequired)?'high':'medium',user_message:lang==='es'?(needType==='ticket_required'?`Necesitas resolver la entrada para ${canonical} antes de esta visita.`:`Conviene revisar y reservar con antelación el acceso a ${canonical}.`):(needType==='ticket_required'?`Plan the admission for ${canonical} before this visit.`:`It is worth checking and booking ${canonical} in advance.`),source_activity:activity,source_route:[row?.from,row?.to].filter(Boolean).join(' → '),transport:String(row?.transport||'').trim(),derived_by:'commerce_context'});
@@ -1309,17 +1334,33 @@ function _returnToPlanner_(view=''){
   if(data?.trip_id) params.set('trip_id',data.trip_id);
   handoffToPlanner();
   const url=`./planner.html?${params.toString()}`;
-  // V150 UX: when Workspace was opened by Planner, return to that exact tab.
-  // This preserves any generation already running there. Only create/reuse the
-  // named Planner tab when the opener is no longer available.
+  // V162 Navigation State Manager · Planner and Workspace are companion
+  // surfaces. Navigation must focus/change the destination view without
+  // destroying either surface or reloading a live Planner.
+  const message={type:'ITBMO_WORKSPACE_NAVIGATE',view:view||'planner',trip_id:data?.trip_id||null,language:lang};
   try{
     if(window.opener && !window.opener.closed){
-      if(view) window.opener.location.href=url;
+      window.opener.postMessage(message,window.location.origin);
       window.opener.focus();
       return;
     }
   }catch(_){}
-  const plannerWindow=window.open(url,'itbmo-planner');
+  // If the original opener relationship was lost, first try the named Planner
+  // surface. Opening an empty URL with an existing name does not reload it.
+  let plannerWindow=null;
+  try{plannerWindow=window.open('','itbmo-planner');}catch(_){}
+  if(plannerWindow){
+    try{
+      const path=String(plannerWindow.location?.pathname||'');
+      if(path&&/(?:^|\/)planner\.html$/i.test(path)){
+        plannerWindow.postMessage(message,window.location.origin);
+        plannerWindow.focus();
+        return;
+      }
+    }catch(_){}
+    try{plannerWindow.location.href=url;plannerWindow.focus();return;}catch(_){}
+  }
+  plannerWindow=window.open(url,'itbmo-planner');
   if(plannerWindow){try{plannerWindow.focus();}catch(_){}}
 }
 function backPlanner(){ _returnToPlanner_(''); }
