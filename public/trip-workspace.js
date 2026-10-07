@@ -16,6 +16,7 @@ const GUEST_HANDOFF_KEY='itbmo_workspace_guest_handoff_v1';
 const WORKSPACE_OPEN_HANDOFF_KEY='itbmo_workspace_open_handoff_v1';
 const PLANNER_OPEN_HANDOFF_KEY='itbmo_planner_open_handoff_v1';
 const $=(s,r=document)=>r.querySelector(s);
+try{if(window.name!=='itbmo-workspace')window.name='itbmo-workspace';}catch(_){}
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 let data=null,city=null,day=null,mode='itinerary';
 let plannerPresenceWatchTimer=null;
@@ -395,7 +396,13 @@ function rowHasAdmissionEvidence(row){
   // Hard semantic exclusions cannot be overridden by incidental reservation
   // language. FREE_SIGHT may be a classifier miss, so explicit admission prose
   // is allowed to correct it deterministically.
-  if(['RESTAURANT','LOGISTICS','NONE','TRANSPORT'].includes(semantic))return false;
+  if(['RESTAURANT','NONE'].includes(semantic))return false;
+  // V163 Required Admission Recovery: explicit itinerary evidence may repair a
+  // stale LOGISTICS/TRANSPORT semantic label, but only when the row itself is
+  // attraction-like rather than a movement/access instruction.
+  const rowText=normalizeWorkspaceEntity(`${row?.activity||''} ${cc?.canonical_place||''} ${row?.to||''}`);
+  const movementOnly=/^(traslado|transfer|tren|train|bus|vuelo|flight|ferry|taxi|conduccion|drive|salida|departure|llegada|arrival|acceso ferroviario|railway access)\b/i.test(rowText);
+  if(['LOGISTICS','TRANSPORT'].includes(semantic)&&(!evidence.positive||movementOnly))return false;
   if(evidence.positive)return true;
   if(semantic==='FREE_SIGHT')return false;
   return semantic==='ATTRACTION_TICKET'&&['required','recommended','optional','unknown'].includes(ticket);
@@ -469,8 +476,12 @@ function localTicketNeedsForCity(cityName,existing=[]){
     // Deterministic contradiction guard: explicit free/no-reservation prose wins
     // over model metadata. Logistics/restaurants remain hard exclusions.
     if(evidence.negative)return;
-    if(['RESTAURANT','LOGISTICS','NONE','TRANSPORT'].includes(semantic))return;
+    if(['RESTAURANT','NONE'].includes(semantic))return;
     const activityKey=normalizeWorkspaceEntity(activity);
+    const movementOnly=/^(traslado|transfer|tren|train|bus|vuelo|flight|ferry|taxi|conduccion|drive|salida|departure|llegada|arrival|acceso ferroviario|railway access)\b/i.test(normalizeWorkspaceEntity(`${activity} ${canonical}`));
+    // V163: explicit paid/required admission prose outranks a stale
+    // LOGISTICS/TRANSPORT classifier, except for genuine movement rows.
+    if(['LOGISTICS','TRANSPORT'].includes(semantic)&&(!evidence.positive||movementOnly))return;
     if(/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|restaurante|restaurant|brasserie|trattoria|cafe|alojamiento|hotel|check in|check out)\b/i.test(activityKey))return;
     const explicitRequired=semantic==='ATTRACTION_TICKET'&&ticket==='required';
     const explicitRecommended=semantic==='ATTRACTION_TICKET'&&['recommended','optional','unknown'].includes(ticket);
@@ -1327,6 +1338,12 @@ function showEmpty(){
 function handoffToPlanner(){
   try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
 }
+function _workspaceNavigationSignal_(message){
+  // V163 Companion Surface Navigation v2. postMessage is fastest when a live
+  // reference exists; localStorage is the same-origin recovery channel when
+  // opener relationships have been lost by a reused Workspace window.
+  try{localStorage.setItem('itbmo_workspace_navigation_v2',JSON.stringify({...message,nonce:`${Date.now()}-${Math.random().toString(36).slice(2)}`,sent_at:Date.now()}));}catch(_){}
+}
 function _returnToPlanner_(view=''){
   const params=new URLSearchParams();
   params.set('lang',lang);
@@ -1334,10 +1351,10 @@ function _returnToPlanner_(view=''){
   if(data?.trip_id) params.set('trip_id',data.trip_id);
   handoffToPlanner();
   const url=`./planner.html?${params.toString()}`;
-  // V162 Navigation State Manager · Planner and Workspace are companion
-  // surfaces. Navigation must focus/change the destination view without
-  // destroying either surface or reloading a live Planner.
   const message={type:'ITBMO_WORKSPACE_NAVIGATE',view:view||'planner',trip_id:data?.trip_id||null,language:lang};
+  _workspaceNavigationSignal_(message);
+
+  // Prefer the original live Planner reference when it is still valid.
   try{
     if(window.opener && !window.opener.closed){
       window.opener.postMessage(message,window.location.origin);
@@ -1345,23 +1362,25 @@ function _returnToPlanner_(view=''){
       return;
     }
   }catch(_){}
-  // If the original opener relationship was lost, first try the named Planner
-  // surface. Opening an empty URL with an existing name does not reload it.
+
+  // V163 registers the Planner browsing context explicitly. An empty URL
+  // targets that existing context without reloading it. If it no longer exists,
+  // the fallback below opens the Planner URL from this user gesture.
   let plannerWindow=null;
   try{plannerWindow=window.open('','itbmo-planner');}catch(_){}
   if(plannerWindow){
     try{
-      const path=String(plannerWindow.location?.pathname||'');
-      if(path&&/(?:^|\/)planner\.html$/i.test(path)){
+      if(String(plannerWindow.location?.href||'')!=='about:blank'){
         plannerWindow.postMessage(message,window.location.origin);
         plannerWindow.focus();
         return;
       }
-    }catch(_){}
+    }catch(_){
+      try{plannerWindow.postMessage(message,window.location.origin);plannerWindow.focus();return;}catch(__){}
+    }
     try{plannerWindow.location.href=url;plannerWindow.focus();return;}catch(_){}
   }
-  plannerWindow=window.open(url,'itbmo-planner');
-  if(plannerWindow){try{plannerWindow.focus();}catch(_){}}
+  try{plannerWindow=window.open(url,'itbmo-planner');if(plannerWindow)plannerWindow.focus();}catch(_){}
 }
 function backPlanner(){ _returnToPlanner_(''); }
 function openMyTrips(){ _returnToPlanner_('my-trips'); }
