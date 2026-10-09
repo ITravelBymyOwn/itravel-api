@@ -1355,43 +1355,50 @@ function _plannerNavigationUrl_(view=''){
   return `./planner.html?${params.toString()}`;
 }
 function _livePlannerWindow_(){
-  // V164: the Workspace is opened by Planner as a named companion tab. The
-  // original opener is therefore the most reliable identity and is exactly the
-  // relationship used before the navigation refactor. Do not manufacture an
-  // about:blank window merely to send a message.
-  try{if(window.opener&&!window.opener.closed)return window.opener;}catch(_){}
-  return null;
+  // Only use an actual, accessible Planner. A stale or unrelated opener is not
+  // sufficient evidence that this is the correct companion surface.
+  try{
+    const candidate=window.opener;
+    if(!candidate||candidate.closed||candidate===window)return null;
+    if(candidate.location.origin!==location.origin)return null;
+    if(!/\/planner\.html$/i.test(candidate.location.pathname))return null;
+    return candidate;
+  }catch(_){return null;}
+}
+function _navigateWorkspaceToPlanner_(view=''){
+  // Deterministic recovery: navigate THIS tab. Popup blockers and a missing
+  // opener must never leave a visible navigation button doing nothing.
+  // The persisted trip remains owned by the existing Planner mechanisms.
+  window.location.assign(_plannerNavigationUrl_(view));
 }
 function backPlanner(){
   const planner=_livePlannerWindow_();
   if(planner){
-    // V165: returning to a live Planner is a pure focus operation. Do not
-    // reload, navigate, hydrate, or write a handoff marker.
-    try{planner.focus();return;}catch(_){}
+    try{planner.focus();return;}catch(error){console.warn('[ITBMO NAV V166] focus failed',error);}
   }
-  // Recovery only: the original Planner is gone. The handoff marker is used
-  // solely so a newly opened Planner preserves the existing authenticated
-  // session lifecycle.
-  handoffToPlanner();
-  try{const w=window.open(_plannerNavigationUrl_(''),'itbmo-planner');if(w)w.focus();}catch(_){}
+  _navigateWorkspaceToPlanner_('');
 }
 function openMyTrips(){
   const planner=_livePlannerWindow_();
   if(planner){
-    // V165: invoke the Planner's own native My trips action in the live
-    // same-origin window. This preserves every in-memory Planner field and
-    // avoids location.assign(), reload, hydration and recovery side effects.
     try{
-      const button=planner.document?.querySelector?.('#planner-my-trips');
-      if(button){button.click();planner.focus();return;}
-    }catch(_){}
+      const button=planner.document.querySelector('#planner-my-trips');
+      if(button&&!button.disabled){
+        button.click();
+        planner.focus();
+        return;
+      }
+    }catch(error){console.warn('[ITBMO NAV V166] native My Trips unavailable',error);}
   }
-  // Recovery only: if there is no usable live Planner (or its native control
-  // cannot be reached), open the proven URL contract in a Planner surface.
-  // This path is intentionally not used during normal companion navigation.
-  handoffToPlanner();
-  const url=_plannerNavigationUrl_('my-trips');
-  try{const w=window.open(url,'itbmo-planner');if(w)w.focus();}catch(_){}
+  _navigateWorkspaceToPlanner_('my-trips');
+}
+function bindWorkspaceNavigationImmediately(){
+  // This runs before any async trip fetch, authentication, or rendering.
+  const actions=[['#tw-back-planner',backPlanner],['#tw-my-trips',openMyTrips],['#tw-empty-back',backPlanner]];
+  for(const [selector,action] of actions){
+    const button=$(selector);
+    if(button)button.addEventListener('click',action);
+  }
 }
 
 function setupAllCitiesFloating(){
@@ -1463,6 +1470,7 @@ function setupPrepareFloating(){
 }
 
 async function boot(){
+  bindWorkspaceNavigationImmediately();
   const params=new URLSearchParams(location.search);
   const requestedTripId=String(params.get('trip_id') || '').trim();
   const cached=readSnapshot();
@@ -1508,9 +1516,6 @@ async function boot(){
     setText();
   }
 
-  $('#tw-back-planner').onclick=backPlanner;
-  $('#tw-my-trips').onclick=openMyTrips;
-  $('#tw-empty-back').onclick=backPlanner;
   $('#tw-all-cities').onclick=overview;const essentialsCta=$('#tw-overview-essentials-cta');if(essentialsCta)essentialsCta.onclick=()=>{const target=$('#tw-trip-wide');if(target)target.scrollIntoView({behavior:'smooth',block:'start'});window.ITBMOFoundation?.track('trip_essentials_cta_clicked',{language:lang,trip_id:data?.trip_id||''});};
   $('#tw-mode-itinerary').onclick=()=>{mode='itinerary';renderCity()};
   $('#tw-mode-prepare').onclick=()=>{mode='prepare';renderCity()};
