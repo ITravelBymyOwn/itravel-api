@@ -404,8 +404,13 @@ function rowHasAdmissionEvidence(row){
   const movementOnly=/^(traslado|transfer|tren|train|bus|vuelo|flight|ferry|taxi|conduccion|drive|salida|departure|llegada|arrival|acceso ferroviario|railway access)\b/i.test(rowText);
   if(['LOGISTICS','TRANSPORT'].includes(semantic)&&(!evidence.positive||movementOnly))return false;
   if(evidence.positive)return true;
+  // V164: ticket_need is the row's specific access decision and is more precise
+  // than a broad FREE_SIGHT semantic label. A required/recommended ticket can
+  // therefore repair that classifier conflict unless explicit negative prose or
+  // a hard non-attraction/movement guard above has already rejected the row.
+  if(['required','recommended'].includes(ticket))return true;
   if(semantic==='FREE_SIGHT')return false;
-  return semantic==='ATTRACTION_TICKET'&&['required','recommended','optional','unknown'].includes(ticket);
+  return semantic==='ATTRACTION_TICKET'&&['optional','unknown'].includes(ticket);
 }
 function contextualCommerceNeedIsSane(item,cityName){
   if(!['ticket_required','reservation_recommended','guided_tour_optional'].includes(item?.need_type))return true;
@@ -483,8 +488,12 @@ function localTicketNeedsForCity(cityName,existing=[]){
     // LOGISTICS/TRANSPORT classifier, except for genuine movement rows.
     if(['LOGISTICS','TRANSPORT'].includes(semantic)&&(!evidence.positive||movementOnly))return;
     if(/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|restaurante|restaurant|brasserie|trattoria|cafe|alojamiento|hotel|check in|check out)\b/i.test(activityKey))return;
-    const explicitRequired=semantic==='ATTRACTION_TICKET'&&ticket==='required';
-    const explicitRecommended=semantic==='ATTRACTION_TICKET'&&['recommended','optional','unknown'].includes(ticket);
+    // V164 Required Recall: a specific required/recommended ticket_need may
+    // recover an attraction even when the broad semantic_type was stale. Hard
+    // exclusions, movement rows and explicit free/no-ticket prose were already
+    // rejected above, so this does not turn logistics into admission products.
+    const explicitRequired=ticket==='required';
+    const explicitRecommended=ticket==='recommended'||(semantic==='ATTRACTION_TICKET'&&['optional','unknown'].includes(ticket));
     // Strong itinerary prose may repair a FREE_SIGHT/unknown classifier miss.
     // This is what protects required-ticket recall without making the LLM the
     // authority for commercial eligibility.
@@ -1338,52 +1347,52 @@ function showEmpty(){
 function handoffToPlanner(){
   try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
 }
-function _workspaceNavigationSignal_(message){
-  // V163 Companion Surface Navigation v2. postMessage is fastest when a live
-  // reference exists; localStorage is the same-origin recovery channel when
-  // opener relationships have been lost by a reused Workspace window.
-  try{localStorage.setItem('itbmo_workspace_navigation_v2',JSON.stringify({...message,nonce:`${Date.now()}-${Math.random().toString(36).slice(2)}`,sent_at:Date.now()}));}catch(_){}
-}
-function _returnToPlanner_(view=''){
+function _plannerNavigationUrl_(view=''){
   const params=new URLSearchParams();
   params.set('lang',lang);
-  if(view) params.set('view',view);
-  if(data?.trip_id) params.set('trip_id',data.trip_id);
-  handoffToPlanner();
-  const url=`./planner.html?${params.toString()}`;
-  const message={type:'ITBMO_WORKSPACE_NAVIGATE',view:view||'planner',trip_id:data?.trip_id||null,language:lang};
-  _workspaceNavigationSignal_(message);
-
-  // Prefer the original live Planner reference when it is still valid.
-  try{
-    if(window.opener && !window.opener.closed){
-      window.opener.postMessage(message,window.location.origin);
-      window.opener.focus();
-      return;
-    }
-  }catch(_){}
-
-  // V163 registers the Planner browsing context explicitly. An empty URL
-  // targets that existing context without reloading it. If it no longer exists,
-  // the fallback below opens the Planner URL from this user gesture.
-  let plannerWindow=null;
-  try{plannerWindow=window.open('','itbmo-planner');}catch(_){}
-  if(plannerWindow){
-    try{
-      if(String(plannerWindow.location?.href||'')!=='about:blank'){
-        plannerWindow.postMessage(message,window.location.origin);
-        plannerWindow.focus();
-        return;
-      }
-    }catch(_){
-      try{plannerWindow.postMessage(message,window.location.origin);plannerWindow.focus();return;}catch(__){}
-    }
-    try{plannerWindow.location.href=url;plannerWindow.focus();return;}catch(_){}
-  }
-  try{plannerWindow=window.open(url,'itbmo-planner');if(plannerWindow)plannerWindow.focus();}catch(_){}
+  if(view)params.set('view',view);
+  if(data?.trip_id)params.set('trip_id',data.trip_id);
+  return `./planner.html?${params.toString()}`;
 }
-function backPlanner(){ _returnToPlanner_(''); }
-function openMyTrips(){ _returnToPlanner_('my-trips'); }
+function _livePlannerWindow_(){
+  // V164: the Workspace is opened by Planner as a named companion tab. The
+  // original opener is therefore the most reliable identity and is exactly the
+  // relationship used before the navigation refactor. Do not manufacture an
+  // about:blank window merely to send a message.
+  try{if(window.opener&&!window.opener.closed)return window.opener;}catch(_){}
+  return null;
+}
+function backPlanner(){
+  const planner=_livePlannerWindow_();
+  if(planner){
+    // V165: returning to a live Planner is a pure focus operation. Do not
+    // reload, navigate, hydrate, or write a handoff marker.
+    try{planner.focus();return;}catch(_){}
+  }
+  // Recovery only: the original Planner is gone. The handoff marker is used
+  // solely so a newly opened Planner preserves the existing authenticated
+  // session lifecycle.
+  handoffToPlanner();
+  try{const w=window.open(_plannerNavigationUrl_(''),'itbmo-planner');if(w)w.focus();}catch(_){}
+}
+function openMyTrips(){
+  const planner=_livePlannerWindow_();
+  if(planner){
+    // V165: invoke the Planner's own native My trips action in the live
+    // same-origin window. This preserves every in-memory Planner field and
+    // avoids location.assign(), reload, hydration and recovery side effects.
+    try{
+      const button=planner.document?.querySelector?.('#planner-my-trips');
+      if(button){button.click();planner.focus();return;}
+    }catch(_){}
+  }
+  // Recovery only: if there is no usable live Planner (or its native control
+  // cannot be reached), open the proven URL contract in a Planner surface.
+  // This path is intentionally not used during normal companion navigation.
+  handoffToPlanner();
+  const url=_plannerNavigationUrl_('my-trips');
+  try{const w=window.open(url,'itbmo-planner');if(w)w.focus();}catch(_){}
+}
 
 function setupAllCitiesFloating(){
   const source=$('#tw-all-cities');
