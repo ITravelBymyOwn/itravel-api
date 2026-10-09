@@ -44,68 +44,8 @@ button,a {
   backdrop-filter:blur(22px);
   -webkit-backdrop-filter:blur(22px)
 }
-.tw-top-actions {
-  justify-self:start;
-  display:flex;
-  align-items:center;
-  gap:10px
-}
-.tw-back {
-  justify-self:start;
-  border:1px solid var(--line);
-  background:rgba(255,255,255,.86);
-  border-radius:999px;
-  padding:11px 18px;
-  display:flex;
-  gap:10px;
-  align-items:center;
-  color:var(--ink);
-  cursor:pointer;
-  box-shadow:0 8px 24px rgba(25,64,82,.05)
-}
-.tw-back span {
-  width:30px;
-  height:30px;
-  border-radius:50%;
-  display:grid;
-  place-items:center;
-  background:linear-gradient(135deg,var(--cyan),var(--teal));
-  color:white
-}
-.tw-my-trips {
-  border:1px solid rgba(8,126,209,.20);
-  background:linear-gradient(145deg,rgba(8,126,209,.10),rgba(10,157,181,.11));
-  border-radius:999px;
-  padding:11px 16px;
-  display:flex;
-  gap:9px;
-  align-items:center;
-  color:#087c9f;
-  cursor:pointer;
-  font-weight:900;
-  box-shadow:0 8px 24px rgba(25,64,82,.04);
-  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease
-}
-.tw-my-trips span {
-  width:30px;
-  height:30px;
-  border-radius:50%;
-  display:grid;
-  place-items:center;
-  background:linear-gradient(135deg,var(--cyan),var(--teal));
-  color:white
-}
-.tw-my-trips:hover {
-  transform:translateY(-1px);
-  border-color:rgba(8,126,209,.34);
-  box-shadow:0 10px 28px rgba(25,64,82,.08)
-}
-.tw-my-trips:focus-visible,
-.tw-back:focus-visible {
-  outline:3px solid rgba(8,126,209,.20);
-  outline-offset:3px
-}
 .tw-brand {
+  grid-column:2;
   justify-self:center;
   display:flex;
   gap:11px;
@@ -136,6 +76,7 @@ button,a {
   margin-top:1px
 }
 .tw-top-status {
+  grid-column:3;
   justify-self:end;
   display:flex;
   gap:8px;
@@ -640,18 +581,8 @@ button,a {
     padding:0 14px;
     grid-template-columns:auto 1fr auto
   }
-  .tw-back b,.tw-my-trips b,.tw-top-status span:last-child {
+  .tw-top-status span:last-child {
     display:none
-  }
-  .tw-top-actions {
-    gap:6px
-  }
-  .tw-back,.tw-my-trips {
-    padding:7px
-  }
-  .tw-back span,.tw-my-trips span {
-    width:30px;
-    height:30px
   }
   .tw-brand {
     justify-self:center
@@ -1387,9 +1318,6 @@ body{
 }
 .tw-topbar{border-bottom-color:rgba(32,76,108,.13)!important;background:rgba(251,253,254,.84)!important;box-shadow:0 8px 34px rgba(16,42,67,.028);backdrop-filter:blur(18px) saturate(120%);}
 .tw-brand-mark{background:linear-gradient(145deg,#087BFA,#35BFD1)!important;box-shadow:0 10px 24px rgba(8,123,200,.16)!important;}
-.tw-back span{background:linear-gradient(145deg,#6D78EE,#3F83E6)!important;box-shadow:0 10px 24px rgba(83,104,213,.15)!important;}
-.tw-my-trips span{background:linear-gradient(145deg,#E9855E,#E2B061)!important;box-shadow:0 10px 24px rgba(181,124,73,.14)!important;}
-.tw-my-trips{color:#586d82!important;border-color:rgba(76,100,126,.18)!important;background:linear-gradient(145deg,rgba(255,255,255,.90),rgba(255,248,239,.70))!important;}
 .tw-kicker{color:#586fb2!important;}
 .tw-summary{border-color:rgba(76,105,145,.16)!important;background:linear-gradient(135deg,rgba(8,123,250,.065),rgba(109,120,238,.050),rgba(53,191,209,.045))!important;color:#536d86!important;}
 
@@ -1663,4 +1591,3 @@ body{
 @media(max-width:760px){.tw-context-item--mobility-decision{grid-column:auto}.tw-context-item--mobility-decision h4{font-size:17px!important}}
 
 /* V168: semantic return link shares the existing button appearance */
-#tw-back-planner{text-decoration:none}
