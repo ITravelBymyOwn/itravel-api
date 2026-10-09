@@ -379,7 +379,7 @@ function admissionEvidenceFromText(value=''){
   // natural itinerary prose ("no se presupone una parada concreta ni una reserva")
   // without turning generic words such as "confirmar" into admission evidence.
   const negative=/\b(acceso libre|entrada gratuita|free admission|no ticket|sin entrada|no requiere entrada|no necesita entrada|sin necesidad de entrada)\b|\bno se presupone\b.{0,90}\b(parada|reserva|reservacion|entrada|ticket|booking)\b|\b(no requiere|no necesita|sin necesidad de)\b.{0,45}\b(reserva|reservacion|ticket|entrada|booking)\b/i.test(text);
-  const positive=/\b(entrada|ticket|billete|boleto|admission|acceso)\b.{0,65}\b(de pago|pago|necesari|required|obligatori|requiere|requerid|reserva|reserv|anticipad|confirm|verific)\b|\b(requiere|requires?|necesita|es necesaria|es necesario|debe comprar|hay que comprar)\b.{0,45}\b(entrada|ticket|billete|boleto|admission|acceso)\b/i.test(text);
+  const positive=/\b(entrada|ticket|billete|boleto|admission|acceso)\b.{0,65}\b(de pago|pago|necesari|required|obligatori|requiere|requerid|reserva|reserv|anticipad|confirm|verific)\b|\b(requiere|requires?|necesita|necesaria|necesario|es necesaria|es necesario|debe comprar|hay que comprar)\b.{0,45}\b(entrada|ticket|billete|boleto|admission|acceso)\b|\b(entrada|ticket|boleto|admission)\s+(?:es\s+)?(?:necesaria|necesario|obligatoria|obligatorio|required)\b/i.test(text);
   return {positive,negative};
 }
 function rowHasAdmissionEvidence(row){
