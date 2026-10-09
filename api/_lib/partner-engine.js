@@ -3,7 +3,7 @@ import zlib from 'zlib';
 import crypto from 'crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
-const SAFE_SLUGS = new Set(['holafly', 'airalo', 'omio', 'viator', 'getyourguide', '12go', 'discovercars', 'riseandshield']);
+const SAFE_SLUGS = new Set(['holafly', 'airalo', 'omio', 'viator', 'getyourguide', '12go', 'bookaway', 'discovercars', 'riseandshield']);
 const SIGNING_SECRET = String(
   process.env.PARTNER_CLICK_SIGNING_SECRET || process.env.SUPABASE_SECRET_KEY || ''
 ).trim();
@@ -13,6 +13,8 @@ const VIATOR_PID = 'P00318254';
 const VIATOR_MCID = '42383';
 const GYG_PARTNER_ID = '3FZWELC';
 const TWELVEGO_PARTNER_ID = '17129424';
+const BOOKAWAY_AFFILIATE_ID = '4289';
+const BOOKAWAY_OFFER_ID = '34';
 const DISCOVERCARS_AID = 'itravelbymyown';
 const RISE_SHIELD_REF = 'yzyzndg';
 
@@ -251,6 +253,7 @@ function allowedPartnerUrl(slug, rawUrl) {
     if (slug === 'omio') return host === 'omio.sjv.io' || host === 'www.omio.com' || host === 'www.omio.es';
     if (slug === 'holafly') return host === 'holafly.sjv.io' || host.endsWith('.holafly.com') || host === 'holafly.com';
     if (slug === 'airalo') return host === 'airalo.pxf.io' || host.endsWith('.airalo.com') || host === 'airalo.com';
+    if (slug === 'bookaway') return host === 'www.bookaway.com';
     if (slug === '12go') return host === '12go.asia' || host === 'www.12go.asia';
     if (slug === 'discovercars') return host === 'discovercars.com' || host === 'www.discovercars.com';
     if (slug === 'riseandshield') return host === 'riseandshield.com' || host === 'www.riseandshield.com';
@@ -311,6 +314,7 @@ function hasRequiredAttribution(slug, rawUrl) {
         url.searchParams.get('utm_medium') === 'online_publisher' &&
         Boolean(url.searchParams.get('cmp'));
     }
+    if (slug === 'bookaway') return url.hostname.toLowerCase() === 'www.bookaway.com' && url.searchParams.get('offer_id') === BOOKAWAY_OFFER_ID && url.searchParams.get('aff_id') === BOOKAWAY_AFFILIATE_ID && /^\/(?:es\/)?s\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname);
     if (slug === '12go') return url.searchParams.get('z') === TWELVEGO_PARTNER_ID && url.searchParams.get('sub_id') === 'itbmo';
     if (slug === 'discovercars') return url.searchParams.get('a_aid') === DISCOVERCARS_AID;
     if (slug === 'riseandshield') return url.searchParams.get('ref') === RISE_SHIELD_REF && url.searchParams.get('tm_source') === 'itbmo';
@@ -987,6 +991,50 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
   }
   return out;
 }
+// V171 Bookaway: fail-closed, independently verified route inventory.
+// Do not guess Bookaway SEO slugs from arbitrary destinations: unlike Omio,
+// Bookaway has no approved route catalog bundled with this project.
+// Extend BOOKAWAY_VERIFIED_ROUTES only after a real Bookaway route URL is verified.
+const BOOKAWAY_VERIFIED_ROUTES = Object.freeze({
+  'dubrovnik|split': 'https://www.bookaway.com/es/s/croatia/dubrovnik-to-split'
+});
+function resolveBookawayTransportOffers(city,uiLanguage,needs=[]){
+  const partner=virtualPartner('bookaway','Bookaway','transport');
+  const out=[]; const seen=new Set();
+  for(const need of (Array.isArray(needs)?needs:[])){
+    if(!['intercity_transport','transport_arrangement'].includes(need?.need_type))continue;
+    if(/rental car|car rental|vehiculo rentado|coche de alquiler|auto de alquiler/i.test(`${need?.entity_name||''} ${need?.transport||''}`))continue;
+    const payload=parseResolvedRoutePayload(need?.source_route);
+    const candidates=[];
+    if(payload?.legs?.length){
+      payload.legs.forEach((leg,index)=>{
+        const route=twelveGoResolvedMarket({leg,city,need,index});
+        if(route)candidates.push(route);
+      });
+    }else{
+      const route=twelveGoLegacyRouteMarket(need,city);
+      if(route)candidates.push(route);
+    }
+    for(const route of candidates){
+      // Only supported commercial modes; never sell a local taxi or flight.
+      if(!['train','bus','ferry','van'].includes(route.mode))continue;
+      const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
+      const verified=BOOKAWAY_VERIFIED_ROUTES[key];
+      if(!verified||seen.has(key))continue;
+      seen.add(key);
+      const targetUrl=appendParams(verified,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+      const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
+        resolutionType:'verified_bookaway_route',confidence:'high',travelDate:route.date||'',
+        routeSegment:{index:Number(route.index||1),mode:route.mode,commercial_origin:route.origin,commercial_destination:route.destination},
+        titleEs:`Bookaway · ${label}`,titleEn:`Bookaway · ${label}`,
+        descriptionEs:'Consulta opciones y disponibilidad actualizada en Bookaway.',
+        descriptionEn:'Check current options and availability on Bookaway.'});
+      if(offer)out.push(offer);
+    }
+  }
+  return out;
+}
 function resolveDiscoverCarsOffers(city,needs=[]){
   const partner=virtualPartner('discovercars','DiscoverCars','car_rental'); const out=[];
   for(const need of (Array.isArray(needs)?needs:[])){
@@ -1118,9 +1166,10 @@ export async function resolveCityOffers({
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[]),
     Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,safeNeeds)),
+    Promise.resolve(resolveBookawayTransportOffers(safeCity,safeUiLanguage,safeNeeds)),
     Promise.resolve(resolveDiscoverCarsOffers(safeCity,safeNeeds))
   ]);
-  const labels=['viator','getyourguide','omio','12go','discovercars'];
+  const labels=['viator','getyourguide','omio','12go','bookaway','discovercars'];
   const buckets=resolved.map((result,index)=>{
     if(result.status==='fulfilled')return Array.isArray(result.value)?result.value:[];
     console.warn(`[ITBMO PARTNER ISOLATION] ${labels[index]}`,result.reason?.message||result.reason);
