@@ -991,14 +991,36 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
   }
   return out;
 }
-// V172 Bookaway: global contextual discovery for all physically eligible intercity legs.
-// Bookaway documents both affiliate homepage referrals and specific route deep links.
-// Without a verified country/route page, link to the affiliate homepage and explicitly
-// ask the traveler to search there; never fabricate a country-specific route URL.
-const BOOKAWAY_VERIFIED_ROUTES = Object.freeze({
-  'dubrovnik|split': 'https://www.bookaway.com/es/s/croatia/dubrovnik-to-split'
-});
-function resolveBookawayTransportOffers(city,uiLanguage,needs=[]){
+// V174: Bookaway uses exactly the same sealed physical A→B markets as 12Go.
+// Bookaway's documented /s/{country}/{origin}-to-{destination}/ path needs
+// an actual destination-country context. No country => affiliate home fallback,
+// NEVER a fabricated country or a demo route. Search availability is unverified.
+const BOOKAWAY_COUNTRY_CODES_BY_NAME = {"isla de la ascension":"AC","andorra":"AD","emiratos arabes unidos":"AE","afganistan":"AF","antigua y barbuda":"AG","anguila":"AI","albania":"AL","armenia":"AM","angola":"AO","antartida":"AQ","argentina":"AR","samoa americana":"AS","austria":"AT","australia":"AU","aruba":"AW","islas aland":"AX","azerbaiyan":"AZ","bosnia y herzegovina":"BA","barbados":"BB","banglades":"BD","belgica":"BE","burkina faso":"BF","bulgaria":"BG","barein":"BH","burundi":"BI","benin":"BJ","san bartolome":"BL","bermudas":"BM","brunei":"BN","bolivia":"BO","caribe neerlandes":"BQ","brasil":"BR","bahamas":"BS","butan":"BT","isla bouvet":"BV","botsuana":"BW","bielorrusia":"BY","belice":"BZ","canada":"CA","islas cocos":"CC","republica democratica del congo":"CD","republica centroafricana":"CF","congo":"CG","suiza":"CH","cote divoire":"CI","islas cook":"CK","chile":"CL","camerun":"CM","china":"CN","colombia":"CO","isla clipperton":"CP","costa rica":"CR","cuba":"CU","cabo verde":"CV","curazao":"CW","isla de navidad":"CX","chipre":"CY","chequia":"CZ","alemania":"DE","diego garcia":"DG","yibuti":"DJ","dinamarca":"DK","dominica":"DM","republica dominicana":"DO","argelia":"DZ","ceuta y melilla":"EA","ecuador":"EC","estonia":"EE","egipto":"EG","sahara occidental":"EH","eritrea":"ER","espana":"ES","etiopia":"ET","union europea":"EU","zona del euro":"EZ","finlandia":"FI","fiyi":"FJ","islas malvinas":"FK","micronesia":"FM","islas feroe":"FO","francia":"FR","gabon":"GA","reino unido":"GB","granada":"GD","georgia":"GE","guayana francesa":"GF","guernesey":"GG","ghana":"GH","gibraltar":"GI","groenlandia":"GL","gambia":"GM","guinea":"GN","guadalupe":"GP","guinea ecuatorial":"GQ","grecia":"GR","islas georgia del sur y sandwich del sur":"GS","guatemala":"GT","guam":"GU","guinea-bisau":"GW","guyana":"GY","rae de hong kong (china)":"HK","islas heard y mcdonald":"HM","honduras":"HN","croacia":"HR","haiti":"HT","hungria":"HU","canarias":"IC","indonesia":"ID","irlanda":"IE","israel":"IL","isla de man":"IM","india":"IN","territorio britanico del oceano indico":"IO","irak":"IQ","iran":"IR","islandia":"IS","italia":"IT","jersey":"JE","jamaica":"JM","jordania":"JO","japon":"JP","kenia":"KE","kirguistan":"KG","camboya":"KH","kiribati":"KI","comoras":"KM","san cristobal y nieves":"KN","corea del norte":"KP","corea del sur":"KR","kuwait":"KW","islas caiman":"KY","kazajistan":"KZ","laos":"LA","libano":"LB","santa lucia":"LC","liechtenstein":"LI","sri lanka":"LK","liberia":"LR","lesoto":"LS","lituania":"LT","luxemburgo":"LU","letonia":"LV","libia":"LY","marruecos":"MA","monaco":"MC","moldavia":"MD","montenegro":"ME","san martin":"MF","madagascar":"MG","islas marshall":"MH","macedonia del norte":"MK","mali":"ML","myanmar (birmania)":"MM","mongolia":"MN","rae de macao (china)":"MO","islas marianas del norte":"MP","martinica":"MQ","mauritania":"MR","montserrat":"MS","malta":"MT","mauricio":"MU","maldivas":"MV","malaui":"MW","mexico":"MX","malasia":"MY","mozambique":"MZ","namibia":"NA","nueva caledonia":"NC","niger":"NE","isla norfolk":"NF","nigeria":"NG","nicaragua":"NI","paises bajos":"NL","noruega":"NO","nepal":"NP","nauru":"NR","niue":"NU","nueva zelanda":"NZ","oman":"OM","panama":"PA","peru":"PE","polinesia francesa":"PF","papua nueva guinea":"PG","filipinas":"PH","pakistan":"PK","polonia":"PL","san pedro y miquelon":"PM","islas pitcairn":"PN","puerto rico":"PR","territorios palestinos":"PS","portugal":"PT","palaos":"PW","paraguay":"PY","catar":"QA","territorios alejados de oceania":"QO","reunion":"RE","rumania":"RO","serbia":"RS","rusia":"RU","ruanda":"RW","arabia saudi":"SA","islas salomon":"SB","seychelles":"SC","sudan":"SD","suecia":"SE","singapur":"SG","santa elena":"SH","eslovenia":"SI","svalbard y jan mayen":"SJ","eslovaquia":"SK","sierra leona":"SL","san marino":"SM","senegal":"SN","somalia":"SO","surinam":"SR","sudan del sur":"SS","santo tome y principe":"ST","el salvador":"SV","sint maarten":"SX","siria":"SY","esuatini":"SZ","tristan de acuna":"TA","islas turcas y caicos":"TC","chad":"TD","territorios australes franceses":"TF","togo":"TG","tailandia":"TH","tayikistan":"TJ","tokelau":"TK","timor-leste":"TL","turkmenistan":"TM","tunez":"TN","tonga":"TO","turquia":"TR","trinidad y tobago":"TT","tuvalu":"TV","taiwan":"TW","tanzania":"TZ","ucrania":"UA","uganda":"UG","islas menores alejadas de ee. uu.":"UM","naciones unidas":"UN","estados unidos":"US","uruguay":"UY","uzbekistan":"UZ","ciudad del vaticano":"VA","san vicente y las granadinas":"VC","venezuela":"VE","islas virgenes britanicas":"VG","islas virgenes de ee. uu.":"VI","vietnam":"VN","vanuatu":"VU","wallis y futuna":"WF","samoa":"WS","pseudoacentos":"XA","pseudobidi":"XB","kosovo":"XK","yemen":"YE","mayotte":"YT","sudafrica":"ZA","zambia":"ZM","zimbabue":"ZW","region desconocida":"ZZ","ascension island":"AC","united arab emirates":"AE","afghanistan":"AF","antigua & barbuda":"AG","anguilla":"AI","antarctica":"AQ","american samoa":"AS","aland islands":"AX","azerbaijan":"AZ","bosnia & herzegovina":"BA","bangladesh":"BD","belgium":"BE","bahrain":"BH","st. barthelemy":"BL","bermuda":"BM","caribbean netherlands":"BQ","brazil":"BR","bhutan":"BT","bouvet island":"BV","botswana":"BW","belarus":"BY","belize":"BZ","cocos (keeling) islands":"CC","congo - kinshasa":"CD","central african republic":"CF","congo - brazzaville":"CG","switzerland":"CH","cook islands":"CK","cameroon":"CM","clipperton island":"CP","sark":"CQ","cape verde":"CV","curacao":"CW","christmas island":"CX","cyprus":"CY","czechia":"CZ","germany":"DE","djibouti":"DJ","denmark":"DK","dominican republic":"DO","algeria":"DZ","ceuta & melilla":"EA","egypt":"EG","western sahara":"EH","spain":"ES","ethiopia":"ET","european union":"EU","eurozone":"EZ","finland":"FI","fiji":"FJ","falkland islands":"FK","faroe islands":"FO","france":"FR","united kingdom":"GB","grenada":"GD","french guiana":"GF","guernsey":"GG","greenland":"GL","guadeloupe":"GP","equatorial guinea":"GQ","greece":"GR","south georgia & south sandwich islands":"GS","guinea-bissau":"GW","hong kong sar china":"HK","heard & mcdonald islands":"HM","croatia":"HR","hungary":"HU","canary islands":"IC","ireland":"IE","isle of man":"IM","british indian ocean territory":"IO","iraq":"IQ","iceland":"IS","italy":"IT","jordan":"JO","japan":"JP","kenya":"KE","kyrgyzstan":"KG","cambodia":"KH","comoros":"KM","st. kitts & nevis":"KN","north korea":"KP","south korea":"KR","cayman islands":"KY","kazakhstan":"KZ","lebanon":"LB","st. lucia":"LC","lesotho":"LS","lithuania":"LT","luxembourg":"LU","latvia":"LV","libya":"LY","morocco":"MA","moldova":"MD","st. martin":"MF","marshall islands":"MH","north macedonia":"MK","myanmar (burma)":"MM","macao sar china":"MO","northern mariana islands":"MP","martinique":"MQ","mauritius":"MU","maldives":"MV","malawi":"MW","malaysia":"MY","new caledonia":"NC","norfolk island":"NF","netherlands":"NL","norway":"NO","new zealand":"NZ","french polynesia":"PF","papua new guinea":"PG","philippines":"PH","poland":"PL","st. pierre & miquelon":"PM","pitcairn islands":"PN","palestinian territories":"PS","palau":"PW","qatar":"QA","outlying oceania":"QO","romania":"RO","russia":"RU","rwanda":"RW","saudi arabia":"SA","solomon islands":"SB","sweden":"SE","singapore":"SG","st. helena":"SH","slovenia":"SI","svalbard & jan mayen":"SJ","slovakia":"SK","sierra leone":"SL","suriname":"SR","south sudan":"SS","sao tome & principe":"ST","syria":"SY","eswatini":"SZ","tristan da cunha":"TA","turks & caicos islands":"TC","french southern territories":"TF","thailand":"TH","tajikistan":"TJ","tunisia":"TN","turkiye":"TR","trinidad & tobago":"TT","ukraine":"UA","u.s. outlying islands":"UM","united nations":"UN","united states":"US","vatican city":"VA","st. vincent & grenadines":"VC","british virgin islands":"VG","u.s. virgin islands":"VI","wallis & futuna":"WF","pseudo-accents":"XA","pseudo-bidi":"XB","south africa":"ZA","zimbabwe":"ZW","unknown region":"ZZ"};
+function bookawayCountrySlug(countryCode='',countryName=''){
+  const nameKey=normalizeCountryKey(countryName);
+  const code=(clean(countryCode,8)||BOOKAWAY_COUNTRY_CODES_BY_NAME[nameKey]||'').toUpperCase();
+  const aliases={GB:'united-kingdom',US:'united-states',AE:'united-arab-emirates',KR:'south-korea',KP:'north-korea',CZ:'czech-republic',CI:'ivory-coast',CD:'democratic-republic-of-the-congo',CG:'republic-of-the-congo',TW:'taiwan',VN:'vietnam',TR:'turkey',LA:'laos',BO:'bolivia',TZ:'tanzania',RU:'russia'};
+  if(aliases[code])return aliases[code];
+  if(/^[A-Z]{2}$/.test(code)){
+    try{const name=new Intl.DisplayNames(['en'],{type:'region'}).of(code);
+      if(name&&name!==code)return twelveGoSlug(name).toLowerCase();
+    }catch(_){}
+  }
+  // Country strings are accepted only when already an English canonical name;
+  // a Spanish label such as "Croacia" must not silently become a false slug.
+  const name=clean(countryName,100);
+  if(/^[a-z -]+$/i.test(name)&&normalizeKey(name)===normalizeKey('peru'))return 'peru';
+  return '';
+}
+function bookawayCountryForRoute(route,need,city,destinations=[]){
+  const originKey=normalizeKey(route.origin),destKey=normalizeKey(route.destination),baseKey=normalizeKey(city);
+  const known=(Array.isArray(destinations)?destinations:[]).filter(Boolean);
+  const match=known.find(d=>normalizeKey(d.city)===originKey)||known.find(d=>normalizeKey(d.city)===destKey)||known.find(d=>normalizeKey(d.city)===baseKey);
+  // Explicit trip ownership metadata takes priority. Never infer geography
+  // from the text of a destination name or a made-up country lookup.
+  return bookawayCountrySlug(match?.country_code||need?.country_code||need?.countryCode||'',match?.country||need?.country||'');
+}
+function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]){
   const partner=virtualPartner('bookaway','Bookaway','transport');
   const out=[]; const seen=new Set();
   for(const need of (Array.isArray(needs)?needs:[])){
@@ -1016,22 +1038,28 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[]){
       if(route)candidates.push(route);
     }
     for(const route of candidates){
-      // Only supported commercial modes; never sell a local taxi or flight.
       if(!['train','bus','ferry','van'].includes(route.mode))continue;
-      const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}|${route.date||''}`;
-      if(seen.has(key))continue;
-      seen.add(key);
-      const verified=BOOKAWAY_VERIFIED_ROUTES[`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`];
-      // Global availability is NOT confirmed. For unverified markets, the official
-      // affiliate homepage is a search starting point, not a preselected route.
-      const targetUrl=appendParams(verified||'https://www.bookaway.com/',{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+      const origin=twelveGoSlug(route.origin).toLowerCase();
+      const destination=twelveGoSlug(route.destination).toLowerCase();
+      if(!origin||!destination||origin===destination)continue;
+      const key=`${origin}|${destination}|${route.date||''}`;
+      if(seen.has(key))continue;seen.add(key);
+      const country=bookawayCountryForRoute(route,need,city,destinations);
+      // Only same-country markets are supported by the documented country
+      // route format. A route crossing two known different countries falls back.
+      const originCountry=destinations.find(d=>normalizeKey(d.city)===normalizeKey(route.origin))?.country_code;
+      const destinationCountry=destinations.find(d=>normalizeKey(d.city)===normalizeKey(route.destination))?.country_code;
+      const crossBorder=originCountry&&destinationCountry&&originCountry!==destinationCountry;
+      const contextual=Boolean(country&&!crossBorder);
+      const base=contextual?`https://www.bookaway.com/s/${encodeURIComponent(country)}/${encodeURIComponent(origin)}-to-${encodeURIComponent(destination)}/`:'https://www.bookaway.com/';
+      const targetUrl=appendParams(base,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
-        resolutionType:verified?'verified_bookaway_route':'bookaway_global_search',confidence:verified?'high':'medium',travelDate:route.date||'',
+        resolutionType:contextual?'bookaway_context_route_search':'bookaway_global_search',confidence:'medium',travelDate:route.date||'',
         routeSegment:{index:Number(route.index||1),mode:route.mode,commercial_origin:route.origin,commercial_destination:route.destination},
         titleEs:`Bookaway · ${label}`,titleEn:`Bookaway · ${label}`,
-        descriptionEs:verified?'Consulta opciones y disponibilidad actualizada en Bookaway.':'Busca este trayecto en Bookaway. Deberás introducir origen y destino; disponibilidad y horarios se confirman allí.',
-        descriptionEn:verified?'Check current options and availability on Bookaway.':'Search this route on Bookaway. Enter origin and destination there; availability and schedules are confirmed by the provider.'});
+        descriptionEs:contextual?'Busca este trayecto en Bookaway. Ruta, horarios y disponibilidad deben confirmarse con el proveedor.':'Busca este trayecto en Bookaway introduciendo origen y destino; no se pudo determinar una URL de ruta segura.',
+        descriptionEn:contextual?'Search this route on Bookaway. Route, schedules and availability must be confirmed with the provider.':'Search this route on Bookaway by entering origin and destination; a safe route URL could not be determined.'});
       if(offer)out.push(offer);
     }
   }
@@ -1159,6 +1187,16 @@ export async function resolveCityOffers({
   const safeCity = clean(city || safeNeeds.find(Boolean)?.city, 160);
   const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
   const safeTripLanguage = normalizeLanguage(trip_language);
+  // Existing owned-trip data source (Supabase), not a live Bookaway request.
+  // Failure isolates to Bookaway country resolution; other partners are untouched.
+  let bookawayDestinations=[];
+  try{
+    if(trip_id&&session.user_id){
+      const rows=await supabaseFetch(`/trips?select=destinations&id=eq.${encodeURIComponent(trip_id)}&user_id=eq.${encodeURIComponent(session.user_id)}&limit=1`);
+      bookawayDestinations=(Array.isArray(rows?.[0]?.destinations)?rows[0].destinations:[]).map(d=>({city:clean(d?.city,160),country:clean(d?.country,120),country_code:destinationCountryCode(d)}));
+    }
+  }catch(err){console.warn('[ITBMO BOOKAWAY COUNTRY CONTEXT]',err?.message||err);}
+
 
   // Partner adapters are isolated. One provider failure must not blank valid
   // offers from another provider; especially, experience-partner errors cannot
@@ -1168,7 +1206,7 @@ export async function resolveCityOffers({
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[]),
     Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,safeNeeds)),
-    Promise.resolve(resolveBookawayTransportOffers(safeCity,safeUiLanguage,safeNeeds)),
+    Promise.resolve(resolveBookawayTransportOffers(safeCity,safeUiLanguage,safeNeeds,bookawayDestinations)),
     Promise.resolve(resolveDiscoverCarsOffers(safeCity,safeNeeds))
   ]);
   const labels=['viator','getyourguide','omio','12go','bookaway','discovercars'];
