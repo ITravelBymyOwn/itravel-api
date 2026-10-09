@@ -1354,44 +1354,55 @@ function _plannerNavigationUrl_(view=''){
   if(data?.trip_id)params.set('trip_id',data.trip_id);
   return `./planner.html?${params.toString()}`;
 }
-function _livePlannerWindow_(){
-  // Only use an actual, accessible Planner. A stale or unrelated opener is not
-  // sufficient evidence that this is the correct companion surface.
+function _livePlannerSurface_(){
+  // The real entry is preview-home -> sandboxed Planner iframe -> Workspace.
+  // The opener is the FRAME, not the visible browser TAB. Never focus only
+  // the frame and claim navigation succeeded.
   try{
-    const candidate=window.opener;
-    if(!candidate||candidate.closed||candidate===window)return null;
-    if(candidate.location.origin!==location.origin)return null;
-    if(!/\/planner\.html$/i.test(candidate.location.pathname))return null;
-    return candidate;
-  }catch(_){return null;}
+    const planner=window.opener;
+    if(!planner||planner.closed||planner===window)return null;
+    if(planner.location.origin!==window.location.origin)return null;
+    if(!/\/planner\.html$/i.test(planner.location.pathname))return null;
+    let visibleTab=planner;
+    try{
+      const top=planner.top;
+      if(top && !top.closed && top.location.origin===window.location.origin){
+        visibleTab=top;
+      }
+    }catch(error){console.warn('[ITBMO NAV V167] parent access unavailable',error);}
+    return {planner,visibleTab};
+  }catch(error){console.warn('[ITBMO NAV V167] opener unavailable',error);return null;}
 }
 function _navigateWorkspaceToPlanner_(view=''){
-  // Deterministic recovery: navigate THIS tab. Popup blockers and a missing
-  // opener must never leave a visible navigation button doing nothing.
-  // The persisted trip remains owned by the existing Planner mechanisms.
+  // Explicit last resort only when the original Planner is inaccessible.
+  // This does not mutate any trip or generation data.
   window.location.assign(_plannerNavigationUrl_(view));
 }
-function backPlanner(){
-  const planner=_livePlannerWindow_();
-  if(planner){
-    try{planner.focus();return;}catch(error){console.warn('[ITBMO NAV V166] focus failed',error);}
+function _showPlannerSurface_(view=''){
+  const surface=_livePlannerSurface_();
+  if(!surface){
+    console.warn('[ITBMO NAV V167] no live Planner surface; using fallback',view);
+    _navigateWorkspaceToPlanner_(view);
+    return;
   }
-  _navigateWorkspaceToPlanner_('');
-}
-function openMyTrips(){
-  const planner=_livePlannerWindow_();
-  if(planner){
+  const {planner,visibleTab}=surface;
+  if(view==='my-trips'){
     try{
       const button=planner.document.querySelector('#planner-my-trips');
-      if(button&&!button.disabled){
-        button.click();
-        planner.focus();
-        return;
-      }
-    }catch(error){console.warn('[ITBMO NAV V166] native My Trips unavailable',error);}
+      if(!button||button.disabled)throw new Error('MY_TRIPS_CONTROL_UNAVAILABLE');
+      button.click(); // Existing Planner action: no reload, no state rehydration.
+    }catch(error){
+      console.warn('[ITBMO NAV V167] My Trips action unavailable',error);
+      // Never silently claim that My Trips opened. Fallback is visible.
+      _navigateWorkspaceToPlanner_('my-trips');
+      return;
+    }
   }
-  _navigateWorkspaceToPlanner_('my-trips');
+  try{visibleTab.focus();}catch(error){console.warn('[ITBMO NAV V167] tab focus failed',error);}
+  // The tab containing preview-home, not its child iframe, is the focus target.
 }
+function backPlanner(){_showPlannerSurface_('');}
+function openMyTrips(){_showPlannerSurface_('my-trips');}
 function bindWorkspaceNavigationImmediately(){
   // This runs before any async trip fetch, authentication, or rendering.
   const actions=[['#tw-back-planner',backPlanner],['#tw-my-trips',openMyTrips],['#tw-empty-back',backPlanner]];
