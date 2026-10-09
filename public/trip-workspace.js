@@ -68,7 +68,7 @@ const plannerUrl=`./planner.html?lang=${encodeURIComponent(lang)}`;
 const homeUrl=lang==='en'?'./preview-home-en.html':'./preview-home.html';
 try{ localStorage.setItem('itbmo_site_language',lang); }catch(_){ }
 const brand=$('.tw-brand');if(brand)brand.setAttribute('href',homeUrl);
-$('#tw-back-planner').setAttribute('href',_plannerNavigationUrl_());
+$('#tw-back-planner').setAttribute('href','#');
 $('#tw-back-planner').setAttribute('aria-label',lang==='en'?'Go to Planner':'Ir al Planner');
 $('#tw-empty-back').setAttribute('data-planner-url',plannerUrl);
 $('#tw-empty-back').textContent=t.back;
@@ -1354,18 +1354,52 @@ function _plannerNavigationUrl_(){
   params.set('lang',lang==='en'?'en':'es');
   return `./planner.html?${params.toString()}`;
 }
-function backPlanner(){
-  // Browsers do not guarantee cross-tab focus, especially from an iframe opener.
-  // Navigate this tab explicitly so the user always sees the Planner.
-  window.location.assign(_plannerNavigationUrl_());
+function _originalPlannerSurface_(){
+  // The Workspace is opened by planner.html, often inside preview-home's iframe.
+  // The original browser tab is the iframe's top-level browsing context.
+  try{
+    const opener=window.opener;
+    if(!opener||opener.closed)return null;
+    if(opener.location.origin!==window.location.origin)return null;
+    if(!/\/planner\.html$/i.test(opener.location.pathname))return null;
+    const surface=opener.top;
+    if(!surface||surface.closed||surface.location.origin!==window.location.origin)return null;
+    return surface;
+  }catch(error){console.warn('[ITBMO RETURN] Original planner surface inaccessible',error);return null;}
+}
+function _showPlannerReturnHelp_(){
+  // Never silently replace this Workspace with a second Planner. A browser may
+  // refuse programmatic tab activation, and the original session must survive.
+  let box=document.getElementById('tw-planner-return-help');
+  if(!box){
+    box=document.createElement('div');box.id='tw-planner-return-help';
+    box.setAttribute('role','status');box.setAttribute('aria-live','polite');
+    Object.assign(box.style,{position:'fixed',zIndex:'2147483000',right:'18px',bottom:'18px',maxWidth:'360px',padding:'18px',borderRadius:'14px',background:'#11233d',color:'#fff',boxShadow:'0 10px 36px #0006',fontSize:'14px',lineHeight:'1.5'});
+    document.body.appendChild(box);
+  }
+  box.replaceChildren();
+  const message=document.createElement('div');
+  message.textContent=lang==='en'?'Your original Planner is still open. Switch to its browser tab to keep your session and trip intact.':'Tu Planner original sigue abierto. Cambia a su pestaña del navegador para conservar la sesión y el viaje.';
+  const dismiss=document.createElement('button');dismiss.type='button';
+  dismiss.textContent=lang==='en'?'Got it':'Entendido';
+  Object.assign(dismiss.style,{display:'block',marginTop:'12px',padding:'7px 14px',borderRadius:'8px',cursor:'pointer'});
+  dismiss.addEventListener('click',()=>box.remove());box.append(message,dismiss);
+}
+function backPlanner(event){
+  if(event)event.preventDefault();
+  const surface=_originalPlannerSurface_();
+  if(surface){
+    try{surface.focus();}catch(error){console.warn('[ITBMO RETURN] Tab focus rejected',error);}
+    // Some browsers do not allow changing tabs programmatically. Never create
+    // another Planner as a fallback, because it may lose guest session state.
+    if(!document.hidden)_showPlannerReturnHelp_();
+  }else _showPlannerReturnHelp_();
 }
 function bindWorkspaceNavigationImmediately(){
-  // Bind before asynchronous trip restoration. A real anchor in HTML also
-  // provides native navigation if JavaScript does not initialize.
   const button=$('#tw-back-planner');
   if(button){
-    button.href=_plannerNavigationUrl_();
-    button.addEventListener('click',()=>{button.href=_plannerNavigationUrl_();});
+    button.href='#';
+    button.addEventListener('click',backPlanner);
   }
   const empty=$('#tw-empty-back');
   if(empty)empty.addEventListener('click',backPlanner);
