@@ -314,7 +314,7 @@ function hasRequiredAttribution(slug, rawUrl) {
         url.searchParams.get('utm_medium') === 'online_publisher' &&
         Boolean(url.searchParams.get('cmp'));
     }
-    if (slug === 'bookaway') return url.hostname.toLowerCase() === 'www.bookaway.com' && url.searchParams.get('offer_id') === BOOKAWAY_OFFER_ID && url.searchParams.get('aff_id') === BOOKAWAY_AFFILIATE_ID && /^\/(?:es\/)?s\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname);
+    if (slug === 'bookaway') return url.hostname.toLowerCase() === 'www.bookaway.com' && url.searchParams.get('offer_id') === BOOKAWAY_OFFER_ID && url.searchParams.get('aff_id') === BOOKAWAY_AFFILIATE_ID && (url.pathname === '/' || /^\/(?:[a-z]{2}\/)?s\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname));
     if (slug === '12go') return url.searchParams.get('z') === TWELVEGO_PARTNER_ID && url.searchParams.get('sub_id') === 'itbmo';
     if (slug === 'discovercars') return url.searchParams.get('a_aid') === DISCOVERCARS_AID;
     if (slug === 'riseandshield') return url.searchParams.get('ref') === RISE_SHIELD_REF && url.searchParams.get('tm_source') === 'itbmo';
@@ -991,10 +991,10 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
   }
   return out;
 }
-// V171 Bookaway: fail-closed, independently verified route inventory.
-// Do not guess Bookaway SEO slugs from arbitrary destinations: unlike Omio,
-// Bookaway has no approved route catalog bundled with this project.
-// Extend BOOKAWAY_VERIFIED_ROUTES only after a real Bookaway route URL is verified.
+// V172 Bookaway: global contextual discovery for all physically eligible intercity legs.
+// Bookaway documents both affiliate homepage referrals and specific route deep links.
+// Without a verified country/route page, link to the affiliate homepage and explicitly
+// ask the traveler to search there; never fabricate a country-specific route URL.
 const BOOKAWAY_VERIFIED_ROUTES = Object.freeze({
   'dubrovnik|split': 'https://www.bookaway.com/es/s/croatia/dubrovnik-to-split'
 });
@@ -1018,18 +1018,20 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[]){
     for(const route of candidates){
       // Only supported commercial modes; never sell a local taxi or flight.
       if(!['train','bus','ferry','van'].includes(route.mode))continue;
-      const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
-      const verified=BOOKAWAY_VERIFIED_ROUTES[key];
-      if(!verified||seen.has(key))continue;
+      const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}|${route.date||''}`;
+      if(seen.has(key))continue;
       seen.add(key);
-      const targetUrl=appendParams(verified,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+      const verified=BOOKAWAY_VERIFIED_ROUTES[`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`];
+      // Global availability is NOT confirmed. For unverified markets, the official
+      // affiliate homepage is a search starting point, not a preselected route.
+      const targetUrl=appendParams(verified||'https://www.bookaway.com/',{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
-        resolutionType:'verified_bookaway_route',confidence:'high',travelDate:route.date||'',
+        resolutionType:verified?'verified_bookaway_route':'bookaway_global_search',confidence:verified?'high':'medium',travelDate:route.date||'',
         routeSegment:{index:Number(route.index||1),mode:route.mode,commercial_origin:route.origin,commercial_destination:route.destination},
         titleEs:`Bookaway · ${label}`,titleEn:`Bookaway · ${label}`,
-        descriptionEs:'Consulta opciones y disponibilidad actualizada en Bookaway.',
-        descriptionEn:'Check current options and availability on Bookaway.'});
+        descriptionEs:verified?'Consulta opciones y disponibilidad actualizada en Bookaway.':'Busca este trayecto en Bookaway. Deberás introducir origen y destino; disponibilidad y horarios se confirman allí.',
+        descriptionEn:verified?'Check current options and availability on Bookaway.':'Search this route on Bookaway. Enter origin and destination there; availability and schedules are confirmed by the provider.'});
       if(offer)out.push(offer);
     }
   }
