@@ -68,12 +68,7 @@ const plannerUrl=`./planner.html?lang=${encodeURIComponent(lang)}`;
 const homeUrl=lang==='en'?'./preview-home-en.html':'./preview-home.html';
 try{ localStorage.setItem('itbmo_site_language',lang); }catch(_){ }
 const brand=$('.tw-brand');if(brand)brand.setAttribute('href',homeUrl);
-$('#tw-back-planner').setAttribute('href','#');
-$('#tw-back-planner').setAttribute('aria-label',lang==='en'?'Go to Planner':'Ir al Planner');
-$('#tw-empty-back').setAttribute('data-planner-url',plannerUrl);
-$('#tw-empty-back').textContent=t.back;
 const badge=$('#tw-prepare-badge');if(badge)badge.textContent=t.prepareBadge;
-$('#tw-back-label').textContent=lang==='en'?'Go to Planner':'Ir al Planner';
 
 $('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
 function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+days(c).length,0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${days(c).length} ${esc(t.ds)} ${esc(t.organized)}</p><span class="tw-city-go">${esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
@@ -1347,64 +1342,6 @@ function showEmpty(){
 function handoffToPlanner(){
   try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
 }
-function _plannerNavigationUrl_(){
-  // A deterministic same-tab return. Never mutate the trip, generation,
-  // auth or workspace snapshot. Do not add mode=new or view=my-trips.
-  const params=new URLSearchParams();
-  params.set('lang',lang==='en'?'en':'es');
-  return `./planner.html?${params.toString()}`;
-}
-function _originalPlannerSurface_(){
-  // The Workspace is opened by planner.html, often inside preview-home's iframe.
-  // The original browser tab is the iframe's top-level browsing context.
-  try{
-    const opener=window.opener;
-    if(!opener||opener.closed)return null;
-    if(opener.location.origin!==window.location.origin)return null;
-    if(!/\/planner\.html$/i.test(opener.location.pathname))return null;
-    const surface=opener.top;
-    if(!surface||surface.closed||surface.location.origin!==window.location.origin)return null;
-    return surface;
-  }catch(error){console.warn('[ITBMO RETURN] Original planner surface inaccessible',error);return null;}
-}
-function _showPlannerReturnHelp_(){
-  // Never silently replace this Workspace with a second Planner. A browser may
-  // refuse programmatic tab activation, and the original session must survive.
-  let box=document.getElementById('tw-planner-return-help');
-  if(!box){
-    box=document.createElement('div');box.id='tw-planner-return-help';
-    box.setAttribute('role','status');box.setAttribute('aria-live','polite');
-    Object.assign(box.style,{position:'fixed',zIndex:'2147483000',right:'18px',bottom:'18px',maxWidth:'360px',padding:'18px',borderRadius:'14px',background:'#11233d',color:'#fff',boxShadow:'0 10px 36px #0006',fontSize:'14px',lineHeight:'1.5'});
-    document.body.appendChild(box);
-  }
-  box.replaceChildren();
-  const message=document.createElement('div');
-  message.textContent=lang==='en'?'Your original Planner is still open. Switch to its browser tab to keep your session and trip intact.':'Tu Planner original sigue abierto. Cambia a su pestaña del navegador para conservar la sesión y el viaje.';
-  const dismiss=document.createElement('button');dismiss.type='button';
-  dismiss.textContent=lang==='en'?'Got it':'Entendido';
-  Object.assign(dismiss.style,{display:'block',marginTop:'12px',padding:'7px 14px',borderRadius:'8px',cursor:'pointer'});
-  dismiss.addEventListener('click',()=>box.remove());box.append(message,dismiss);
-}
-function backPlanner(event){
-  if(event)event.preventDefault();
-  const surface=_originalPlannerSurface_();
-  if(surface){
-    try{surface.focus();}catch(error){console.warn('[ITBMO RETURN] Tab focus rejected',error);}
-    // Some browsers do not allow changing tabs programmatically. Never create
-    // another Planner as a fallback, because it may lose guest session state.
-    if(!document.hidden)_showPlannerReturnHelp_();
-  }else _showPlannerReturnHelp_();
-}
-function bindWorkspaceNavigationImmediately(){
-  const button=$('#tw-back-planner');
-  if(button){
-    button.href='#';
-    button.addEventListener('click',backPlanner);
-  }
-  const empty=$('#tw-empty-back');
-  if(empty)empty.addEventListener('click',backPlanner);
-}
-
 function setupAllCitiesFloating(){
   const source=$('#tw-all-cities');
   const floating=$('#tw-floating-all-cities');
@@ -1474,7 +1411,6 @@ function setupPrepareFloating(){
 }
 
 async function boot(){
-  bindWorkspaceNavigationImmediately();
   const params=new URLSearchParams(location.search);
   const requestedTripId=String(params.get('trip_id') || '').trim();
   const cached=readSnapshot();
