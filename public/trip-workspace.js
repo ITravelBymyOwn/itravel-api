@@ -519,6 +519,54 @@ function transportNeedBelongsToOriginWorkspace(item,cityName){
   return !origin || normalizeWorkspaceEntity(origin)===normalizeWorkspaceEntity(cityName);
 }
 
+// V176: read-only coverage audit. This deliberately does not synthesize
+// tickets from another planning unit or mutate itinerary/context state.
+// Enable with sessionStorage.setItem('itbmo_context_audit','1') and reload.
+function auditContextCoverageForCity(cityName,serverNeeds=[],visibleNeeds=[]){
+  try{
+    if(sessionStorage.getItem('itbmo_context_audit')!=='1')return;
+    const cityKey=normalizeWorkspaceEntity(cityName);
+    const itinerary=data?.itineraries||{};
+    const local=workspaceRowsForCity(cityName);
+    const visible=(Array.isArray(visibleNeeds)?visibleNeeds:[]).filter(n=>['ticket_required','reservation_recommended'].includes(n?.need_type));
+    const record=(sourceCity,day,index,row)=>{
+      const cc=row?.commerce_context||{};
+      const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
+      const canonical=String(cc?.canonical_place||row?.to||activity).trim();
+      const physical=String(row?.physical_location||cc?.physical_destination||'').trim();
+      const note=String(row?.notes||'');
+      const evidence=admissionEvidenceFromText(`${activity} ${canonical} ${note}`);
+      const semantic=String(cc?.semantic_type||'').toUpperCase();
+      const ticket=String(cc?.ticket_need||'').toLowerCase();
+      const positive=rowHasAdmissionEvidence(row);
+      const matching=visible.filter(n=>sameWorkspaceEntity(n?.entity_name||n?.source_activity,canonical));
+      return {sourceCity,day,index:index+1,activity,canonical,physical,semantic,ticket,explicitAdmission:evidence.positive,explicitExclusion:evidence.negative,admissionEligible:positive,shown:matching.length>0,matchedCards:matching.map(n=>n.entity_name)};
+    };
+    const localRecords=local.map(({day,index,row})=>record(cityName,day,index,row));
+    const external=[];
+    for(const [sourceCity,unit] of Object.entries(itinerary)){
+      if(normalizeWorkspaceEntity(sourceCity)===cityKey)continue;
+      for(const [day,rows] of Object.entries(unit?.byDay||{})){
+        if(!Array.isArray(rows))continue;
+        rows.forEach((row,index)=>{
+          if(!row||typeof row!=='object')return;
+          const cc=row.commerce_context||{};
+          const base=String(cc?.base_city||cc?.planning_base||cc?.parent_city||row?.base_city||'');
+          if(normalizeWorkspaceEntity(base)===cityKey)external.push(record(sourceCity,Number(day),index,row));
+        });
+      }
+    }
+    const omissions=localRecords.filter(r=>r.admissionEligible&&!r.shown);
+    const server=(Array.isArray(serverNeeds)?serverNeeds:[]).map(n=>({entity:n?.entity_name,source:n?.source_activity,day:n?.day,type:n?.need_type,passedCitySlice:contextualNeedBelongsToCitySlice(n,cityName),passedSanity:contextualCommerceNeedIsSane(n,cityName)}));
+    console.groupCollapsed(`[ITBMO V176 CONTEXT AUDIT] ${cityName} · ${localRecords.length} rows · ${omissions.length} potential missing admissions`);
+    console.table(localRecords);
+    if(omissions.length){console.warn('Admission evidence without visible card');console.table(omissions);}
+    if(external.length){console.warn('Rows explicitly owned by this base city in another physical unit');console.table(external);}
+    console.table(server);
+    console.groupEnd();
+  }catch(error){console.warn('[ITBMO V176 CONTEXT AUDIT] unavailable',String(error?.message||error));}
+}
+
 function contextualNeedsForCity(cityName,needs){
   // Server context for a main planning unit can contain rows that physically
   // belong to a subdestination. Keep only needs that belong to this physical
@@ -569,6 +617,7 @@ function contextualNeedsForCity(cityName,needs){
     const forced=cityOverviewTourForCity(cityName,[]);
     if(forced) finalNeeds=[forced,...finalNeeds];
   }
+  auditContextCoverageForCity(cityName,needs,finalNeeds);
   return finalNeeds;
 }
 
