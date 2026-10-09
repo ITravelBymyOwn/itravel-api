@@ -577,7 +577,7 @@ function buildCandidates(trip, requestedCity) {
   const itineraries = plain(checkpoint.itineraries);
   const requestedKey = normalizeEntityKey(requestedCity);
   const candidates = [];
-  const pendingContextNotes = new Map();
+  const pendingContextNotes = new Map(); // V175: keyed by physical planning unit and day, not candidate id
   const physicalNames = new Set(cityNames(trip));
 
   for (const [sourceCity, rawCityData] of Object.entries(itineraries)) {
@@ -616,15 +616,16 @@ function buildCandidates(trip, requestedCity) {
         const genericTransfer=isGenericTransferActivity(row.activity);
         if(genericTransfer&&!transportInfo.significant){
           const destination=clean(row.to,180);
-          if(destination) pendingContextNotes.set(`${sourceCity}:${day}:${index+1}`,clean(row.notes,320));
+          if(destination) pendingContextNotes.set(`${sourceCity}:${day}`,clean(row.notes,320));
           return;
         }
         const candidateId=`${normalizeEntityKey(sourceCity)||'unit'}-${day}-${index+1}`;
         const destination=clean(row.to,180);
         const entityHint=clean(cc.canonical_place,180)||destination||activity;
         const ownNotes=clean(row.notes,320).replace(/^valid:\s*/i,"");
-        const contextNotes=clean(`${pendingContextNotes.get(candidateId)||""} ${ownNotes}`,620);
-        pendingContextNotes.delete(candidateId);
+        const pendingKey=`${sourceCity}:${day}`;
+        const contextNotes=clean(`${pendingContextNotes.get(pendingKey)||""} ${ownNotes}`,620);
+        pendingContextNotes.delete(pendingKey);
         const evidence=accessEvidence({activity,notes:contextNotes});
         candidates.push({
           candidate_id:candidateId,day,activity,entity_hint:entityHint,notes:ownNotes,context_notes:contextNotes,
