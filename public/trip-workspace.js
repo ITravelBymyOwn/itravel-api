@@ -68,14 +68,14 @@ const plannerUrl=`./planner.html?lang=${encodeURIComponent(lang)}`;
 const homeUrl=lang==='en'?'./preview-home-en.html':'./preview-home.html';
 try{ localStorage.setItem('itbmo_site_language',lang); }catch(_){ }
 const brand=$('.tw-brand');if(brand)brand.setAttribute('href',homeUrl);
-$('#tw-back-planner').setAttribute('data-planner-url',plannerUrl);
-$('#tw-back-planner').setAttribute('aria-label',t.back);
+$('#tw-back-planner').setAttribute('href',_plannerNavigationUrl_());
+$('#tw-back-planner').setAttribute('aria-label',lang==='en'?'Go to Planner':'Ir al Planner');
 $('#tw-empty-back').setAttribute('data-planner-url',plannerUrl);
 $('#tw-empty-back').textContent=t.back;
 const badge=$('#tw-prepare-badge');if(badge)badge.textContent=t.prepareBadge;
-$('#tw-back-label').textContent=t.back;
-$('#tw-my-trips-label').textContent=t.myTrips;
-$('#tw-my-trips').setAttribute('aria-label',t.myTrips);$('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
+$('#tw-back-label').textContent=lang==='en'?'Go to Planner':'Ir al Planner';
+
+$('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
 function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+days(c).length,0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${days(c).length} ${esc(t.ds)} ${esc(t.organized)}</p><span class="tw-city-go">${esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
 function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='prepare';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
 function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw-city-dates').textContent=range(city);const ib=$('#tw-mode-itinerary'),pb=$('#tw-mode-prepare');ib.classList.toggle('active',mode==='itinerary');pb.classList.toggle('active',mode==='prepare');ib.setAttribute('aria-selected',mode==='itinerary');pb.setAttribute('aria-selected',mode==='prepare');renderDays();mode==='itinerary'?renderItinerary():renderPrepare();window.dispatchEvent(new Event('tw:prepare-mode-changed'))}
@@ -1347,69 +1347,28 @@ function showEmpty(){
 function handoffToPlanner(){
   try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
 }
-function _plannerNavigationUrl_(view=''){
+function _plannerNavigationUrl_(){
+  // A deterministic same-tab return. Never mutate the trip, generation,
+  // auth or workspace snapshot. Do not add mode=new or view=my-trips.
   const params=new URLSearchParams();
-  params.set('lang',lang);
-  if(view)params.set('view',view);
-  if(data?.trip_id)params.set('trip_id',data.trip_id);
+  params.set('lang',lang==='en'?'en':'es');
   return `./planner.html?${params.toString()}`;
 }
-function _livePlannerSurface_(){
-  // The real entry is preview-home -> sandboxed Planner iframe -> Workspace.
-  // The opener is the FRAME, not the visible browser TAB. Never focus only
-  // the frame and claim navigation succeeded.
-  try{
-    const planner=window.opener;
-    if(!planner||planner.closed||planner===window)return null;
-    if(planner.location.origin!==window.location.origin)return null;
-    if(!/\/planner\.html$/i.test(planner.location.pathname))return null;
-    let visibleTab=planner;
-    try{
-      const top=planner.top;
-      if(top && !top.closed && top.location.origin===window.location.origin){
-        visibleTab=top;
-      }
-    }catch(error){console.warn('[ITBMO NAV V167] parent access unavailable',error);}
-    return {planner,visibleTab};
-  }catch(error){console.warn('[ITBMO NAV V167] opener unavailable',error);return null;}
+function backPlanner(){
+  // Browsers do not guarantee cross-tab focus, especially from an iframe opener.
+  // Navigate this tab explicitly so the user always sees the Planner.
+  window.location.assign(_plannerNavigationUrl_());
 }
-function _navigateWorkspaceToPlanner_(view=''){
-  // Explicit last resort only when the original Planner is inaccessible.
-  // This does not mutate any trip or generation data.
-  window.location.assign(_plannerNavigationUrl_(view));
-}
-function _showPlannerSurface_(view=''){
-  const surface=_livePlannerSurface_();
-  if(!surface){
-    console.warn('[ITBMO NAV V167] no live Planner surface; using fallback',view);
-    _navigateWorkspaceToPlanner_(view);
-    return;
-  }
-  const {planner,visibleTab}=surface;
-  if(view==='my-trips'){
-    try{
-      const button=planner.document.querySelector('#planner-my-trips');
-      if(!button||button.disabled)throw new Error('MY_TRIPS_CONTROL_UNAVAILABLE');
-      button.click(); // Existing Planner action: no reload, no state rehydration.
-    }catch(error){
-      console.warn('[ITBMO NAV V167] My Trips action unavailable',error);
-      // Never silently claim that My Trips opened. Fallback is visible.
-      _navigateWorkspaceToPlanner_('my-trips');
-      return;
-    }
-  }
-  try{visibleTab.focus();}catch(error){console.warn('[ITBMO NAV V167] tab focus failed',error);}
-  // The tab containing preview-home, not its child iframe, is the focus target.
-}
-function backPlanner(){_showPlannerSurface_('');}
-function openMyTrips(){_showPlannerSurface_('my-trips');}
 function bindWorkspaceNavigationImmediately(){
-  // This runs before any async trip fetch, authentication, or rendering.
-  const actions=[['#tw-back-planner',backPlanner],['#tw-my-trips',openMyTrips],['#tw-empty-back',backPlanner]];
-  for(const [selector,action] of actions){
-    const button=$(selector);
-    if(button)button.addEventListener('click',action);
+  // Bind before asynchronous trip restoration. A real anchor in HTML also
+  // provides native navigation if JavaScript does not initialize.
+  const button=$('#tw-back-planner');
+  if(button){
+    button.href=_plannerNavigationUrl_();
+    button.addEventListener('click',()=>{button.href=_plannerNavigationUrl_();});
   }
+  const empty=$('#tw-empty-back');
+  if(empty)empty.addEventListener('click',backPlanner);
 }
 
 function setupAllCitiesFloating(){
