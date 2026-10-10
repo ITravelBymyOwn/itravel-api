@@ -971,7 +971,8 @@ function verifiedTransportUrl(provider,route){
 }
 function localTransportMarket(route,need){
   const values=[route.origin,route.destination];
-  if(need?.need_type!=='intercity_transport' && values.some(v=>/\b(centro historico|historic center|historical center|plaza de armas|hotel|downtown|city center|casco antiguo)\b/i.test(normalizeKey(v))))return true;
+  // V183: A city-center pickup is not proof of local travel; regional legs often start there.
+  // Local walking/taxi-only journeys remain filtered by the mode rule below.
   const label=normalizeKey(`${need?.transport||''} ${need?.source_activity||''}`);
   return /\b(walk|walking|caminar|caminata|a pie|taxi local|local taxi)\b/.test(label) && need?.need_type!=='intercity_transport';
 }
