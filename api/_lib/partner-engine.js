@@ -855,7 +855,7 @@ function syntheticOfferId(slug,key='context'){ return `virtual:${slug}:${campaig
 function signedVirtualOffer({partner,targetUrl,placement,need={},city='',resolutionType='verified_affiliate',titleEs='',titleEn='',descriptionEs='',descriptionEn='',confidence='high',travelDate='',routeSegment=null}){
   if(!allowedPartnerUrl(partner.slug,targetUrl)||!hasRequiredAttribution(partner.slug,targetUrl))return null;
   return {
-    id:syntheticOfferId(partner.slug,`${placement}-${need?.id||city||'trip'}`),
+    id:syntheticOfferId(partner.slug,`${placement}-${need?.id||city||'trip'}-${routeSegment?.index||0}-${routeSegment?.commercial_origin||''}-${routeSegment?.commercial_destination||''}`),
     partner_id:null,offer_key:`${partner.slug}-${placement}`,need_type:clean(need?.need_type,80),placement,
     title_es:titleEs,title_en:titleEn,description_es:descriptionEs,description_en:descriptionEn,
     confidence,enabled:true,metadata:{source:'verified_affiliate_adapter'},target_url:undefined,
@@ -935,7 +935,7 @@ function twelveGoLegacyRouteMarket(need={},city=''){
   if(!raw||raw.startsWith('ITBMO_ROUTE_V1|'))return null;
   const parts=raw.split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).map(v=>clean(v,160).trim()).filter(Boolean);
   if(parts.length!==2)return null;
-  const mode=twelveGoCommercialMode(need?.transport||need?.entity_name||need?.source_activity||'');
+  const mode=twelveGoCommercialMode(need?.transport||need?.entity_name||need?.source_activity||'')||(need?._workspace_physical?'alternative':'');
   if(!mode)return null;
   let [origin,destination]=parts;
   const originAbstract=twelveGoAbstractAccessNode(origin),destinationAbstract=twelveGoAbstractAccessNode(destination);
@@ -984,6 +984,29 @@ function regionalPhysicalMarket({leg,need,index=0}){
   if(twelveGoAbstractAccessNode(origin)||twelveGoAbstractAccessNode(destination))return null;
   if(localTransportMarket({origin,destination},need))return null;
   return {origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode:'alternative',resolution:'physical_leg_unverified'};
+}
+// V182: Workspace sends the exact displayed physical legs separately as
+// transport_routes. Prior versions only consumed source_route on needs, which
+// may be absent or non-commerce-sealed for private/regionally planned legs.
+// This bridge preserves need_id so the UI can attach each partner CTA.
+function partnerWorkspaceRouteNeeds(needs=[],transportRoutes=[],city=''){
+  const base=Array.isArray(needs)?needs.filter(Boolean):[];
+  const byId=new Map(base.map(n=>[clean(n?.id,120),n]));
+  const extra=[];
+  for(const [i,raw] of (Array.isArray(transportRoutes)?transportRoutes:[]).slice(0,48).entries()){
+    const origin=clean(raw?.origin,120),destination=clean(raw?.destination,120);
+    const needId=clean(raw?.need_id,120);
+    if(!origin||!destination||normalizeKey(origin)===normalizeKey(destination))continue;
+    const original=byId.get(needId);
+    const needType=clean(original?.need_type||raw?.need_type,80)||'intercity_transport';
+    const mode=normalizeKey(`${original?.transport||''} ${raw?.mode||''}`);
+    if(needType==='transport_arrangement' && /\b(walk|walking|caminar|a pie|taxi local|local taxi)\b/.test(mode))continue;
+    const route={origin,destination};
+    if(localTransportMarket(route,{...original,need_type:needType}))continue;
+    const id=needId||`workspace-route:${i+1}`;
+    extra.push({...(original||{}),id,need_type:needType,city:clean(original?.city||city,160),travel_date:clean(raw?.travel_date||original?.travel_date,40),source_route:`${origin} → ${destination}`,transport:clean(raw?.mode||original?.transport,100),_workspace_physical:true});
+  }
+  return [...base,...extra];
 }
 function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
   const partner=virtualPartner('12go','12Go','transport'); const out=[]; const seen=new Set();
@@ -1081,7 +1104,7 @@ function bookawayPhysicalMarket({leg,city,need,index=0}){
 }
 function bookawayLegacyMarket(need={}){
   // Only explicitly intercity historic A→B needs; never local taxis.
-  if(need?.need_type!=='intercity_transport')return null;
+  if(need?.need_type!=='intercity_transport' && !need?._workspace_physical)return null;
   const raw=clean(need?.source_route,1000).trim();
   if(!raw||raw.startsWith('ITBMO_ROUTE_V1|'))return null;
   const parts=raw.split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).map(v=>clean(v,160).trim()).filter(Boolean);
@@ -1274,8 +1297,8 @@ export async function resolveCityOffers({
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[]),
-    Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,safeNeeds)),
-    Promise.resolve(resolveBookawayTransportOffers(safeCity,safeUiLanguage,safeNeeds,bookawayDestinations)),
+    Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity))),
+    Promise.resolve(resolveBookawayTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity),bookawayDestinations)),
     Promise.resolve(resolveDiscoverCarsOffers(safeCity,safeNeeds))
   ]);
   const labels=['viator','getyourguide','omio','12go','bookaway','discovercars'];
