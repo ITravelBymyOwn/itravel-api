@@ -736,7 +736,7 @@ function renderResolvedTransportSegments(item,matched=[]){
     return matched;
   };
   const offerMatches12GoLeg=(offer,leg,index)=>{
-    if((offer?.partner?.slug||'')!=='12go')return false;
+    if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return false;
     const markets=localizedMarkets(leg),seg=offer?.route_segment||{};
     const sameNeed=String(offer?.need_id||'')===String(item?.id||'');
     const sameIndex=Number(seg.index||0)===Number(leg.index||index+1);
@@ -749,11 +749,12 @@ function renderResolvedTransportSegments(item,matched=[]){
   const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
     const markets=localizedMarkets(leg),marketFrom=markets.from,marketTo=markets.to;
     const omioLegOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
-    const twelveGoLegOffers=(matched||[]).filter(o=>offerMatches12GoLeg(o,leg,index));
+    const twelveGoLegOffers=(matched||[]).filter(o=>offerMatches12GoLeg(o,leg,index)&&o?.partner?.slug==='12go');
+    const bookawayLegOffers=(matched||[]).filter(o=>offerMatches12GoLeg(o,leg,index)&&o?.partner?.slug==='bookaway');
     console.info('[ITBMO OMIO V63][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:omioLegOffers.length,button_expected:omioLegOffers.length>0,stop_reason:omioLegOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
     console.info('[ITBMO 12GO V160][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='12go').length,matched_offers:twelveGoLegOffers.length,button_expected:twelveGoLegOffers.length>0});
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
-    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${omioLegOffers.length?omioOptions(omioLegOffers):''}${twelveGoLegOffers.length?twelveGoOptions(twelveGoLegOffers):''}</div>`;
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${omioLegOffers.length?omioOptions(omioLegOffers):''}${twelveGoLegOffers.length?twelveGoOptions(twelveGoLegOffers):''}${bookawayLegOffers.length?partnerOptions(bookawayLegOffers):''}</div>`;
   }).join('')}</div>`:'';
   const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
   return commercial+logistics;
@@ -806,7 +807,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
         // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
         // outer need-card association suppress a valid feed offer after the UI
         // changed from one simple card to a parent card containing 1..N legs.
-        ? `${renderResolvedTransportSegments(item,offers)}${partnerOptions(matched.filter(offer=>!['omio','12go'].includes(offer?.partner?.slug||'')))}`
+        ? `${renderResolvedTransportSegments(item,offers)}${partnerOptions(matched.filter(offer=>!['omio','12go','bookaway'].includes(offer?.partner?.slug||'') || !(offer?.route_segment)))}`
         : partnerOptions(matched)}
     </article>`;
   }).join('')}</div>`;
