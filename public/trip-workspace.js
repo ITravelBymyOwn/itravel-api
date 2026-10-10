@@ -271,45 +271,71 @@ function rentalTransportTextMatches(value){
   if(!text) return false;
   return /\b(rental car|car rental|rent a car|rented car|alquiler de coche|coche de alquiler|alquiler de auto|auto de alquiler|vehiculo de alquiler|vehiculo rentado|carro de alquiler|aluguel de carro|carro alugado|voiture de location|location de voiture|mietwagen|autonoleggio|noleggio auto)\b/i.test(text);
 }
+// V177: Rental is a *date-window decision*, not an intercity segment.
+// Respect the traveler's city-wide choice. Per-day rental mentions remain scoped
+// to those days. Otherwise recommend only for evidenced regional road days.
 function rentalPlanForCity(cityName){
   const cityDays=days(cityName);
-  if(!cityDays.length) return null;
-
+  if(!cityDays.length)return null;
   const meta=data?.city_meta?.[cityName]||{};
   const metaTransport=String(meta?.transport||meta?.transportation||'').trim();
   const explicitWholeStay=rentalTransportTextMatches(metaTransport);
-  const rentalDays=[];
   const byDay=data?.itineraries?.[cityName]?.byDay||{};
-
-  cityDays.forEach(dayNumber=>{
-    const rows=Array.isArray(byDay?.[dayNumber])?byDay[dayNumber]:[];
-    const found=rows.some(row=>rentalTransportTextMatches(`${row?.transport||''} ${row?.notes||''}`));
-    if(found) rentalDays.push(dayNumber);
+  const explicitDays=[];
+  const recommendedDays=[];
+  const reasons=new Map();
+  const norm=v=>normalizeWorkspaceEntity(v||'');
+  const localTransport=/\b(a pie|walking|walk|caminata|peatonal|metro|subway|urban bus|bus urbano|taxi local|uber)\b/i;
+  const roadTransport=/\b(vehiculo privado|private vehicle|vehiculo terrestre|transporte turistico|tourist transport|carretera|road|auto|coche|carro|taxi contratado|hired driver|conductor privado)\b/i;
+  const riskText=/\b(nieve|snow|hielo|ice|icy|ventisca|blizzard|carretera cerrada|road closure|inundacion|flood|lluvia intensa|heavy rain|conduccion peligrosa|dangerous driving)\b/i;
+  cityDays.forEach(day=>{
+    const rows=Array.isArray(byDay?.[day])?byDay[day]:[];
+    // Only transport fields or an explicit traveler selection count as a rental
+    // commitment. Narrative notes can mention rentals as a hypothetical option.
+    if(rows.some(row=>rentalTransportTextMatches(row?.transport||''))){explicitDays.push(day);return;}
+    const moves=rows.filter(row=>{
+      const cc=row?.commerce_context||{};
+      const semantic=String(cc?.semantic_type||'').toUpperCase();
+      const activity=norm(row?.activity);
+      return semantic==='TRANSPORT'||/\b(traslado|regreso|retorno|transfer|drive|conducir|desplazamiento)\b/.test(activity);
+    });
+    const regional=moves.filter(row=>{
+      const from=norm(row?.from),to=norm(row?.to),transport=norm(row?.transport);
+      if(!from||!to||from===to||localTransport.test(transport))return false;
+      return roadTransport.test(transport);
+    });
+    const distinctStops=new Set(regional.map(row=>norm(row?.to)).filter(Boolean));
+    // Two meaningful regional legs plus two distinct endpoints demonstrate a
+    // multi-stop road itinerary. Avoid recommending cars for isolated transfers.
+    if(regional.length<2||distinctStops.size<2)return;
+    const risky=rows.some(row=>riskText.test(`${row?.notes||''} ${row?.transport||''}`));
+    // A risk is not a reason to push a rental: suppress proactive recommendations.
+    if(risky)return;
+    recommendedDays.push(day);
+    reasons.set(day,distinctStops.size);
   });
-
-  if(!explicitWholeStay && !rentalDays.length) return null;
-  const scopeDays=explicitWholeStay ? cityDays : [...new Set(rentalDays)].sort((a,b)=>a-b);
-  const wholeStay=explicitWholeStay || (scopeDays.length===cityDays.length && cityDays.every(d=>scopeDays.includes(d)));
-  const scopeLabel=wholeStay
-    ? t.rentalAll
-    : `${t.rentalDays} ${scopeDays.join(', ')}`;
-
+  const scopeDays=explicitWholeStay?cityDays:(explicitDays.length?explicitDays:recommendedDays);
+  if(!scopeDays.length)return null;
+  const userSelected=explicitWholeStay||explicitDays.length>0;
+  const wholeStay=explicitWholeStay||(userSelected&&scopeDays.length===cityDays.length);
+  const startDay=scopeDays[0],endDay=scopeDays[scopeDays.length-1];
+  const contiguous=scopeDays.every((d,i)=>i===0||d===scopeDays[i-1]+1);
+  // Non-consecutive days must not be presented as one continuous paid rental.
+  const scopeLabel=wholeStay?t.rentalAll:`${t.rentalDays} ${scopeDays.join(', ')}`;
+  const dateIso=day=>{const b=base(cityName);if(!b)return'';const d=addDays(b,day-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+  const explanation=userSelected
+    ? (lang==='es'?'Respetamos tu elección de vehículo alquilado. Comprueba recogida, devolución y condiciones para los días indicados.':'Your rental-car choice is respected. Check pickup, return and driving conditions for the indicated days.')
+    : (lang==='es'?'Tu ruta incluye varias conexiones regionales por carretera. Alquilar podría darte flexibilidad; compara también tours o transporte con conductor y verifica condiciones de conducción.':'Your route includes several regional road connections. A rental could add flexibility; also compare guided tours or a driver and check driving conditions.');
   return {
-    id:`workspace-rental:${normalizeWorkspaceEntity(cityName)||'city'}`,
-    category:'transport',
-    city:cityName,
-    day:'',
-    entity_name:t.rentalTitle,
-    entity_type:'transport',
-    need_type:'transport_arrangement',
-    confidence:explicitWholeStay?'high':'medium',
-    user_message:wholeStay?t.rentalMessageAll:t.rentalMessageDays,
-    source_activity:t.rentalTitle,
-    source_route:'',
-    transport:metaTransport || t.rentalTitle,
-    scope_label:scopeLabel,
-    source_summary:t.rentalSource,
-    rental_scope_days:scopeDays,
+    id:`workspace-rental:${norm(cityName)||'city'}:${scopeDays.join('-')}`,
+    category:'transport',city:cityName,day:'',entity_name:t.rentalTitle,entity_type:'transport',
+    need_type:'transport_arrangement',confidence:userSelected?'high':'medium',
+    user_message:explanation,source_activity:t.rentalTitle,source_route:'',
+    transport:'vehículo alquilado',scope_label:scopeLabel,
+    source_summary:userSelected?t.rentalSource:(lang==='es'?'Alternativa evaluada según tu recorrido regional':'Alternative assessed from your regional itinerary'),
+    rental_scope_days:scopeDays,rental_pickup_date:dateIso(startDay),
+    rental_dropoff_date:contiguous?dateIso(endDay+1):'',
+    rental_user_selected:userSelected,rental_contiguous:contiguous,
     derived_by:'workspace_rental_plan'
   };
 }
