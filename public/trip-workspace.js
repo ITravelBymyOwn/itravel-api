@@ -746,7 +746,8 @@ function renderResolvedTransportSegments(item,matched=[]){
   };
   const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)||offerMatches12GoLeg(o,leg,index)));
   const localLegs=allLegs.filter((leg,index)=>!legs.includes(leg));
-  const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
+  const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg)=>{
+    const index=allLegs.indexOf(leg);
     const markets=localizedMarkets(leg),marketFrom=markets.from,marketTo=markets.to;
     const omioLegOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
     const twelveGoLegOffers=(matched||[]).filter(o=>offerMatches12GoLeg(o,leg,index)&&o?.partner?.slug==='12go');
@@ -991,9 +992,10 @@ async function fetchPartnerOffers(action,needs=[]){
   // so no additional Vercel Function is introduced.
   const transport_routes=omioTransportRoutesForRequest(needs);
   const [cityOffers,omioOffers]=await Promise.all([
-    post({...baseBody,action:'resolve_city',transport_routes:[]}),
+    post({...baseBody,action:'resolve_city',transport_routes}),
     transport_routes.length?post({...baseBody,action:'lookup_omio_feed_routes',transport_routes}):Promise.resolve([])
   ]);
+  console.info('[ITBMO V183 TRANSPORT BRIDGE]',{city:city||'',routes_sent:transport_routes.length,city_partner_counts:cityOffers.reduce((acc,o)=>{const k=o?.partner?.slug||'unknown';acc[k]=(acc[k]||0)+1;return acc;},{}),omio_feed:omioOffers.length});
   const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
   console.info('[ITBMO OMIO V63][SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
   return [...experiences,...omioOffers];
