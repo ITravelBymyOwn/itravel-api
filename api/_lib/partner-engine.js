@@ -1020,6 +1020,32 @@ function bookawayCountryForRoute(route,need,city,destinations=[]){
   // from the text of a destination name or a made-up country lookup.
   return bookawayCountrySlug(match?.country_code||need?.country_code||need?.countryCode||'',match?.country||need?.country||'');
 }
+// V178: Bookaway's geographic candidate is independent of the 12Go
+// commercial-mode classifier. This extracts ONLY explicit physical markets;
+// it never asserts that Bookaway actually sells a ticket on that route.
+function bookawayPhysicalMarket({leg,city,need,index=0}){
+  let origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
+  let destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
+  const base=clean(city||need?.city,120);
+  const abstractOrigin=twelveGoAbstractAccessNode(origin);
+  const abstractDestination=twelveGoAbstractAccessNode(destination);
+  if(!leg?.commerce_eligible && !abstractOrigin && !abstractDestination)return null;
+  if(abstractOrigin && !abstractDestination && twelveGoEndpointSane(base) && normalizeKey(base)!==normalizeKey(destination))origin=base;
+  else if(abstractDestination && !abstractOrigin && twelveGoEndpointSane(base) && normalizeKey(origin)!==normalizeKey(base))destination=base;
+  else if(abstractOrigin||abstractDestination)return null;
+  if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
+  return {origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode:twelveGoCommercialMode(leg?.mode)||'alternative',resolution:'bookaway_physical_market'};
+}
+function bookawayLegacyMarket(need={}){
+  // Only explicitly intercity historic A→B needs; never local taxis.
+  if(need?.need_type!=='intercity_transport')return null;
+  const raw=clean(need?.source_route,1000).trim();
+  if(!raw||raw.startsWith('ITBMO_ROUTE_V1|'))return null;
+  const parts=raw.split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).map(v=>clean(v,160).trim()).filter(Boolean);
+  if(parts.length!==2||parts.some(t=>!twelveGoEndpointSane(t)||twelveGoAbstractAccessNode(t)))return null;
+  if(normalizeKey(parts[0])===normalizeKey(parts[1]))return null;
+  return {origin:parts[0],destination:parts[1],date:need?.travel_date||'',index:1,mode:'alternative',resolution:'bookaway_legacy_intercity'};
+}
 function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]){
   const partner=virtualPartner('bookaway','Bookaway','transport');
   const out=[]; const seen=new Set();
@@ -1030,15 +1056,14 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
     const candidates=[];
     if(payload?.legs?.length){
       payload.legs.forEach((leg,index)=>{
-        const route=twelveGoResolvedMarket({leg,city,need,index});
+        const route=bookawayPhysicalMarket({leg,city,need,index});
         if(route)candidates.push(route);
       });
     }else{
-      const route=twelveGoLegacyRouteMarket(need,city);
+      const route=bookawayLegacyMarket(need);
       if(route)candidates.push(route);
     }
     for(const route of candidates){
-      if(!['train','bus','ferry','van'].includes(route.mode))continue;
       const origin=twelveGoSlug(route.origin).toLowerCase();
       const destination=twelveGoSlug(route.destination).toLowerCase();
       if(!origin||!destination||origin===destination)continue;
