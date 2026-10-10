@@ -808,7 +808,17 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
         // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
         // outer need-card association suppress a valid feed offer after the UI
         // changed from one simple card to a parent card containing 1..N legs.
-        ? `${renderResolvedTransportSegments(item,offers)}${partnerOptions(matched.filter(offer=>!['omio','12go','bookaway'].includes(offer?.partner?.slug||'') || !(offer?.route_segment)))}`
+        ? `${renderResolvedTransportSegments(item,offers)}${partnerOptions(matched.filter(offer=>{
+            const slug=offer?.partner?.slug||'';
+            if(slug==='omio')return !offer?.route_segment;
+            if(!['12go','bookaway'].includes(slug))return true;
+            // V184: never silently discard a partner CTA merely because a route
+            // segment exists; show it on the parent when it did not bind to an
+            // actual displayed leg. The inner segment renderer still owns matches.
+            const seg=offer?.route_segment||{};
+            if(!seg.commercial_origin||!seg.commercial_destination)return true;
+            return !itemCommercialLegs.some(leg=>leg.from===normRoute(seg.commercial_origin)&&leg.to===normRoute(seg.commercial_destination));
+          }))}`
         : partnerOptions(matched)}
     </article>`;
   }).join('')}</div>`;
@@ -995,7 +1005,7 @@ async function fetchPartnerOffers(action,needs=[]){
     post({...baseBody,action:'resolve_city',transport_routes}),
     transport_routes.length?post({...baseBody,action:'lookup_omio_feed_routes',transport_routes}):Promise.resolve([])
   ]);
-  console.info('[ITBMO V183 TRANSPORT BRIDGE]',{city:city||'',routes_sent:transport_routes.length,city_partner_counts:cityOffers.reduce((acc,o)=>{const k=o?.partner?.slug||'unknown';acc[k]=(acc[k]||0)+1;return acc;},{}),omio_feed:omioOffers.length});
+  console.info('[ITBMO V184 TRANSPORT BRIDGE]',{city:city||'',routes_sent:transport_routes.length,city_partner_counts:cityOffers.reduce((acc,o)=>{const k=o?.partner?.slug||'unknown';acc[k]=(acc[k]||0)+1;return acc;},{}),omio_feed:omioOffers.length});
   const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
   console.info('[ITBMO OMIO V63][SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
   return [...experiences,...omioOffers];
