@@ -1065,13 +1065,26 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
   }
   return out;
 }
+// V177: This adapter consumes an explicit, date-scoped rental decision from
+// Workspace. It does NOT infer a rental from arbitrary intercity transfers.
 function resolveDiscoverCarsOffers(city,needs=[]){
-  const partner=virtualPartner('discovercars','DiscoverCars','car_rental'); const out=[];
+  const partner=virtualPartner('discovercars','DiscoverCars','car_rental');const out=[];
   for(const need of (Array.isArray(needs)?needs:[])){
-    const rental=/rental car|car rental|vehiculo rentado|coche de alquiler|auto de alquiler|carro de alquiler/i.test(`${need?.entity_name||''} ${need?.source_activity||''} ${need?.transport||''} ${need?.user_message||''}`);
-    if(need?.need_type!=='transport_arrangement'||!rental)continue;
+    const rental=need?.derived_by==='workspace_rental_plan' ||
+      (need?.need_type==='transport_arrangement'&&/rental car|car rental|vehiculo rentado|vehículo alquilado|coche de alquiler|auto de alquiler|carro de alquiler/i.test(`${need?.entity_name||''} ${need?.source_activity||''} ${need?.transport||''}`));
+    if(!rental)continue;
+    const selected=Boolean(need?.rental_user_selected);
+    const days=Array.isArray(need?.rental_scope_days)?need.rental_scope_days.filter(x=>Number.isInteger(x)&&x>0):[];
+    const scope=days.length?` · ${days.join(', ')}`:'';
+    // DiscoverCars search-field parameters have NOT been verified for this
+    // affiliate account. Preserve attribution; do not fabricate pickup dates.
     const targetUrl=appendParams('https://www.discovercars.com/',{a_aid:DISCOVERCARS_AID,data1:'itbmo',data2:campaignPart(city||'workspace')});
-    const offer=signedVirtualOffer({partner,targetUrl,placement:'city_car_rental',need,city,resolutionType:'verified_car_rental',titleEs:`Vehículo para ${city}`,titleEn:`Rental car for ${city}`,descriptionEs:'Compara opciones de alquiler para ejecutar esta parte de tu itinerario por tu cuenta.',descriptionEn:'Compare rental options to complete this part of your itinerary independently.',confidence:'high'});
+    const offer=signedVirtualOffer({partner,targetUrl,placement:'city_car_rental',need,city,
+      resolutionType:'affiliate_rental_comparison',confidence:selected?'high':'medium',
+      travelDate:need?.rental_pickup_date||'',
+      titleEs:`Comparar vehículos en ${city}${scope}`,titleEn:`Compare rental cars in ${city}${scope}`,
+      descriptionEs:selected?'Compara vehículos para los días que elegiste. Completa fechas, recogida y devolución en el proveedor.':'Compara alquiler para los días regionales indicados; revisa conducción, seguros y devolución. Fechas y disponibilidad se confirman con el proveedor.',
+      descriptionEn:selected?'Compare vehicles for your selected days. Enter dates, pickup and return with the provider.':'Compare rentals for the indicated regional days; check driving conditions, insurance and return logistics. Confirm dates and availability with the provider.'});
     if(offer)out.push(offer);
   }
   return out;
