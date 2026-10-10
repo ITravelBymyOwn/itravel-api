@@ -314,7 +314,7 @@ function hasRequiredAttribution(slug, rawUrl) {
         url.searchParams.get('utm_medium') === 'online_publisher' &&
         Boolean(url.searchParams.get('cmp'));
     }
-    if (slug === 'bookaway') return url.hostname.toLowerCase() === 'www.bookaway.com' && url.searchParams.get('offer_id') === BOOKAWAY_OFFER_ID && url.searchParams.get('aff_id') === BOOKAWAY_AFFILIATE_ID && (url.pathname === '/' || /^\/(?:[a-z]{2}\/)?s\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname));
+    if (slug === 'bookaway') return url.hostname.toLowerCase() === 'www.bookaway.com' && url.searchParams.get('offer_id') === BOOKAWAY_OFFER_ID && url.searchParams.get('aff_id') === BOOKAWAY_AFFILIATE_ID && (url.pathname === '/' || /^\/(?:[a-z]{2}\/)?(?:s|routes)\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname));
     if (slug === '12go') return url.searchParams.get('z') === TWELVEGO_PARTNER_ID && url.searchParams.get('sub_id') === 'itbmo';
     if (slug === 'discovercars') return url.searchParams.get('a_aid') === DISCOVERCARS_AID;
     if (slug === 'riseandshield') return url.searchParams.get('ref') === RISE_SHIELD_REF && url.searchParams.get('tm_source') === 'itbmo';
@@ -951,24 +951,66 @@ function twelveGoLegacyRouteMarket(need={},city=''){
   if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
   return {origin,destination,date:need?.travel_date||'',index:1,mode,resolution};
 }
+// V185: small audited publisher route inventory. This is DATA, not a global
+// rule that guesses coverage. Expand through authorized provider feeds or the
+// ITBMO_*_VERIFIED_ROUTES JSON environment catalogs. Dates/seat availability
+// are NOT verified by these landing-page references.
+const PUBLISHED_TRANSPORT_ROUTE_URLS = Object.freeze({
+  '12go': Object.freeze({
+    'ollantaytambo|cusco':'https://12go.asia/es/travel/ollantaytambo/cusco',
+    'cusco|ollantaytambo':'https://12go.asia/es/travel/cusco/ollantaytambo'
+  }),
+  bookaway: Object.freeze({
+    'ollantaytambo|cusco':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-cusco',
+    'cusco|ollantaytambo':'https://www.bookaway.com/es/routes/peru/cusco-to-ollantaytambo',
+    'ollantaytambo|machu picchu':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-machu-picchu',
+    'cusco|machu picchu':'https://www.bookaway.com/es/routes/peru/cusco-to-machu-picchu'
+  })
+});
+// Match explicit city-center pickup labels to their actual base city ONLY
+// when that base is supplied by the current itinerary. Never translate an
+// arbitrary narrative destination into a commercial city or station.
+function publisherEndpoint(value,baseCity=''){
+  const raw=clean(value,160).trim();
+  const base=clean(baseCity,120).trim();
+  if(!base)return raw;
+  const key=normalizeKey(raw),cityKey=normalizeKey(base);
+  if(key===cityKey)return base;
+  if(/^(centro historico|historic center|city center|downtown|centro de|centre ville)\b/.test(key) &&
+     (key.endsWith(` de ${cityKey}`)||key.endsWith(` of ${cityKey}`)||key.endsWith(` ${cityKey}`)))return base;
+  return raw;
+}
+function publishedMarketKey(route,city=''){
+  const a=publisherEndpoint(route.origin,city),b=publisherEndpoint(route.destination,city);
+  return `${normalizeKey(a)}|${normalizeKey(b)}`;
+}
 // V179: Only publisher-confirmed URLs may be represented as route-specific links.
 // Configure provider route catalogues through server-side JSON environment vars:
 // ITBMO_12GO_VERIFIED_ROUTES / ITBMO_BOOKAWAY_VERIFIED_ROUTES.
 // Each maps normalized "origin|destination" to an OFFICIALLY CONFIRMED URL.
-function verifiedTransportUrl(provider,route){
+function verifiedTransportUrl(provider,route,city=''){
   const envName=provider==='12go'?'ITBMO_12GO_VERIFIED_ROUTES':'ITBMO_BOOKAWAY_VERIFIED_ROUTES';
   let catalog={};
-  try{catalog=JSON.parse(process.env[envName]||'{}');}catch(_){return '';}
-  const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
-  const candidate=clean(catalog?.[key],1500);
+  try{catalog=JSON.parse(process.env[envName]||'{}');}catch(_){catalog={};}
+  if(!catalog||typeof catalog!=='object'||Array.isArray(catalog))catalog={};
+  const literalKey=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
+  const canonicalKey=publishedMarketKey(route,city);
+  // Explicit partner overrides take precedence. No fuzzy matching or URL
+  // generation from itinerary prose: a route is specific only if listed.
+  const candidate=clean(catalog[literalKey]||catalog[canonicalKey]||
+    PUBLISHED_TRANSPORT_ROUTE_URLS[provider]?.[canonicalKey]||'',1500);
   if(!candidate)return '';
   try{
-    const url=new URL(candidate);
-    const hostname=url.hostname.toLowerCase();
-    if(url.protocol!=='https:' || (provider==='12go' ? !['12go.asia','www.12go.asia'].includes(hostname) : !['bookaway.com','www.bookaway.com'].includes(hostname)))return '';
+    const url=new URL(candidate),hostname=url.hostname.toLowerCase();
+    if(url.protocol!=='https:' || (provider==='12go'
+      ? !['12go.asia','www.12go.asia'].includes(hostname)
+      : !['bookaway.com','www.bookaway.com'].includes(hostname)))return '';
+    if(provider==='12go'&&!/^\/(?:es|en)\/travel\/[^/]+\/[^/]+\/?$/.test(url.pathname))return '';
+    if(provider==='bookaway'&&!/^\/(?:[a-z]{2}\/)?routes\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname))return '';
     return url.toString();
   }catch(_){return '';}
 }
+
 function localTransportMarket(route,need){
   const values=[route.origin,route.destination];
   // V183: A city-center pickup is not proof of local travel; regional legs often start there.
@@ -1045,7 +1087,7 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
       const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b||normalizeKey(a)===normalizeKey(b))continue;
       const key=`${normalizeKey(a)}|${normalizeKey(b)}|${route.date||''}`; if(seen.has(key))continue; seen.add(key);
       const locale=normalizeLanguage(uiLanguage)==='es'?'es':'en';
-      const verified=verifiedTransportUrl('12go',route);
+      const verified=verifiedTransportUrl('12go',route,city);
       // No fabricated deep links for unverified private-car/regional markets.
       // A generic affiliate landing page is explicitly a MANUAL search.
       // V184: A slug is NOT evidence of a published 12Go route.
@@ -1133,7 +1175,7 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
       if(seen.has(key))continue;seen.add(key);
       // Bookaway's documented deep-link scheme requires an EXISTING Bookaway
       // route page. Country + slug alone does not establish route existence.
-      const verified=verifiedTransportUrl('bookaway',route);
+      const verified=verifiedTransportUrl('bookaway',route,city);
       const targetUrl=appendParams(verified||'https://www.bookaway.com/',{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
