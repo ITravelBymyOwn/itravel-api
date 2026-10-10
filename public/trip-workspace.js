@@ -795,7 +795,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
     <article class="tw-context-item${isRentalTransportNeed(item)?' tw-context-item--mobility-decision':''}${isMandatoryItineraryTour(item)?' tw-context-item--must':''}"${index>=visibleCount?' hidden data-context-extra="1"':''}>
       <div class="tw-context-item-top">
         ${scopeOrDay}
-        <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : contextLabel(item))}</span>
+        <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : ((item.need_type==='transport_arrangement' || item.need_type==='intercity_transport') && !matched.length && /(?:taxi local|local taxi|a pie|walking|caminar)/i.test(String(item.transport||'')+' '+String(item.source_summary||'')) ? (lang==='es'?'Transporte local recomendado':'Local transport recommended') : contextLabel(item)))}</span>
       </div>
       <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
       ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
