@@ -741,9 +741,9 @@ function renderResolvedTransportSegments(item,matched=[]){
     const markets=localizedMarkets(leg),seg=offer?.route_segment||{};
     const sameNeed=String(offer?.need_id||'')===String(item?.id||'');
     const sameIndex=Number(seg.index||0)===Number(leg.index||index+1);
-    const byIdentity=sameNeed&&sameIndex;
+    // V188: indices are not physical route identities. Require exact directional endpoints.
     const byRoute=sameNeed&&seg.commercial_origin&&seg.commercial_destination&&norm(seg.commercial_origin)===norm(markets.from)&&norm(seg.commercial_destination)===norm(markets.to);
-    return !!(byIdentity||byRoute);
+    return !!byRoute;
   };
   const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)||offerMatches12GoLeg(o,leg,index)));
   const localLegs=allLegs.filter((leg,index)=>!legs.includes(leg));
@@ -773,13 +773,32 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       from:normRoute((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
       to:normRoute((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
     })).filter(leg=>leg.from&&leg.to);
-    const matched=(Array.isArray(offers)?offers:[]).filter(offer=>{
-      if(offer?.need_id===item?.id) return true;
+    const rawMatched=(Array.isArray(offers)?offers:[]).filter(offer=>{
+      if(offer?.need_id===item?.id){
+        if(['12go','bookaway'].includes(offer?.partner?.slug||'')){
+          const seg=offer?.route_segment||{};
+          const route=String(item?.source_route||'');
+          // Plain A→B cards must never accept an unrelated verified edge.
+          if(!itemCommercialLegs.length){
+            const parts=route.split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).map(normRoute).filter(Boolean);
+            return parts.length===2&&parts[0]===normRoute(seg.commercial_origin)&&parts[1]===normRoute(seg.commercial_destination);
+          }
+        }
+        return true;
+      }
+      // V188: independent providers must never migrate to a different need/card.
+      if(['12go','bookaway'].includes(offer?.partner?.slug||''))return false;
       if(!itemCommercialLegs.length || offer?.placement!=='city_transport') return false;
       const seg=offer?.route_segment||{};
       const from=normRoute(seg.commercial_origin||''),to=normRoute(seg.commercial_destination||'');
       if(!from||!to) return false;
       return itemCommercialLegs.some(leg=>(leg.from===from&&leg.to===to) || (Number(seg.index||0)>0&&Number(seg.index)===leg.index&&leg.from===from&&leg.to===to));
+    });
+    const matched=rawMatched.filter((offer,i,arr)=>{
+      if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return true;
+      const seg=offer?.route_segment||{};
+      const key=o=>[o?.partner?.slug,normRoute(o?.route_segment?.commercial_origin),normRoute(o?.route_segment?.commercial_destination)].join('|');
+      return arr.findIndex(o=>key(o)===key(offer))===i;
     });
     const scopeOrDay=item?.scope_label
       ? `<span class="tw-context-day">${esc(item.scope_label)}</span>`
