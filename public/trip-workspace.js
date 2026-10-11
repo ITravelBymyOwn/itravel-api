@@ -742,7 +742,8 @@ function renderResolvedTransportSegments(item,matched=[]){
     const sameNeed=String(offer?.need_id||'')===String(item?.id||'');
     const sameIndex=Number(seg.index||0)===Number(leg.index||index+1);
     // V188: indices are not physical route identities. Require exact directional endpoints.
-    const byRoute=sameNeed&&seg.commercial_origin&&seg.commercial_destination&&norm(seg.commercial_origin)===norm(markets.from)&&norm(seg.commercial_destination)===norm(markets.to);
+    const canon=v=>v190CommercialEndpoint(v);
+    const byRoute=sameNeed&&seg.commercial_origin&&seg.commercial_destination&&canon(seg.commercial_origin)===canon(markets.from)&&canon(seg.commercial_destination)===canon(markets.to);
     return !!byRoute;
   };
   const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)||offerMatches12GoLeg(o,leg,index)));
@@ -762,44 +763,79 @@ function renderResolvedTransportSegments(item,matched=[]){
   return commercial+logistics;
 }
 
+// V190: provider offers may originate from synthetic itinerary-row needs while
+// the visible Context card has a different need_id. Bind by physical route AND
+// itinerary day/date, never by synthetic id or segment index alone.
+function v190CommercialEndpoint(value){
+  const key=normalizeWorkspaceEntity(value);
+  const centre=key.match(/^(?:centro historico|historic center|city center|downtown|centro de|centre ville) (?:de |of )?(.+)$/);
+  return centre&&centre[1]?centre[1]:key;
+}
+function v190NeedLegs(item){
+  const structured=parseResolvedRouteSource(item?.source_route);
+  if(structured?.legs?.length)return structured.legs.map(leg=>({
+    from:v190CommercialEndpoint((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
+    to:v190CommercialEndpoint((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
+  })).filter(x=>x.from&&x.to&&x.from!==x.to);
+  const parts=String(item?.source_route||'').split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/);
+  return parts.length===2?[{from:v190CommercialEndpoint(parts[0]),to:v190CommercialEndpoint(parts[1])}]:[];
+}
+function v190OfferMatchesNeed(offer,item){
+  if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return false;
+  const seg=offer?.route_segment||{};
+  const from=v190CommercialEndpoint(seg.commercial_origin),to=v190CommercialEndpoint(seg.commercial_destination);
+  if(!from||!to||from===to)return false;
+  const legs=v190NeedLegs(item);
+  if(!legs.some(leg=>leg.from===from&&leg.to===to))return false;
+  // Explicit dates must agree; if one side has no date, use the trip day when
+  // available. A missing date must not erase an otherwise exact physical match.
+  const normalizeDate=value=>{const raw=String(value||'').trim();const parsed=parseDate(raw);return parsed?`${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`:raw.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');};
+  const itemDate=normalizeDate(item?.travel_date||dayDate(city,item?.day)||'');
+  const offerDate=normalizeDate(offer?.travel_date||'');
+  if(itemDate&&offerDate&&itemDate!==offerDate)return false;
+  return true;
+}
+function v190UniqueMobilityOffers(offers){
+  const seen=new Set();return (offers||[]).filter(offer=>{
+    if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return true;
+    const seg=offer?.route_segment||{};
+    const key=[offer.partner.slug,v190CommercialEndpoint(seg.commercial_origin),v190CommercialEndpoint(seg.commercial_destination)].join('|');
+    if(seen.has(key))return false;seen.add(key);return true;
+  });
+}
 function renderNeedItems(items,offers=[],visibleCount=Infinity){
   if(!items.length)return'';
   const ordered=items;
   return `<div class="tw-context-list">${ordered.map((item,index)=>{
     const itemRoute=(item?.need_type==='intercity_transport' || item?.need_type==='transport_arrangement') ? parseResolvedRouteSource(item?.source_route) : null;
     const normRoute=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    // V189: canonicalize an itinerary city-centre label to the commercial city,
+    // but ONLY when the full city name is explicitly present. Never fuzzy-match Chinchero to Ollantaytambo.
+    const commercialEndpoint=value=>{
+      const key=normRoute(value);
+      const centre=key.match(/^(?:centro historico|historic center|city center|downtown|centro de|centre ville) (?:de |of )?(.+)$/);
+      return centre&&centre[1]?centre[1]:key;
+    };
+    const samePhysicalLeg=(from,to,seg)=>commercialEndpoint(from)===commercialEndpoint(seg?.commercial_origin)&&commercialEndpoint(to)===commercialEndpoint(seg?.commercial_destination);
+
     const itemCommercialLegs=(itemRoute?.legs||[]).map(leg=>({
       index:Number(leg.index||0),
       from:normRoute((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
       to:normRoute((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
     })).filter(leg=>leg.from&&leg.to);
     const rawMatched=(Array.isArray(offers)?offers:[]).filter(offer=>{
-      if(offer?.need_id===item?.id){
-        if(['12go','bookaway'].includes(offer?.partner?.slug||'')){
-          const seg=offer?.route_segment||{};
-          const route=String(item?.source_route||'');
-          // Plain A→B cards must never accept an unrelated verified edge.
-          if(!itemCommercialLegs.length){
-            const parts=route.split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).map(normRoute).filter(Boolean);
-            return parts.length===2&&parts[0]===normRoute(seg.commercial_origin)&&parts[1]===normRoute(seg.commercial_destination);
-          }
-        }
-        return true;
+      if(['12go','bookaway'].includes(offer?.partner?.slug||'')){
+        return v190OfferMatchesNeed(offer,item);
       }
-      // V188: independent providers must never migrate to a different need/card.
-      if(['12go','bookaway'].includes(offer?.partner?.slug||''))return false;
-      if(!itemCommercialLegs.length || offer?.placement!=='city_transport') return false;
+      // Preserve existing Omio matching and all other affiliates unchanged.
+      if(offer?.need_id===item?.id)return true;
+      if(!itemCommercialLegs.length || offer?.placement!=='city_transport')return false;
       const seg=offer?.route_segment||{};
       const from=normRoute(seg.commercial_origin||''),to=normRoute(seg.commercial_destination||'');
-      if(!from||!to) return false;
+      if(!from||!to)return false;
       return itemCommercialLegs.some(leg=>(leg.from===from&&leg.to===to) || (Number(seg.index||0)>0&&Number(seg.index)===leg.index&&leg.from===from&&leg.to===to));
     });
-    const matched=rawMatched.filter((offer,i,arr)=>{
-      if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return true;
-      const seg=offer?.route_segment||{};
-      const key=o=>[o?.partner?.slug,normRoute(o?.route_segment?.commercial_origin),normRoute(o?.route_segment?.commercial_destination)].join('|');
-      return arr.findIndex(o=>key(o)===key(offer))===i;
-    });
+    const matched=v190UniqueMobilityOffers(rawMatched);
     const scopeOrDay=item?.scope_label
       ? `<span class="tw-context-day">${esc(item.scope_label)}</span>`
       : item.day
@@ -828,7 +864,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
         // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
         // outer need-card association suppress a valid feed offer after the UI
         // changed from one simple card to a parent card containing 1..N legs.
-        ? `${renderResolvedTransportSegments(item,offers)}${partnerOptions(matched.filter(offer=>{
+        ? `${renderResolvedTransportSegments(item,[...offers.filter(o=>(o?.partner?.slug||'')==='omio'),...matched.filter(o=>['12go','bookaway'].includes(o?.partner?.slug||''))])}${partnerOptions(matched.filter(offer=>{
             const slug=offer?.partner?.slug||'';
             if(slug==='omio')return !offer?.route_segment;
             if(!['12go','bookaway'].includes(slug))return true;
@@ -837,7 +873,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
             // actual displayed leg. The inner segment renderer still owns matches.
             const seg=offer?.route_segment||{};
             if(!seg.commercial_origin||!seg.commercial_destination)return true;
-            return !itemCommercialLegs.some(leg=>leg.from===normRoute(seg.commercial_origin)&&leg.to===normRoute(seg.commercial_destination));
+            return !itemCommercialLegs.some(leg=>samePhysicalLeg(leg.from,leg.to,seg));
           }))}`
         : partnerOptions(matched)}
     </article>`;
