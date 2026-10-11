@@ -616,6 +616,7 @@ function contextualNeedsForCity(cityName,needs){
     return !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
   const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
+  merged.push(...v187ProviderMobilityNeeds(cityName,merged));
   // Ticket/access needs are first-class deterministic data. V3 emits
   // commerce_context on each row; use it directly so subdestination cards do
   // not depend on the parent planning-unit classifier.
@@ -974,6 +975,33 @@ function omioTransportRoutesForRequest(needs=[]){
   console.groupEnd();
   return out;
 }
+// V187: independent mobility extraction for 12Go and Bookaway.
+// Omio continues to use omioTransportRoutesForRequest() without changes.
+function v187ProviderMobilityNeeds(cityName,existing=[]){
+  const out=[];const seen=new Set((existing||[]).map(n=>normalizeWorkspaceEntity(n?.source_route||'')+'|'+String(n?.day||'')));
+  const unit=data?.itineraries?.[cityName];if(!unit)return out;
+  const baseDate=parseDate(unit.baseDate||'');
+  for(const dayNo of Object.keys(unit.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b)){
+    const rows=Array.isArray(unit.byDay[dayNo])?unit.byDay[dayNo]:[];
+    rows.forEach((row,index)=>{
+      const from=String(row?.from||'').trim(),to=String(row?.to||'').trim();
+      if(!from||!to||normalizeWorkspaceEntity(from)===normalizeWorkspaceEntity(to))return;
+      const movement=String(row?.transport||'')+' '+String(row?.activity||'');
+      const isTransfer=/\b(traslado|transfer|transporte|transport|tren|train|ferrocarril|rail|bus|autobus|shuttle|van|ferry|ferri|barco|boat|regreso|return|ida|outbound|vehiculo|vehicle|carretera|road)\b/i.test(movement);
+      if(!isTransfer)return;
+      // Ignore routine urban walking and local taxi hops. Regional journeys
+      // remain eligible even when ITBMO recommends a private vehicle.
+      if(/\b(a pie|walking|caminar|caminata|taxi local|local taxi)\b/i.test(movement)&&!/(tren|train|ferrocarril|rail|bus|autobus|ferry|regreso regional|regional transfer)/i.test(movement))return;
+      const source=`${from} → ${to}`,key=normalizeWorkspaceEntity(source)+'|'+dayNo;
+      if(seen.has(key))return;seen.add(key);
+      out.push({id:`v187-mobility:${cityName}:${dayNo}:${index+1}`,category:'transport',need_type:'transport_arrangement',city:cityName,day:dayNo,
+        travel_date:baseDate?fmt(addDays(baseDate,dayNo-1)):'',entity_name:source,source_activity:String(row?.activity||''),source_route:source,
+        transport:String(row?.transport||''),derived_by:'v187_physical_itinerary',
+        user_message:lang==='es'?'Compara alternativas para este desplazamiento; conserva el medio elegido si lo prefieres.':'Compare alternatives for this journey; keep your chosen mode if preferred.'});
+    });
+  }
+  return out;
+}
 async function fetchPartnerOffers(action,needs=[]){
   const token=getStoredSessionToken();if(!data?.trip_id)return[];
   const baseBody={session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs};
@@ -1001,11 +1029,12 @@ async function fetchPartnerOffers(action,needs=[]){
   // suppressing a valid mobility CTA. It uses the same /api/partners function,
   // so no additional Vercel Function is introduced.
   const transport_routes=omioTransportRoutesForRequest(needs);
+  const mobilityNeeds=v187ProviderMobilityNeeds(city||'',needs);
   const [cityOffers,omioOffers]=await Promise.all([
-    post({...baseBody,action:'resolve_city',transport_routes}),
+    post({...baseBody,needs:[...needs,...mobilityNeeds],action:'resolve_city',transport_routes}),
     transport_routes.length?post({...baseBody,action:'lookup_omio_feed_routes',transport_routes}):Promise.resolve([])
   ]);
-  console.info('[ITBMO V184 TRANSPORT BRIDGE]',{city:city||'',routes_sent:transport_routes.length,city_partner_counts:cityOffers.reduce((acc,o)=>{const k=o?.partner?.slug||'unknown';acc[k]=(acc[k]||0)+1;return acc;},{}),omio_feed:omioOffers.length});
+  console.info('[ITBMO V187 TRANSPORT BRIDGE]',{city:city||'',routes_sent:transport_routes.length,city_partner_counts:cityOffers.reduce((acc,o)=>{const k=o?.partner?.slug||'unknown';acc[k]=(acc[k]||0)+1;return acc;},{}),omio_feed:omioOffers.length});
   const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
   console.info('[ITBMO OMIO V63][SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
   return [...experiences,...omioOffers];
