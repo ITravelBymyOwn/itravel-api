@@ -1174,7 +1174,7 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
       // selects their date at 12Go; never send a malformed prefilled date.
       const targetUrl=appendParams(base,{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
-      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:verified?'provider_verified_route':'manual_affiliate_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60)},titleEs:label,titleEn:label,descriptionEs:direct?'Busca opciones para este tramo en 12Go. Confirma disponibilidad con el proveedor.':`Búsqueda manual en 12Go: introduce ${label}; no se ha validado un enlace directo.`,descriptionEn:direct?'Search this leg on 12Go; confirm availability with the provider.':`Manual search on 12Go: enter ${label}; no direct route link has been verified.`,confidence:'medium'});
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:verified?'provider_verified_route':'manual_affiliate_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60),journey_origin:clean(route.journey_origin||'',120),journey_destination:clean(route.journey_destination||'',120)},titleEs:label,titleEn:label,descriptionEs:direct?'Busca opciones para este tramo en 12Go. Confirma disponibilidad con el proveedor.':`Búsqueda manual en 12Go: introduce ${label}; no se ha validado un enlace directo.`,descriptionEn:direct?'Search this leg on 12Go; confirm availability with the provider.':`Manual search on 12Go: enter ${label}; no direct route link has been verified.`,confidence:'medium'});
       if(offer)out.push(offer);
     }
   }
@@ -1261,7 +1261,7 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
         resolutionType:verified?'provider_verified_route':'manual_affiliate_search',confidence:verified?'high':'low',travelDate:route.date||'',
-        routeSegment:{index:Number(route.index||1),mode:route.mode,commercial_origin:route.origin,commercial_destination:route.destination},
+        routeSegment:{index:Number(route.index||1),mode:route.mode,commercial_origin:route.origin,commercial_destination:route.destination,market_resolution:clean(route.resolution||'',60),journey_origin:clean(route.journey_origin||'',120),journey_destination:clean(route.journey_destination||'',120)},
         titleEs:`Bookaway · ${label}`,titleEn:`Bookaway · ${label}`,
         descriptionEs:verified?'Consulta este trayecto en Bookaway; confirma horarios y disponibilidad.':`Búsqueda manual en Bookaway: introduce ${label}. No hay un enlace específico validado para este tramo.`,
         descriptionEn:verified?'Check this route on Bookaway; confirm schedules and availability.':`Manual search on Bookaway: enter ${label}. No validated route-specific link is available.`});
