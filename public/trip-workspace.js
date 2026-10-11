@@ -617,6 +617,7 @@ function contextualNeedsForCity(cityName,needs){
   });
   const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
   merged.push(...v187ProviderMobilityNeeds(cityName,merged));
+  merged.push(...v192ExcursionMobilityNeeds(cityName,merged));
   // Ticket/access needs are first-class deterministic data. V3 emits
   // commerce_context on each row; use it directly so subdestination cards do
   // not depend on the parent planning-unit classifier.
@@ -786,7 +787,12 @@ function v190OfferMatchesNeed(offer,item){
   const from=v190CommercialEndpoint(seg.commercial_origin),to=v190CommercialEndpoint(seg.commercial_destination);
   if(!from||!to||from===to)return false;
   const legs=v190NeedLegs(item);
-  if(!legs.some(leg=>leg.from===from&&leg.to===to))return false;
+  const exactLeg=legs.some(leg=>leg.from===from&&leg.to===to);
+  const verifiedJourneyLeg=item?.derived_by==='v192_explicit_excursion_mobility' &&
+    seg.market_resolution==='v187_publisher_graph' &&
+    v190CommercialEndpoint(seg.journey_origin)===legs[0]?.from &&
+    v190CommercialEndpoint(seg.journey_destination)===legs[0]?.to;
+  if(!exactLeg&&!verifiedJourneyLeg)return false;
   // Explicit dates must agree; if one side has no date, use the trip day when
   // available. A missing date must not erase an otherwise exact physical match.
   const normalizeDate=value=>{const raw=String(value||'').trim();const parsed=parseDate(raw);return parsed?`${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`:raw.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');};
@@ -836,6 +842,9 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       return itemCommercialLegs.some(leg=>(leg.from===from&&leg.to===to) || (Number(seg.index||0)>0&&Number(seg.index)===leg.index&&leg.from===from&&leg.to===to));
     });
     const matched=v190UniqueMobilityOffers(rawMatched);
+    const mobilityOffersForCard=item.derived_by==='v192_explicit_excursion_mobility'
+      ? matched.map(offer=>({...offer,partner:{...offer.partner,name:`${offer.partner?.name||''} · ${offer.route_segment?.commercial_origin||''} → ${offer.route_segment?.commercial_destination||''}`}}))
+      : matched;
     const scopeOrDay=item?.scope_label
       ? `<span class="tw-context-day">${esc(item.scope_label)}</span>`
       : item.day
@@ -851,10 +860,11 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
     <article class="tw-context-item${isRentalTransportNeed(item)?' tw-context-item--mobility-decision':''}${isMandatoryItineraryTour(item)?' tw-context-item--must':''}"${index>=visibleCount?' hidden data-context-extra="1"':''}>
       <div class="tw-context-item-top">
         ${scopeOrDay}
-        <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : ((item.need_type==='transport_arrangement' || item.need_type==='intercity_transport') && !matched.length && /(?:taxi local|local taxi|a pie|walking|caminar)/i.test(String(item.transport||'')+' '+String(item.source_summary||'')) ? (lang==='es'?'Transporte local recomendado':'Local transport recommended') : contextLabel(item)))}</span>
+        <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : ((item.need_type==='transport_arrangement' || item.need_type==='intercity_transport') && !matched.length && /(?:taxi local|local taxi|a pie|walking|caminar)/i.test(String(item.transport||'')+' '+String(item.source_summary||'')) ? (lang==='es'?'Transporte local recomendado':'Local transport recommended') : ((item.need_type==='transport_arrangement'||item.need_type==='intercity_transport') && !matched.length && (item.transport||item.source_route) ? (lang==='es'?'Transporte recomendado':'Suggested transport') : contextLabel(item))))}</span>
       </div>
       <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
       ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
+      ${item.derived_by==='v192_explicit_excursion_mobility'&&matched.length?`<small class="tw-context-source">${esc(lang==='es'?'Cada botón corresponde al tramo indicado por el proveedor; comprueba qué conexiones y accesos quedan incluidos.':'Each button covers the provider-listed leg; check which connections and access services are included.')}</small>`:''}
       ${originalNote?`<details class="tw-context-original-note"><summary><span>${esc(t.details)} ＋</span><span>${esc(t.hide)} −</span></summary><div><small>${esc(t.notes)}</small><p>${esc(originalNote)}</p></div></details>`:''}
       ${sourceCopy?`<small class="tw-context-source">${sourceCopy}</small>`:''}
       ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && !parseResolvedRouteSource(item.source_route)
@@ -875,15 +885,31 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
             if(!seg.commercial_origin||!seg.commercial_destination)return true;
             return !itemCommercialLegs.some(leg=>samePhysicalLeg(leg.from,leg.to,seg));
           }))}`
-        : partnerOptions(matched)}
+        : partnerOptions(mobilityOffersForCard)}
     </article>`;
   }).join('')}</div>`;
 }
 
+// V192: remove routine pedestrian hops from the display, without affecting
+// provider generation or the authoritative itinerary. Do not suppress any
+// transport card with an actual commercial offer.
+function v192VisibleContextItems(items,offers,sectionType){
+  if(sectionType!=='transport')return items;
+  return items.filter(item=>{
+    if(!['transport_arrangement','intercity_transport'].includes(item?.need_type))return true;
+    if(isRentalTransportNeed(item))return true;
+    if((offers||[]).some(offer=>v190OfferMatchesNeed(offer,item)))return true;
+    const text=normalizeWorkspaceEntity(`${item.transport||''} ${item.source_summary||''} ${item.user_message||''}`);
+    const walk=/\b(a pie|walking|walk|caminar|caminata|on foot)\b/.test(text);
+    const regional=/\b(tren|train|rail|bus interurbano|regional|intercity|ferry|barco|boat)\b/.test(text);
+    return !(walk&&!regional);
+  });
+}
 function contextSection(icon,title,description,items,offers=[],sectionId='',sectionType=''){
   if(!items.length)return'';
   const id=sectionId?` id="${esc(sectionId)}"`:'';
-  const ordered=sectionSort(items,sectionType);
+  const ordered=sectionSort(v192VisibleContextItems(items,offers,sectionType),sectionType);
+  if(!ordered.length)return'';
   const sectionKey=`${city||''}:${sectionId||sectionType}`;
   const expanded=expandedContextSections.has(sectionKey);
   const initialLimit=initialSectionLimit(ordered,sectionType);
@@ -898,7 +924,7 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
       <div class="tw-context-section-copy">
         <div class="tw-context-section-title">
           <h3>${esc(title)}</h3>
-          <span>${items.length}</span>
+          <span>${ordered.length}</span>
         </div>
         <p>${esc(description)}</p>
       </div>
@@ -1032,6 +1058,37 @@ function omioTransportRoutesForRequest(needs=[]){
 }
 // V187: independent mobility extraction for 12Go and Bookaway.
 // Omio continues to use omioTransportRoutesForRequest() without changes.
+// V192: derive an excursion's transport need from explicit itinerary evidence,
+// even when the row has no from/to transfer pair. The provider graph, not this
+// extractor, decides whether a route is commercially documented. No destination
+// names or guessed connections are embedded here.
+function v192ExcursionMobilityNeeds(cityName,existing=[]){
+  const out=[];const seen=new Set();
+  const base=data?.itineraries?.[cityName];if(!base)return out;
+  const dateBase=parseDate(base.baseDate||'');
+  const existingLegs=new Set((existing||[]).flatMap(need=>v190NeedLegs(need).map(leg=>`${need.day||''}|${leg.from}|${leg.to}`)));
+  workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
+    const cc=row?.commerce_context||{};
+    const activity=String(row?.activity||'');
+    const narrative=normalizeWorkspaceEntity(`${activity} ${row?.notes||''} ${row?.transport||''}`);
+    // An attraction alone does not establish a mobility requirement. Require
+    // explicit interregional rail/boat/bus or excursion logistics in the row.
+    const mobilityEvidence=/\b(tren|train|ferrocarril|railway|railroad|ferry|ferri|barco|boat|bus interurbano|intercity bus|bus turistico|tourist bus|traslado regional|regional transfer|servicio bimodal|bimodal)\b/.test(narrative);
+    if(!mobilityEvidence)return;
+    const target=String(cc.canonical_place||cc.physical_destination||row?.physical_location||row?.to||'').trim();
+    if(!target||sameWorkspaceEntity(target,cityName))return;
+    // Never turn a route to an intermediate stop into a new complete journey.
+    const origin=cityName;
+    const key=`${day}|${v190CommercialEndpoint(origin)}|${v190CommercialEndpoint(target)}`;
+    if(seen.has(key)||existingLegs.has(key))return;
+    seen.add(key);
+    out.push({id:`v192-excursion:${cityName}:${day}:${index+1}`,category:'transport',need_type:'transport_arrangement',city:cityName,day,
+      travel_date:dateBase?fmt(addDays(dateBase,day-1)):'',entity_name:lang==='es'?`Transporte para ${target}`:`Transport to ${target}`,
+      source_activity:activity,source_route:`${origin} → ${target}`,transport:String(row?.transport||''),derived_by:'v192_explicit_excursion_mobility',
+      user_message:lang==='es'?'Compara los tramos comerciales publicados. Una conexión parcial no incluye necesariamente el recorrido completo ni el acceso final.':'Compare published commercial legs. A partial connection does not necessarily cover the full journey or final access.'});
+  });
+  return out;
+}
 function v187ProviderMobilityNeeds(cityName,existing=[]){
   const out=[];const seen=new Set((existing||[]).map(n=>normalizeWorkspaceEntity(n?.source_route||'')+'|'+String(n?.day||'')));
   const unit=data?.itineraries?.[cityName];if(!unit)return out;
