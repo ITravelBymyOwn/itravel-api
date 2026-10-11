@@ -1166,7 +1166,9 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
       seen.add(key);
       const direct=true;
       const base=verified;
-      const targetUrl=appendParams(base,{date:direct?(route.date||undefined):undefined,z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
+      // V190: dates from the Workspace may be localized display strings. The traveler
+      // selects their date at 12Go; never send a malformed prefilled date.
+      const targetUrl=appendParams(base,{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:verified?'provider_verified_route':'manual_affiliate_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60)},titleEs:label,titleEn:label,descriptionEs:direct?'Busca opciones para este tramo en 12Go. Confirma disponibilidad con el proveedor.':`Búsqueda manual en 12Go: introduce ${label}; no se ha validado un enlace directo.`,descriptionEn:direct?'Search this leg on 12Go; confirm availability with the provider.':`Manual search on 12Go: enter ${label}; no direct route link has been verified.`,confidence:'medium'});
       if(offer)out.push(offer);
