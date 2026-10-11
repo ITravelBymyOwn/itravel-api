@@ -1154,15 +1154,18 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
     for(const route of candidates){
       if(!route.verified_url&&localTransportMarket(route,need))continue;
       const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b||normalizeKey(a)===normalizeKey(b))continue;
-      const key=`${normalizeKey(a)}|${normalizeKey(b)}|${route.date||''}`; if(seen.has(key))continue; seen.add(key);
+      const key=`${clean(need?.id,120)}|${v187RouteKey(route.origin,city)}|${v187RouteKey(route.destination,city)}`; if(seen.has(key))continue;
       const locale=normalizeLanguage(uiLanguage)==='es'?'es':'en';
       const verified=route.verified_url||verifiedTransportUrl('12go',route,city);
       // No fabricated deep links for unverified private-car/regional markets.
       // A generic affiliate landing page is explicitly a MANUAL search.
       // V184: A slug is NOT evidence of a published 12Go route.
       // Never turn editorial place names into /travel/A/B/ (404).
-      const direct=Boolean(verified);
-      const base=verified||`https://12go.asia/${locale}`;
+      // V188: never emit a generic landing-page CTA as evidence of route existence.
+      if(!verified)continue;
+      seen.add(key);
+      const direct=true;
+      const base=verified;
       const targetUrl=appendParams(base,{date:direct?(route.date||undefined):undefined,z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:verified?'provider_verified_route':'manual_affiliate_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60)},titleEs:label,titleEn:label,descriptionEs:direct?'Busca opciones para este tramo en 12Go. Confirma disponibilidad con el proveedor.':`Búsqueda manual en 12Go: introduce ${label}; no se ha validado un enlace directo.`,descriptionEn:direct?'Search this leg on 12Go; confirm availability with the provider.':`Manual search on 12Go: enter ${label}; no direct route link has been verified.`,confidence:'medium'});
@@ -1240,12 +1243,15 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
     else{const route=bookawayLegacyMarket(need);if(route)candidates.push(route);}
     for(const route of candidates){
       if(!route.verified_url&&localTransportMarket(route,need))continue;
-      const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}|${route.date||''}`;
-      if(seen.has(key))continue;seen.add(key);
+      const key=`${clean(need?.id,120)}|${v187RouteKey(route.origin,city)}|${v187RouteKey(route.destination,city)}`;
+      if(seen.has(key))continue;
       // Bookaway's documented deep-link scheme requires an EXISTING Bookaway
       // route page. Country + slug alone does not establish route existence.
       const verified=route.verified_url||verifiedTransportUrl('bookaway',route,city);
-      const targetUrl=appendParams(verified||'https://www.bookaway.com/',{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+      // V188: verified publisher routes only; generic home searches are not commercial matches.
+      if(!verified)continue;
+      seen.add(key);
+      const targetUrl=appendParams(verified,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
         resolutionType:verified?'provider_verified_route':'manual_affiliate_search',confidence:verified?'high':'low',travelDate:route.date||'',
