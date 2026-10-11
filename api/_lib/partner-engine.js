@@ -958,13 +958,17 @@ function twelveGoLegacyRouteMarket(need={},city=''){
 const PUBLISHED_TRANSPORT_ROUTE_URLS = Object.freeze({
   '12go': Object.freeze({
     'ollantaytambo|cusco':'https://12go.asia/es/travel/ollantaytambo/cusco',
-    'cusco|ollantaytambo':'https://12go.asia/es/travel/cusco/ollantaytambo'
+    'cusco|ollantaytambo':'https://12go.asia/es/travel/cusco/ollantaytambo',
+    'ollantaytambo|machu picchu':'https://12go.asia/es/travel/ollantaytambo/machu-picchu',
+    'machu picchu|ollantaytambo':'https://12go.asia/es/travel/machu-picchu/ollantaytambo'
   }),
   bookaway: Object.freeze({
     'ollantaytambo|cusco':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-cusco',
     'cusco|ollantaytambo':'https://www.bookaway.com/es/routes/peru/cusco-to-ollantaytambo',
     'ollantaytambo|machu picchu':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-machu-picchu',
-    'cusco|machu picchu':'https://www.bookaway.com/es/routes/peru/cusco-to-machu-picchu'
+    'cusco|machu picchu':'https://www.bookaway.com/es/routes/peru/cusco-to-machu-picchu',
+    'machu picchu|ollantaytambo':'https://www.bookaway.com/es/routes/peru/machu-picchu-to-ollantaytambo',
+    'machu picchu|cusco':'https://www.bookaway.com/routes/peru/machu-picchu-to-cusco'
   })
 });
 // Match explicit city-center pickup labels to their actual base city ONLY
