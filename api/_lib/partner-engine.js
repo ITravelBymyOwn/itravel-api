@@ -1011,6 +1011,75 @@ function verifiedTransportUrl(provider,route,city=''){
   }catch(_){return '';}
 }
 
+// V187: publisher-evidenced route graph. Edges are confirmed publisher pages,
+// never guessed slugs. This registry is DATA, not a Cusco-specific algorithm.
+// Additional edges can be supplied through ITBMO_*_VERIFIED_ROUTES JSON.
+function v187RouteRegistry(provider){
+  const envName=provider==='12go'?'ITBMO_12GO_VERIFIED_ROUTES':'ITBMO_BOOKAWAY_VERIFIED_ROUTES';
+  let configured={};try{configured=JSON.parse(process.env[envName]||'{}');}catch(_){configured={};}
+  const entries={...(PUBLISHED_TRANSPORT_ROUTE_URLS[provider]||{}),...(configured&&typeof configured==='object'&&!Array.isArray(configured)?configured:{})};
+  const edges=[];
+  for(const [key,url] of Object.entries(entries)){
+    const parts=key.split('|');if(parts.length!==2||!parts[0]||!parts[1])continue;
+    const route={origin:parts[0],destination:parts[1]};
+    // URL must pass existing host/path checks before becoming an edge.
+    if(!verifiedTransportUrl(provider,route))continue;
+    edges.push({origin:parts[0],destination:parts[1],url:verifiedTransportUrl(provider,route)});
+  }
+  return edges;
+}
+function v187RouteKey(value,city=''){
+  const raw=publisherEndpoint(value,city);
+  return normalizeKey(raw).replace(/^(?:ciudadela de|santuario historico de|historical sanctuary of|historic sanctuary of)\s+/,'').replace(/\b(pueblo|town)\b/g,' ').replace(/\s+/g,' ').trim();
+}
+function v187VerifiedPaths(provider,origin,destination,city=''){
+  const start=v187RouteKey(origin,city),goal=v187RouteKey(destination,city);
+  if(!start||!goal||start===goal)return [];
+  const edges=v187RouteRegistry(provider);
+  const adjacency=new Map();
+  for(const edge of edges){const key=v187RouteKey(edge.origin);if(!adjacency.has(key))adjacency.set(key,[]);adjacency.get(key).push(edge);}
+  const queue=[{node:start,path:[],visited:new Set([start])}];const found=[];
+  while(queue.length&&found.length<2){
+    const state=queue.shift();if(state.path.length>=3)continue;
+    for(const edge of adjacency.get(state.node)||[]){
+      const next=v187RouteKey(edge.destination);if(state.visited.has(next))continue;
+      const path=[...state.path,edge];
+      if(next===goal){found.push(path);continue;}
+      queue.push({node:next,path,visited:new Set([...state.visited,next])});
+    }
+  }
+  return found.sort((a,b)=>a.length-b.length);
+}
+// Verified path is evidence of route publication, NOT date-specific inventory.
+function v187CommercialCandidates(provider,need,city){
+  const payload=parseResolvedRoutePayload(need?.source_route);
+  const pairs=[];
+  if(payload?.parent?.origin&&payload?.parent?.destination)pairs.push({origin:payload.parent.origin,destination:payload.parent.destination});
+  if(payload?.legs?.length)for(const leg of payload.legs){
+    const origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
+    const destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
+    if(origin&&destination)pairs.push({origin,destination});
+  }
+  if(!payload){
+    const parts=clean(need?.source_route,1000).split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).filter(Boolean);
+    if(parts.length===2)pairs.push({origin:parts[0],destination:parts[1]});
+  }
+  const out=[];const seen=new Set();
+  for(const pair of pairs){
+    const origin=publisherEndpoint(pair.origin,city),destination=publisherEndpoint(pair.destination,city);
+    if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||v187RouteKey(origin)===v187RouteKey(destination))continue;
+    // Only expand paths for independently verified publisher edges.
+    const paths=v187VerifiedPaths(provider,origin,destination,city);
+    if(!paths.length)continue;
+    const path=paths[0];
+    for(const [i,edge] of path.entries()){
+      const key=`${v187RouteKey(edge.origin)}|${v187RouteKey(edge.destination)}`;
+      if(seen.has(key))continue;seen.add(key);
+      out.push({origin:edge.origin,destination:edge.destination,index:i+1,date:need?.travel_date||'',mode:'alternative',resolution:'v187_publisher_graph',verified_url:edge.url,journey_origin:origin,journey_destination:destination,connection_count:path.length});
+    }
+  }
+  return out;
+}
 function localTransportMarket(route,need){
   const values=[route.origin,route.destination];
   // V183: A city-center pickup is not proof of local travel; regional legs often start there.
@@ -1055,9 +1124,9 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
   const partner=virtualPartner('12go','12Go','transport'); const out=[]; const seen=new Set();
   for(const need of (Array.isArray(needs)?needs:[])){
     if(!['intercity_transport','transport_arrangement'].includes(need?.need_type))continue;
-    if(/rental car|car rental|vehiculo rentado|coche de alquiler|auto de alquiler/i.test(`${need?.entity_name||''} ${need?.transport||''}`))continue;
+    // V187: the chosen/recommended vehicle does not veto alternative providers.
     const payload=parseResolvedRoutePayload(need?.source_route);
-    const candidates=[];
+    const candidates=v187CommercialCandidates('12go',need,city);
     // Prefer the same physical commercial A→B legs rendered by Workspace.
     // A parent label such as “Cusco → Machu Picchu area → Cusco” is editorial,
     // not necessarily a bookable market. Resolve each real intercity leg first.
@@ -1083,11 +1152,11 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
     // Never synthesize a 12Go market from editorial parent labels or narrative
     // free text. Structured legs or an explicit legacy A→B source are required.
     for(const route of candidates){
-      if(localTransportMarket(route,need))continue;
+      if(!route.verified_url&&localTransportMarket(route,need))continue;
       const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b||normalizeKey(a)===normalizeKey(b))continue;
       const key=`${normalizeKey(a)}|${normalizeKey(b)}|${route.date||''}`; if(seen.has(key))continue; seen.add(key);
       const locale=normalizeLanguage(uiLanguage)==='es'?'es':'en';
-      const verified=verifiedTransportUrl('12go',route,city);
+      const verified=route.verified_url||verifiedTransportUrl('12go',route,city);
       // No fabricated deep links for unverified private-car/regional markets.
       // A generic affiliate landing page is explicitly a MANUAL search.
       // V184: A slug is NOT evidence of a published 12Go route.
@@ -1161,8 +1230,8 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
   const partner=virtualPartner('bookaway','Bookaway','transport');const out=[];const seen=new Set();
   for(const need of (Array.isArray(needs)?needs:[])){
     if(!['intercity_transport','transport_arrangement'].includes(need?.need_type))continue;
-    if(/rental car|car rental|vehiculo rentado|coche de alquiler|auto de alquiler/i.test(`${need?.entity_name||''} ${need?.transport||''}`))continue;
-    const payload=parseResolvedRoutePayload(need?.source_route);const candidates=[];
+    // V187: the chosen/recommended vehicle does not veto alternative providers.
+    const payload=parseResolvedRoutePayload(need?.source_route);const candidates=v187CommercialCandidates('bookaway',need,city);
     if(payload?.legs?.length)payload.legs.forEach((leg,index)=>{
       const route=bookawayPhysicalMarket({leg,city,need,index})||
         regionalPhysicalMarket({leg,need,index});
@@ -1170,12 +1239,12 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
     });
     else{const route=bookawayLegacyMarket(need);if(route)candidates.push(route);}
     for(const route of candidates){
-      if(localTransportMarket(route,need))continue;
+      if(!route.verified_url&&localTransportMarket(route,need))continue;
       const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}|${route.date||''}`;
       if(seen.has(key))continue;seen.add(key);
       // Bookaway's documented deep-link scheme requires an EXISTING Bookaway
       // route page. Country + slug alone does not establish route existence.
-      const verified=verifiedTransportUrl('bookaway',route,city);
+      const verified=route.verified_url||verifiedTransportUrl('bookaway',route,city);
       const targetUrl=appendParams(verified||'https://www.bookaway.com/',{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
@@ -1352,7 +1421,7 @@ export async function resolveCityOffers({
     console.warn(`[ITBMO PARTNER ISOLATION] ${labels[index]}`,result.reason?.message||result.reason);
     return [];
   });
-  console.info('[ITBMO V184 PROVIDER ROUTES]',{city:safeCity,needs:safeNeeds.length,transport_routes:Array.isArray(transport_routes)?transport_routes.length:0,providers:Object.fromEntries(labels.map((label,index)=>[label,buckets[index].length]))});
+  console.info('[ITBMO V187 PROVIDER ROUTES]',{city:safeCity,needs:safeNeeds.length,transport_routes:Array.isArray(transport_routes)?transport_routes.length:0,providers:Object.fromEntries(labels.map((label,index)=>[label,buckets[index].length]))});
   return { session, offers: rankOffers(buckets.flat()) };
 }
 
