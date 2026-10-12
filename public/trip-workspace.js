@@ -164,6 +164,26 @@ function sameWorkspaceEntity(a,b){
   return shared.some(token=>token.length>=6) && shared.length/shortest>=0.5;
 }
 
+// V198 · Admission-equivalence guard. A named attraction and a descriptive
+// "surrounding landscape / entorno" card can describe the SAME admission
+// decision on the SAME day. Do not collapse different monuments, tour products,
+// or visits on different days. The check is destination-agnostic.
+function v198SameAdmissionDecision(a,b){
+  if(!['ticket_required','reservation_recommended'].includes(a?.need_type)||
+     !['ticket_required','reservation_recommended'].includes(b?.need_type))return false;
+  if(String(a?.day||'')!==String(b?.day||''))return false;
+  const x=workspaceEntityCore(a?.entity_name||a?.source_activity||'');
+  const y=workspaceEntityCore(b?.entity_name||b?.source_activity||'');
+  if(!x||!y)return false;
+  const descriptive=/^(?:y |and |& )?(?:entorno|alrededores|paisaje|area circundante|surroundings|surrounding area|surrounding landscape|landscape|landscapes|landscape and surroundings)\b/;
+  const shorter=x.length<=y.length?x:y;
+  const longer=x.length<=y.length?y:x;
+  // Require an identifiable attraction name, not generic words such as "park".
+  if(shorter.length<5||shorter.split(' ').length>5)return false;
+  if(!longer.startsWith(shorter+' '))return false;
+  return descriptive.test(longer.slice(shorter.length).trim());
+}
+
 function dedupeContextualNeeds(items=[]){
   const rank=item=>item?.need_type==='ticket_required'?4:item?.need_type==='reservation_recommended'?3:item?.confidence==='high'?2:1;
   const out=[];
@@ -185,6 +205,7 @@ function dedupeContextualNeeds(items=[]){
         if(a.length&&b.length)return String(item?.day||'')===String(existing?.day||'') && a.length===b.length && a.every((leg,i)=>leg.from===b[i].from&&leg.to===b[i].to);
         return String(item?.day||'')===String(existing?.day||'') && normalizeWorkspaceEntity(item?.source_route||item?.entity_name||'')===normalizeWorkspaceEntity(existing?.source_route||existing?.entity_name||'');
       }
+      if(category==='tickets'&&v198SameAdmissionDecision(item,existing))return true;
       return sameWorkspaceEntity(item?.entity_name||item?.source_activity,existing?.entity_name||existing?.source_activity);
     });
     if(match<0)out.push(item);else if(rank(item)>rank(out[match]))out[match]=item;
