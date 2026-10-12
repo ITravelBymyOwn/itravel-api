@@ -1062,33 +1062,50 @@ function omioTransportRoutesForRequest(needs=[]){
 // even when the row has no from/to transfer pair. The provider graph, not this
 // extractor, decides whether a route is commercially documented. No destination
 // names or guessed connections are embedded here.
+// V193 Journey Evidence Bridge: reconstruct only journeys explicitly described
+// by itinerary rows. This does not infer via-stations or provider inventory.
+function v193ExplicitRowEndpoints(row,cityName){
+  const directFrom=String(row?.from||'').trim(),directTo=String(row?.to||'').trim();
+  if(directFrom&&directTo&&v190CommercialEndpoint(directFrom)!==v190CommercialEndpoint(directTo))return {from:directFrom,to:directTo};
+  const cc=row?.commerce_context||{};
+  const explicitFrom=String(cc.physical_origin||cc.canonical_origin||'').trim();
+  const explicitTo=String(cc.physical_destination||cc.canonical_place||row?.physical_location||'').trim();
+  if(explicitFrom&&explicitTo&&v190CommercialEndpoint(explicitFrom)!==v190CommercialEndpoint(explicitTo))return {from:explicitFrom,to:explicitTo};
+  // A written A→B journey is evidence. A place name in a narrative alone is not.
+  const text=String(row?.activity||'');
+  const match=text.match(/(?:^|[:;\n]\s*)([^:;\n→]{2,90}?)\s*(?:→|⇒|⟶|->)\s*([^:;\n→]{2,90})(?:$|[.;\n])/);
+  if(!match)return null;
+  const from=match[1].trim(),to=match[2].trim();
+  if(!from||!to||v190CommercialEndpoint(from)===v190CommercialEndpoint(to))return null;
+  return {from,to};
+}
 function v192ExcursionMobilityNeeds(cityName,existing=[]){
   const out=[];const seen=new Set();
   const base=data?.itineraries?.[cityName];if(!base)return out;
   const dateBase=parseDate(base.baseDate||'');
   const existingLegs=new Set((existing||[]).flatMap(need=>v190NeedLegs(need).map(leg=>`${need.day||''}|${leg.from}|${leg.to}`)));
   workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
-    const cc=row?.commerce_context||{};
     const activity=String(row?.activity||'');
     const narrative=normalizeWorkspaceEntity(`${activity} ${row?.notes||''} ${row?.transport||''}`);
-    // An attraction alone does not establish a mobility requirement. Require
-    // explicit interregional rail/boat/bus or excursion logistics in the row.
     const mobilityEvidence=/\b(tren|train|ferrocarril|railway|railroad|ferry|ferri|barco|boat|bus interurbano|intercity bus|bus turistico|tourist bus|traslado regional|regional transfer|servicio bimodal|bimodal)\b/.test(narrative);
     if(!mobilityEvidence)return;
-    const target=String(cc.canonical_place||cc.physical_destination||row?.physical_location||row?.to||'').trim();
-    if(!target||sameWorkspaceEntity(target,cityName))return;
-    // Never turn a route to an intermediate stop into a new complete journey.
-    const origin=cityName;
-    const key=`${day}|${v190CommercialEndpoint(origin)}|${v190CommercialEndpoint(target)}`;
+    const endpoints=v193ExplicitRowEndpoints(row,cityName);if(!endpoints)return;
+    const from=v190CommercialEndpoint(endpoints.from),to=v190CommercialEndpoint(endpoints.to);
+    if(!from||!to||from===to)return;
+    // Preserve direction, day, and the original physical journey. No synthetic
+    // connection via Ollantaytambo (or any other city) is ever asserted here.
+    const key=`${day}|${from}|${to}`;
     if(seen.has(key)||existingLegs.has(key))return;
     seen.add(key);
-    out.push({id:`v192-excursion:${cityName}:${day}:${index+1}`,category:'transport',need_type:'transport_arrangement',city:cityName,day,
-      travel_date:dateBase?fmt(addDays(dateBase,day-1)):'',entity_name:lang==='es'?`Transporte para ${target}`:`Transport to ${target}`,
-      source_activity:activity,source_route:`${origin} → ${target}`,transport:String(row?.transport||''),derived_by:'v192_explicit_excursion_mobility',
-      user_message:lang==='es'?'Compara los tramos comerciales publicados. Una conexión parcial no incluye necesariamente el recorrido completo ni el acceso final.':'Compare published commercial legs. A partial connection does not necessarily cover the full journey or final access.'});
+    out.push({id:`v193-explicit-journey:${cityName}:${day}:${index+1}`,category:'transport',need_type:'transport_arrangement',city:cityName,day,
+      travel_date:dateBase?fmt(addDays(dateBase,day-1)):'',
+      entity_name:lang==='es'?`Transporte: ${endpoints.from} → ${endpoints.to}`:`Transport: ${endpoints.from} → ${endpoints.to}`,
+      source_activity:activity,source_route:`${endpoints.from} → ${endpoints.to}`,transport:String(row?.transport||''),derived_by:'v192_explicit_excursion_mobility',
+      user_message:lang==='es'?'Compara únicamente los tramos publicados. Verifica estaciones, conexiones, horarios y acceso final; no se presupone una reserva.':'Compare published legs only. Check stations, connections, timetables and final access; no booking is assumed.'});
   });
   return out;
 }
+
 function v187ProviderMobilityNeeds(cityName,existing=[]){
   const out=[];const seen=new Set((existing||[]).map(n=>normalizeWorkspaceEntity(n?.source_route||'')+'|'+String(n?.day||'')));
   const unit=data?.itineraries?.[cityName];if(!unit)return out;
@@ -1142,8 +1159,11 @@ async function fetchPartnerOffers(action,needs=[]){
   // so no additional Vercel Function is introduced.
   const transport_routes=omioTransportRoutesForRequest(needs);
   const mobilityNeeds=v187ProviderMobilityNeeds(city||'',needs);
+  // V193: resolve the SAME contextual journey needs shown in the Workspace.
+  // Omio's independent feed request remains unchanged.
+  const excursionNeeds=needs.filter(n=>n?.derived_by==='v192_explicit_excursion_mobility');
   const [cityOffers,omioOffers]=await Promise.all([
-    post({...baseBody,needs:[...needs,...mobilityNeeds],action:'resolve_city',transport_routes}),
+    post({...baseBody,needs:[...needs,...mobilityNeeds.filter(n=>!excursionNeeds.some(e=>e.source_route===n.source_route&&e.day===n.day))],action:'resolve_city',transport_routes}),
     transport_routes.length?post({...baseBody,action:'lookup_omio_feed_routes',transport_routes}):Promise.resolve([])
   ]);
   console.info('[ITBMO V187 TRANSPORT BRIDGE]',{city:city||'',routes_sent:transport_routes.length,city_partner_counts:cityOffers.reduce((acc,o)=>{const k=o?.partner?.slug||'unknown';acc[k]=(acc[k]||0)+1;return acc;},{}),omio_feed:omioOffers.length});
