@@ -1074,7 +1074,18 @@ function v193ExplicitRowEndpoints(row,cityName){
   // A written A→B journey is evidence. A place name in a narrative alone is not.
   const text=String(row?.activity||'');
   const match=text.match(/(?:^|[:;\n]\s*)([^:;\n→]{2,90}?)\s*(?:→|⇒|⟶|->)\s*([^:;\n→]{2,90})(?:$|[.;\n])/);
-  if(!match)return null;
+  if(!match){
+    // V194: strict natural-language transfer evidence. Only explicit A-to-B
+    // movements are eligible; never infer endpoints from attraction names.
+    // Examples: "Traslado de Cusco a Machu Picchu" and
+    // "Regreso desde Machu Picchu hasta Cusco".
+    const prose=String(row?.activity||'').trim();
+    const movement=prose.match(/^(?:traslado|transfer|transporte|viaje|trayecto|regreso|retorno|return|travel|journey|train|tren|bus|autob[uú]s|desplazamiento)\s+(?:en\s+[^,;:]{2,30}?\s+)?(?:de|desde|from)\s+(.{2,90}?)\s+(?:a|hacia|hasta|to)\s+(.{2,90}?)(?:[.;:]|$)/i);
+    if(!movement)return null;
+    const origin=movement[1].trim(),destination=movement[2].trim();
+    if(!origin||!destination||v190CommercialEndpoint(origin)===v190CommercialEndpoint(destination))return null;
+    return {from:origin,to:destination};
+  }
   const from=match[1].trim(),to=match[2].trim();
   if(!from||!to||v190CommercialEndpoint(from)===v190CommercialEndpoint(to))return null;
   return {from,to};
