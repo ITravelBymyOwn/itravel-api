@@ -1240,37 +1240,9 @@ async function resetITBMOPassword(){
   finally{ setAuthBusy(false); }
 }
 
-// V163 · canonical companion-surface identity. Named browsing contexts let
-// Workspace focus this live Planner without navigating/reloading it.
-try{if(window.top===window&&window.name!=='itbmo-planner')window.name='itbmo-planner';}catch(_){}
-
 function wantsMyTripsView(){
   return String(new URLSearchParams(window.location.search).get('view') || '').trim().toLowerCase()==='my-trips';
 }
-function handleWorkspaceNavigationMessage(event){
-  if(event.origin!==window.location.origin)return;
-  const message=event.data;
-  if(!message||message.type!=='ITBMO_WORKSPACE_NAVIGATE')return;
-  const view=String(message.view||'planner').toLowerCase();
-  // Do not reload or rehydrate the Planner: preserving the live form/generation
-  // state is the point of companion-surface navigation.
-  if(view==='my-trips'){
-    const openMyTrips=()=>qs('#planner-my-trips')?.click();
-    if(currentUser&&getStoredSessionToken()) openMyTrips();
-    else setTimeout(openMyTrips,180);
-  }
-  try{window.focus();}catch(_){}
-}
-window.addEventListener('message',handleWorkspaceNavigationMessage);
-window.addEventListener('storage',event=>{
-  if(event.key!=='itbmo_workspace_navigation_v2'||!event.newValue)return;
-  try{
-    const message=JSON.parse(event.newValue);
-    if(!message||message.type!=='ITBMO_WORKSPACE_NAVIGATE')return;
-    if(Date.now()-Number(message.sent_at||0)>15000)return;
-    handleWorkspaceNavigationMessage({origin:window.location.origin,data:message});
-  }catch(_){}
-});
 
 function openRequestedMyTripsView(){
   if(!wantsMyTripsView() || !currentUser || !getStoredSessionToken()) return false;
@@ -1444,7 +1416,9 @@ function clearPlannerUIForLogout(){
 function enterFreshPlannerAfterAuth(){
   clearPlannerUIForLogout();
   renderAuthState();
-  document.body.classList.remove('itbmo-builder-closed-clean');
+  // Neutral authenticated landing: show only the primary planning CTA.
+  // Keep saved trips, payment entitlements and route drafts untouched.
+  document.body.classList.add('itbmo-builder-closed-clean');
 }
 
 async function logoutITBMOUser(){
@@ -3122,8 +3096,9 @@ function openGuidedPersonalizationJourney(){
   if(!currentTripId || document.querySelector('#guided-personalization-overlay')) return;
   const engine=_travelV2(); if(!engine) return;
   const es=getLang()==='es', model=plannerState?.travelModelV2 || _currentTravelModelV2_();
-  const transitKeys=new Set(((model?.trip_story?.stays)||[]).filter(st=>st?.transitOnly).map(st=>String(st.place||'').trim().toLowerCase()));
-  const places=(engine.placesForPreferences?.(savedDestinations,model)||[]).filter(p=>!transitKeys.has(String(p?.name||p?.key||'').trim().toLowerCase()));
+  // Use the same canonical preference list as the final validation.
+  // Transit-only stops are excluded by placesForPreferences, not just hidden here.
+  const places=engine.placesForPreferences?.(savedDestinations,model)||[];
   if(!engine.state.itineraryLanguage) engine.state.itineraryLanguage=es?'Español':'English';
   engine.state.preferences=engine.state.preferences||{global:{notes:''},places:{}};
   engine.state.preferences.global=engine.state.preferences.global||{notes:''};
@@ -3177,7 +3152,7 @@ function openGuidedPersonalizationJourney(){
     render();
     requestAnimationFrame(()=>active.scrollTo({top:0,behavior:'smooth'}));
   });
-  overlay.querySelector('[data-gp-close]').onclick=()=>{overlay.remove();document.body.classList.remove('guided-preferences-open');delete window._itbmoGuidedPreferencesReady;};
+  overlay.querySelector('[data-gp-close]').onclick=()=>{overlay.remove();document.body.classList.remove('guided-preferences-open');delete window._itbmoGuidedPreferencesReady;document.body.classList.add('itbmo-builder-closed-clean');};
   overlay.querySelector('[data-gp-mobile]').onclick=()=>overlay.querySelector('.guided-journey__story').classList.toggle('is-mobile-open');
   overlay.querySelector('#guided-info-chat-open').onclick=()=>document.querySelector('#info-chat-floating')?.click();
   render();
