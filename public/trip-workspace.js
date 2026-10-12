@@ -877,7 +877,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       </div>
       <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
       ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
-      ${item.derived_by==='v192_explicit_excursion_mobility'&&matched.length?`<small class="tw-context-source">${esc(lang==='es'?'Cada botón corresponde al tramo indicado por el proveedor; comprueba qué conexiones y accesos quedan incluidos.':'Each button covers the provider-listed leg; check which connections and access services are included.')}</small>`:''}
+      ${['transport_arrangement','intercity_transport'].includes(item?.need_type)&&matched.some(o=>['12go','bookaway'].includes(o?.partner?.slug))?`<small class="tw-context-source">${esc(lang==='es'?'Los enlaces permiten comparar ofertas publicadas, no confirman una reserva ni que cubran todo el recorrido. Comprueba origen, destino, estaciones, transbordos, accesos, fecha y servicios incluidos antes de pagar.':'Links compare published offers; they do not confirm a booking or coverage of the entire journey. Check origin, destination, stations, transfers, access, date and included services before paying.')}</small>`:''}
       ${originalNote?`<details class="tw-context-original-note"><summary><span>${esc(t.details)} ＋</span><span>${esc(t.hide)} −</span></summary><div><small>${esc(t.notes)}</small><p>${esc(originalNote)}</p></div></details>`:''}
       ${sourceCopy?`<small class="tw-context-source">${sourceCopy}</small>`:''}
       ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && !parseResolvedRouteSource(item.source_route)
