@@ -960,7 +960,10 @@ const PUBLISHED_TRANSPORT_ROUTE_URLS = Object.freeze({
     'ollantaytambo|cusco':'https://12go.asia/es/travel/ollantaytambo/cusco',
     'cusco|ollantaytambo':'https://12go.asia/es/travel/cusco/ollantaytambo',
     'ollantaytambo|machu picchu':'https://12go.asia/es/travel/ollantaytambo/machu-picchu',
-    'machu picchu|ollantaytambo':'https://12go.asia/es/travel/machu-picchu/ollantaytambo'
+    'machu picchu|ollantaytambo':'https://12go.asia/es/travel/machu-picchu/ollantaytambo',
+    // V196: both directions confirmed on the publisher's live route pages.
+    'cusco|machu picchu':'https://12go.asia/es/travel/cusco/machu-picchu',
+    'machu picchu|cusco':'https://12go.asia/es/travel/machu-picchu/cusco'
   }),
   bookaway: Object.freeze({
     'ollantaytambo|cusco':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-cusco',
