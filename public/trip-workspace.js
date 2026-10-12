@@ -178,6 +178,13 @@ function dedupeContextualNeeds(items=[]){
       // to one monument. Never let entity similarity ("... de Segovia") erase
       // the overview card; only overview cards may dedupe other overviews.
       if(overview||otherOverview)return overview&&otherOverview;
+      // V195: mobility is directional and date-sensitive. Fuzzy POI matching
+      // can erase a legitimate return journey or a different travel day.
+      if(category==='transport'){
+        const a=v190NeedLegs(item),b=v190NeedLegs(existing);
+        if(a.length&&b.length)return String(item?.day||'')===String(existing?.day||'') && a.length===b.length && a.every((leg,i)=>leg.from===b[i].from&&leg.to===b[i].to);
+        return String(item?.day||'')===String(existing?.day||'') && normalizeWorkspaceEntity(item?.source_route||item?.entity_name||'')===normalizeWorkspaceEntity(existing?.source_route||existing?.entity_name||'');
+      }
       return sameWorkspaceEntity(item?.entity_name||item?.source_activity,existing?.entity_name||existing?.source_activity);
     });
     if(match<0)out.push(item);else if(rank(item)>rank(out[match]))out[match]=item;
@@ -646,6 +653,12 @@ function contextualNeedsForCity(cityName,needs){
     if(forced) finalNeeds=[forced,...finalNeeds];
   }
   auditContextCoverageForCity(cityName,needs,finalNeeds);
+  // Opt-in local diagnosis; no itinerary text, account IDs or tokens logged.
+  // In browser console: sessionStorage.setItem('itbmo_context_debug','1'); reload.
+  if(sessionStorage.getItem('itbmo_context_debug')==='1'){
+    console.table(finalNeeds.filter(x=>x.category==='transport').map(x=>({day:x.day||'',route:x.source_route||'',source:x.derived_by||'server',type:x.need_type})));
+    console.info('[ITBMO V195 CONTEXT]',{city:cityName,serverNeeds:Array.isArray(needs)?needs.length:0,derivedMobility:v192ExcursionMobilityNeeds(cityName,[]).length,finalMobility:finalNeeds.filter(x=>x.category==='transport').length});
+  }
   return finalNeeds;
 }
 
@@ -1065,30 +1078,26 @@ function omioTransportRoutesForRequest(needs=[]){
 // V193 Journey Evidence Bridge: reconstruct only journeys explicitly described
 // by itinerary rows. This does not infer via-stations or provider inventory.
 function v193ExplicitRowEndpoints(row,cityName){
-  const directFrom=String(row?.from||'').trim(),directTo=String(row?.to||'').trim();
-  if(directFrom&&directTo&&v190CommercialEndpoint(directFrom)!==v190CommercialEndpoint(directTo))return {from:directFrom,to:directTo};
+  // V195: trust structured transfer fields first, then explicit written routes.
+  // Never treat a destination/attraction field as an origin-destination pair.
+  const valid=(from,to)=>{
+    const a=String(from||'').trim(),b=String(to||'').trim();
+    return a&&b&&v190CommercialEndpoint(a)!==v190CommercialEndpoint(b)?{from:a,to:b}:null;
+  };
+  const direct=valid(row?.from,row?.to);if(direct)return direct;
   const cc=row?.commerce_context||{};
-  const explicitFrom=String(cc.physical_origin||cc.canonical_origin||'').trim();
-  const explicitTo=String(cc.physical_destination||cc.canonical_place||row?.physical_location||'').trim();
-  if(explicitFrom&&explicitTo&&v190CommercialEndpoint(explicitFrom)!==v190CommercialEndpoint(explicitTo))return {from:explicitFrom,to:explicitTo};
-  // A written A→B journey is evidence. A place name in a narrative alone is not.
-  const text=String(row?.activity||'');
-  const match=text.match(/(?:^|[:;\n]\s*)([^:;\n→]{2,90}?)\s*(?:→|⇒|⟶|->)\s*([^:;\n→]{2,90})(?:$|[.;\n])/);
-  if(!match){
-    // V194: strict natural-language transfer evidence. Only explicit A-to-B
-    // movements are eligible; never infer endpoints from attraction names.
-    // Examples: "Traslado de Cusco a Machu Picchu" and
-    // "Regreso desde Machu Picchu hasta Cusco".
-    const prose=String(row?.activity||'').trim();
-    const movement=prose.match(/^(?:traslado|transfer|transporte|viaje|trayecto|regreso|retorno|return|travel|journey|train|tren|bus|autob[uú]s|desplazamiento)\s+(?:en\s+[^,;:]{2,30}?\s+)?(?:de|desde|from)\s+(.{2,90}?)\s+(?:a|hacia|hasta|to)\s+(.{2,90}?)(?:[.;:]|$)/i);
-    if(!movement)return null;
-    const origin=movement[1].trim(),destination=movement[2].trim();
-    if(!origin||!destination||v190CommercialEndpoint(origin)===v190CommercialEndpoint(destination))return null;
-    return {from:origin,to:destination};
+  const contextual=valid(cc.physical_origin||cc.canonical_origin,cc.physical_destination);
+  if(contextual)return contextual;
+  const candidates=[row?.activity,row?.transport,row?.notes,row?.source_route].filter(x=>typeof x==='string');
+  for(const value of candidates){
+    const text=value.trim();
+    // Require a bounded, explicit transfer phrase; never infer from a POI name.
+    const arrow=text.match(/(?:^|[:;\n]\s*)([^:;\n→]{2,90}?)\s*(?:→|⇒|⟶|->)\s*([^:;\n→]{2,90})(?:$|[.;\n])/);
+    if(arrow){const result=valid(arrow[1],arrow[2]);if(result)return result;}
+    const movement=text.match(/(?:^|[.;:]\s*)(?:traslado|transfer|transporte|viaje|trayecto|regreso|retorno|return|travel|journey|train|tren|bus|autob[uú]s|desplazamiento|salida|ida)\s+(?:en\s+[^,;:]{2,30}?\s+)?(?:de|desde|from)\s+(.{2,90}?)\s+(?:a|hacia|hasta|to)\s+(.{2,90}?)(?:[.;:]|$)/i);
+    if(movement){const result=valid(movement[1],movement[2]);if(result)return result;}
   }
-  const from=match[1].trim(),to=match[2].trim();
-  if(!from||!to||v190CommercialEndpoint(from)===v190CommercialEndpoint(to))return null;
-  return {from,to};
+  return null;
 }
 function v192ExcursionMobilityNeeds(cityName,existing=[]){
   const out=[];const seen=new Set();
@@ -1098,7 +1107,7 @@ function v192ExcursionMobilityNeeds(cityName,existing=[]){
   workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
     const activity=String(row?.activity||'');
     const narrative=normalizeWorkspaceEntity(`${activity} ${row?.notes||''} ${row?.transport||''}`);
-    const mobilityEvidence=/\b(tren|train|ferrocarril|railway|railroad|ferry|ferri|barco|boat|bus interurbano|intercity bus|bus turistico|tourist bus|traslado regional|regional transfer|servicio bimodal|bimodal)\b/.test(narrative);
+    const mobilityEvidence=/\b(tren|train|ferrocarril|railway|railroad|ferry|ferri|barco|boat|bus interurbano|intercity bus|bus turistico|tourist bus|traslado regional|regional transfer|servicio bimodal|bimodal|traslado|transfer|regreso|retorno|shuttle)\b/.test(narrative);
     if(!mobilityEvidence)return;
     const endpoints=v193ExplicitRowEndpoints(row,cityName);if(!endpoints)return;
     const from=v190CommercialEndpoint(endpoints.from),to=v190CommercialEndpoint(endpoints.to);
