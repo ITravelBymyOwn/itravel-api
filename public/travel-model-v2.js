@@ -698,6 +698,9 @@
       // Day Trips remain part of the route/timeline and generation context, but
       // they must never become independent preference cards.
       model.trip_story.stays.forEach(st=>{
+        // Transit-only stops are movement context, not places to personalize.
+        // Keep them in trip_story for routing and generation.
+        if(st?.transitOnly===true || st?.transitOnly==='true') return;
         add(st.place,{
           type:'stay',
           country:st.country||'',
@@ -723,7 +726,7 @@
         // later adds that place as a MAIN destination.
         if(isLastDayArrival && !returnsToBase) return;
         // Round-trip excursions are route context, not independent preference destinations.
-        if(seg.disposition==='roundtrip') return;
+        if(seg.disposition==='roundtrip' || seg.transitOnly===true || seg.transitOnly==='true' || Number(seg.nights)===0) return;
         add(seg.destination,{type:'stay',country:dest.country,nights:Number(seg.nights||1),routeArrivalTransport:seg.transportMode||''});
       });
     });
