@@ -966,6 +966,12 @@ const PUBLISHED_TRANSPORT_ROUTE_URLS = Object.freeze({
     'machu picchu|cusco':'https://12go.asia/es/travel/machu-picchu/cusco'
   }),
   bookaway: Object.freeze({
+    // V205: official publisher pages verified independently. Route pages do
+    // not imply availability on the itinerary date; preserve signed affiliate
+    // links and independent route/date matching in the existing resolver.
+    'barcelona|madrid':'https://www.bookaway.com/routes/spain/barcelona-to-madrid',
+    'madrid|paris':'https://www.bookaway.com/routes/france/madrid-to-paris',
+    'paris|barcelona':'https://www.bookaway.com/routes/spain/paris-to-barcelona',
     'ollantaytambo|cusco':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-cusco',
     'cusco|ollantaytambo':'https://www.bookaway.com/es/routes/peru/cusco-to-ollantaytambo',
     'ollantaytambo|machu picchu':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-machu-picchu',
