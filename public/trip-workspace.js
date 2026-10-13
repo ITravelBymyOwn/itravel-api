@@ -1304,6 +1304,18 @@ function renderPrepare(){
     const offers=(partnerOffersByCity.get(city)||[]).filter(x=>x.placement==='city_transport'||x.placement==='city_car_rental');
     const block=contextSection('↗',t.move,t.moveC,needs,offers,'tw-context-move','transport');
     $('#tw-content').innerHTML=`<section class="tw-prepare-hero"><span class="tw-prepare-mark">↗</span><span class="tw-kicker">${c} · ${lang==='es'?'Sólo tránsito':'Transit only'}</span><h2>${lang==='es'?'Conexiones de tu viaje':'Your travel connections'}</h2><p>${lang==='es'?'Esta parada no tiene actividades turísticas programadas. Consulta los traslados de tu recorrido.':'No sightseeing is planned at this stop. Review your journey connections.'}</p></section><div class="tw-context-sections">${block||`<div class="tw-context-empty">${esc(t.contextEmpty)}</div>`}</div>`;
+    // V205: Transit-only views must bind the same expandable mobility sections
+    // as tourist workspaces; the early return previously left 'Ver más' inert.
+    document.querySelectorAll('[data-context-toggle]').forEach(button=>{
+      button.onclick=()=>{
+        const key=button.dataset.contextToggle||'';
+        if(!key)return;
+        if(expandedContextSections.has(key))expandedContextSections.delete(key);
+        else expandedContextSections.add(key);
+        renderPrepare();
+        requestAnimationFrame(()=>[...document.querySelectorAll('[data-context-toggle]')].find(el=>el.dataset.contextToggle===key)?.focus());
+      };
+    });
     bindPartnerOffers();return;
   }
   const state=contextByCity.get(city);
