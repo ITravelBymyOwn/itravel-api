@@ -47,10 +47,17 @@ function normalizeTripLanguage(value){
 function parseDate(v){if(!v)return null;let m=String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(m)return new Date(+m[3],+m[2]-1,+m[1]);m=String(v).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);return null}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
 function fmt(d){if(!d)return'';return new Intl.DateTimeFormat(lang==='es'?'es-ES':'en-US',{day:'numeric',month:'short',year:'numeric'}).format(d)}
-function cities(){const ordered=(data?.destinations||[]).map(x=>x.city).filter(Boolean),extras=Object.keys(data?.itineraries||{}).filter(x=>!ordered.includes(x));return [...ordered,...extras].filter(c=>days(c).some(d=>(data?.itineraries?.[c]?.byDay?.[d]||[]).length))}
+// V204: presentation-only journey authority; never alters paid generation or partner resolvers.
+function journeyStays(){return Array.isArray(data?.journey_story?.stays)?data.journey_story.stays:[]}
+function journeyVisits(c){const key=normalizeWorkspaceEntity(c);return journeyStays().filter(st=>normalizeWorkspaceEntity(st?.place)===key)}
+function journeyTouristVisits(c){return journeyVisits(c).filter(st=>!st.transitOnly)}
+function journeyTransitOnly(c){const visits=journeyVisits(c);return visits.length>0&&!visits.some(st=>!st.transitOnly)}
+function journeyTouristDays(c){return journeyTouristVisits(c).reduce((sum,st)=>sum+Math.max(1,Number(st.days)||1),0)}
+function journeyRange(c){const visits=journeyVisits(c);if(!visits.length)return null;const tourist=visits.filter(st=>!st.transitOnly);const selected=tourist.length?tourist:visits;const dates=[];selected.forEach(st=>{const start=parseDate(st.startDate);if(!start)return;dates.push(start);if(!st.transitOnly)dates.push(addDays(start,Math.max(1,Number(st.days)||1)-1))});if(!dates.length)return null;dates.sort((a,b)=>a-b);return fmt(dates[0])===fmt(dates.at(-1))?fmt(dates[0]):`${fmt(dates[0])} – ${fmt(dates.at(-1))}`}
+function cities(){const ordered=(data?.destinations||[]).map(x=>x.city).filter(Boolean),extras=Object.keys(data?.itineraries||{}).filter(x=>!ordered.includes(x));return [...ordered,...extras,...journeyStays().map(st=>st?.place).filter(Boolean)].filter((c,i,a)=>a.findIndex(x=>normalizeWorkspaceEntity(x)===normalizeWorkspaceEntity(c))===i).filter(c=>journeyVisits(c).length||days(c).some(d=>(data?.itineraries?.[c]?.byDay?.[d]||[]).length))}
 function days(c){return Object.keys(data?.itineraries?.[c]?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b)}
 function base(c){return parseDate(data?.itineraries?.[c]?.baseDate||data?.city_meta?.[c]?.baseDate||'')}
-function range(c){const ds=days(c),b=base(c);if(!b||!ds.length)return'';const a=fmt(addDays(b,ds[0]-1)),z=fmt(addDays(b,ds.at(-1)-1));return a===z?a:`${a} – ${z}`}
+function range(c){const canonical=journeyRange(c);if(canonical)return canonical;const ds=days(c),b=base(c);if(!b||!ds.length)return'';const a=fmt(addDays(b,ds[0]-1)),z=fmt(addDays(b,ds.at(-1)-1));return a===z?a:`${a} – ${z}`}
 function dayDate(c,d){const b=base(c),n=Number(d);return b&&Number.isFinite(n)&&n>0?fmt(addDays(b,n-1)):''}
 function travelDateLabel(raw){const parsed=parseDate(raw);return parsed?fmt(parsed):String(raw||'').trim()}
 function encodeWorkspaceResolvedRoute(row){
@@ -71,7 +78,7 @@ const brand=$('.tw-brand');if(brand)brand.setAttribute('href',homeUrl);
 const badge=$('#tw-prepare-badge');if(badge)badge.textContent=t.prepareBadge;
 
 $('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
-function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+days(c).length,0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${days(c).length} ${esc(t.ds)} ${esc(t.organized)}</p><span class="tw-city-go">${esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
+function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+(journeyVisits(c).length?journeyTouristDays(c):days(c).length),0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${journeyTransitOnly(c)?(lang==='es'?'Sólo tránsito':'Transit only'):`${journeyVisits(c).length?journeyTouristDays(c):days(c).length} ${esc(t.ds)} ${esc(t.organized)}`}</p><span class="tw-city-go">${journeyTransitOnly(c)?(lang==='es'?'Ver conexiones':'View connections'):esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
 function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='prepare';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
 function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw-city-dates').textContent=range(city);const ib=$('#tw-mode-itinerary'),pb=$('#tw-mode-prepare');ib.classList.toggle('active',mode==='itinerary');pb.classList.toggle('active',mode==='prepare');ib.setAttribute('aria-selected',mode==='itinerary');pb.setAttribute('aria-selected',mode==='prepare');renderDays();mode==='itinerary'?renderItinerary():renderPrepare();window.dispatchEvent(new Event('tw:prepare-mode-changed'))}
 function renderDays(){const nav=$('#tw-days');nav.hidden=mode!=='itinerary';nav.innerHTML='';if(nav.hidden)return;days(city).forEach(d=>{const b=document.createElement('button');b.type='button';b.className='tw-day'+(d===day?' active':'');const date=dayDate(city,d);b.textContent=(lang==='es'?`Día ${d}`:`Day ${d}`)+(date?` · ${date}`:'');b.onclick=()=>{day=d;renderCity();window.scrollTo({top:Math.max(0,$('#tw-content').offsetTop-160),behavior:'smooth'})};nav.appendChild(b)})}
@@ -130,6 +137,14 @@ function tripRoutes(){
       });
     });
   });
+  const story=data?.journey_story;
+  if(Array.isArray(story?.stays)&&story.stays.length){
+    story.stays.slice(1).forEach((st,index)=>{
+      const prev=story.stays[index];
+      add({id:`journey:${st.id||index}`,origin:prev.place,destination:st.place,travel_date:st.departureDate||st.startDate,transport:st.transportMode||'',derived_by:'journey_story'});
+    });
+    if(story.returnTrip?.enabled){const last=story.stays.at(-1);add({id:'journey:return',origin:story.returnTrip.origin?.label||last?.place,destination:story.returnTrip.arrival?.label,travel_date:story.returnTrip.departureDate||'',transport:story.returnTrip.transportMode||'',derived_by:'journey_return'});}
+  }
   // Preserve main-destination transitions that may not have an explicit row
   // because they occur between planning units.
   const sourceDestinations=Array.isArray(data?.source_destinations)?data.source_destinations:[];
@@ -236,7 +251,7 @@ function isPhysicalTouristDestination(cityName){
   // Physical manifests should already expose real places. This fail-closed
   // guard also prevents legacy pseudo-destinations from becoming tour cards.
   if(/\b(hotel|alojamiento|accommodation|lodging|airport|aeropuerto|station|estacion|terminal|transit day|dia de transito|check in|check out)\b/i.test(key))return false;
-  return workspaceRowsForCity(cityName).length>0;
+  return !journeyTransitOnly(cityName)&&workspaceRowsForCity(cityName).length>0;
 }
 function cityOverviewTourForCity(cityName,existingNeeds=[]){
   if(!isPhysicalTouristDestination(cityName))return null;
@@ -622,6 +637,7 @@ function auditContextCoverageForCity(cityName,serverNeeds=[],visibleNeeds=[]){
 }
 
 function contextualNeedsForCity(cityName,needs){
+  if(journeyTransitOnly(cityName))return dedupeContextualNeeds(tripRoutes().filter(route=>normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName)));
   // Server context for a main planning unit can contain rows that physically
   // belong to a subdestination. Keep only needs that belong to this physical
   // workspace slice; transport is re-derived from the authoritative route.
@@ -1282,6 +1298,14 @@ function renderTripPartnerOffers(){
 }
 function renderPrepare(){
   const c=esc(city);
+  if(journeyTransitOnly(city)){
+    const needs=contextualNeedsForCity(city,[]);
+    if(!partnerOffersByCity.has(city)){partnerOffersByCity.set(city,[]);fetchPartnerOffers('resolve_city',needs).then(offers=>{partnerOffersByCity.set(city,offers);if(mode==='prepare')renderPrepare()}).catch(()=>{});}
+    const offers=(partnerOffersByCity.get(city)||[]).filter(x=>x.placement==='city_transport'||x.placement==='city_car_rental');
+    const block=contextSection('↗',t.move,t.moveC,needs,offers,'tw-context-move','transport');
+    $('#tw-content').innerHTML=`<section class="tw-prepare-hero"><span class="tw-prepare-mark">↗</span><span class="tw-kicker">${c} · ${lang==='es'?'Sólo tránsito':'Transit only'}</span><h2>${lang==='es'?'Conexiones de tu viaje':'Your travel connections'}</h2><p>${lang==='es'?'Esta parada no tiene actividades turísticas programadas. Consulta los traslados de tu recorrido.':'No sightseeing is planned at this stop. Review your journey connections.'}</p></section><div class="tw-context-sections">${block||`<div class="tw-context-empty">${esc(t.contextEmpty)}</div>`}</div>`;
+    bindPartnerOffers();return;
+  }
   const state=contextByCity.get(city);
 
   if(!state){
