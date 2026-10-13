@@ -8815,7 +8815,11 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         ...dt,
         expected_date:startISO?_tripStoryAddDays_(startISO,Math.max(0,Number(dt.day||1)-1)):null
       }));
-      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
+      const fullStory=(contract.trip_story_stays||[]);
+      const originalIndex=fullStory.findIndex(x=>x.id===st.id);
+      const previous=originalIndex>0?fullStory[originalIndex-1]:null;
+      const next=originalIndex>=0?fullStory[originalIndex+1]||null:null;
+      // Boundaries must follow the complete route, including transit stops.
       // Prefer the shared transition date. This prevents an earlier Day Trip to
       // the next city from being mistaken for the actual inter-stay boundary.
       const inbound=previous?findBoundaryTransfer(previous.place,st.place,startISO):null;
@@ -8906,7 +8910,10 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     descriptors.forEach(d=>{
       const {st,index,dayTrips}=d;
       const allWindows=(ownedWindows.get(index)||[]).sort((a,b)=>_v114LogicalRowCompare_(a,b));
-      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
+      const fullStory=(contract.trip_story_stays||[]);
+      const originalIndex=fullStory.findIndex(x=>x.id===st.id);
+      const previous=originalIndex>0?fullStory[originalIndex-1]:null;
+      const next=originalIndex>=0?fullStory[originalIndex+1]||null:null;
       const parentId=st.id||`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(index+1).padStart(2,'0')}`;
 
       // Resolve whether the traveler fixed the excursion clock. Route-estimated
@@ -12532,6 +12539,32 @@ async function exportItineraryToPDF(options={}){
     if(!item.destinations.some(x=>_arePoiAliases_(x,block.destination)))item.destinations.push(block.destination);
     (day.rows||[]).forEach(row=>item.rows.push({...row,_pdfDestination:block.destination}));
   }));
+  // V202 · PDF-only journey boundaries. No generated rows, units or checkpoints change.
+  const pdfStory=_currentTravelModelV2_()?.trip_story;
+  if(pdfStory?.stays?.length){
+    const itineraryFirst=pdfStory.stays[0].startDate;
+    const events=[];
+    const addEvent=(date,activity,from,to,time,mode,id)=>{
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(String(date||'')))return;
+      events.push({date,activity,from:from||'',to:to||'',time:time||'',mode:mode||'',id});
+    };
+    const start=pdfStory.start||{};
+    if(start.date && (start.origin?.label||start.arrival?.label))addEvent(start.date,es?'Salida internacional':'International departure',start.origin?.label,start.arrival?.label,start.departureTime,start.transportMode,'arrival-departure');
+    if(start.arrivalDate && start.arrival?.label)addEvent(start.arrivalDate,es?'Llegada internacional':'International arrival',start.arrival?.label,'',start.arrivalTime,start.transportMode,'arrival-landing');
+    (pdfStory.stays||[]).forEach((st,i)=>{
+      if(i>0){const prev=pdfStory.stays[i-1];addEvent(st.departureDate||st.arrivalDate||st.startDate,es?'Traslado entre destinos':'Intercity transfer',prev.place,st.place,st.departureTime,st.transportMode,`move-${st.id||i}`);}
+      if(st.transitOnly)addEvent(st.arrivalDate||st.startDate,es?'Parada exclusivamente de tránsito':'Transit-only stop',st.place,'',st.arrivalTime,'',`transit-${st.id||i}`);
+    });
+    const ret=pdfStory.returnTrip||{};
+    if(ret.enabled){addEvent(ret.departureDate,es?'Regreso internacional':'International return journey',ret.origin?.label||pdfStory.stays.at(-1)?.place,ret.arrival?.label,ret.departureTime,ret.transportMode,'return-departure');if(ret.arrivalDate&&ret.arrival?.label)addEvent(ret.arrivalDate,es?'Llegada del regreso':'Return arrival',ret.arrival?.label,'',ret.arrivalTime,ret.transportMode,'return-arrival');}
+    const byISO=new Map();
+    events.forEach(e=>{const key=e.date;const group=byISO.get(key)||[];if(!group.some(x=>x.id===e.id))group.push(e);byISO.set(key,group);});
+    byISO.forEach((group,iso)=>{
+      const key=_tripStoryDMY_(iso);let day=byDate.get(key);
+      if(!day){day={globalDay:Math.max(1,Math.round((Date.parse(iso+'T12:00:00Z')-Date.parse(itineraryFirst+'T12:00:00Z'))/86400000)+1),date:key,destinations:[],rows:[]};byDate.set(key,day);days.push(day);}
+      group.forEach(e=>day.rows.push({activity:e.activity,from:e.from,to:e.to,start:e.time||'',end:'',transport:e.mode,notes:es?'Información logística del recorrido; no constituye una actividad turística.':'Journey logistics; not a sightseeing activity.',_pdfLogistic:true}));
+    });
+  }
   days.sort((a,b)=>(parseDMY(a.date)?.getTime?.()||0)-(parseDMY(b.date)?.getTime?.()||0)||Number(a.globalDay)-Number(b.globalDay));
   // V121 PDF-only aurora restoration. TIE remains the sole semantic authority.
   // Propagate its already-stamped aurora context across sibling physical units of
