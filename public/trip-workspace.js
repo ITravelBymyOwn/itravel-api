@@ -199,6 +199,43 @@ function v198SameAdmissionDecision(a,b){
   return descriptive.test(longer.slice(shorter.length).trim());
 }
 
+// V206: unify representations of the SAME dated intercity journey without
+// touching the commercial resolver, itinerary or independent provider matching.
+// Fail closed when either endpoints or the journey date cannot be established.
+function v206JourneyIdentity(item){
+  if(item?.category!=='transport' && !['intercity_transport','transport_arrangement'].includes(item?.need_type))return '';
+  if(isRentalTransportNeed(item))return '';
+  const legs=v190NeedLegs(item);
+  if(legs.length!==1)return ''; // Multi-leg journeys remain separate decisions.
+  const leg=legs[0];
+  if(!leg?.from||!leg?.to||leg.from===leg.to)return '';
+  const baseDate=base(item?.city||city);
+  const dayNumber=Number(item?.day);
+  const inferredDate=baseDate&&Number.isInteger(dayNumber)&&dayNumber>0?addDays(baseDate,dayNumber-1):null;
+  const rawDate=String(item?.travel_date||'').trim();
+  if(!rawDate)return '';
+  const date=parseDate(rawDate)||inferredDate;
+  if(!date)return ''; // No fuzzy merge across visits or unknown dates.
+  const stamp=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  return `${leg.from}>${leg.to}|${stamp}`;
+}
+function v206JourneyPreference(item){
+  const structured=Boolean(parseResolvedRouteSource(item?.source_route)?.legs?.length);
+  const source=String(item?.derived_by||'');
+  return (structured?100:0)+ (source==='generated_itinerary'?40:source==='journey_story'||source==='journey_return'?30:source==='trip_sequence'?20:0) + (item?.travel_date?2:0);
+}
+function v206ConsolidateJourneyNeeds(items=[]){
+  const out=[],positions=new Map();
+  for(const item of items){
+    const key=v206JourneyIdentity(item);
+    if(!key){out.push(item);continue;}
+    if(!positions.has(key)){positions.set(key,out.length);out.push(item);continue;}
+    const pos=positions.get(key),existing=out[pos];
+    if(v206JourneyPreference(item)>v206JourneyPreference(existing))out[pos]=item;
+  }
+  return out;
+}
+
 function dedupeContextualNeeds(items=[]){
   const rank=item=>item?.need_type==='ticket_required'?4:item?.need_type==='reservation_recommended'?3:item?.confidence==='high'?2:1;
   const out=[];
@@ -225,7 +262,7 @@ function dedupeContextualNeeds(items=[]){
     });
     if(match<0)out.push(item);else if(rank(item)>rank(out[match]))out[match]=item;
   }
-  return out;
+  return v206ConsolidateJourneyNeeds(out);
 }
 function isTourAlternativeEligible(row){
   const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
@@ -983,7 +1020,7 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
 
   const sectionKey=`${city||''}:${sectionId||sectionType}`;
   const expanded=expandedContextSections.has(sectionKey);
-  const initialLimit=sectionType==='transport'?ordered.filter(hasMobilityCTA).length:initialSectionLimit(ordered,sectionType);
+  const initialLimit=sectionType==='transport'?Math.max(journeyTransitOnly(city)?Math.min(1,ordered.length):0,ordered.filter(hasMobilityCTA).length):initialSectionLimit(ordered,sectionType);
   const visibleCount=expanded?ordered.length:initialLimit;
   const hiddenCount=Math.max(0,ordered.length-visibleCount);
   const toggle=ordered.length>initialLimit
