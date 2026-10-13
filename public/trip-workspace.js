@@ -944,9 +944,30 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
   const id=sectionId?` id="${esc(sectionId)}"`:'';
   const ordered=sectionSort(v192VisibleContextItems(items,offers,sectionType),sectionType);
   if(!ordered.length)return'';
+  // V201: all mobility cards with an actual attributable partner CTA stay
+  // visible. Informational cards remain accessible under 'See more'.
+  // Preserve V190 12Go/Bookaway physical-leg matching and Omio route segments.
+  const hasMobilityCTA=item=>{
+    if(sectionType!=='transport')return false;
+    if(isRentalTransportNeed(item))return (offers||[]).some(o=>o?.placement==='city_car_rental' && (o?.offer_token||o?.direct_url||o?.url||o?.affiliate_url||o?.tracking_url));
+    const route=parseResolvedRouteSource(item?.source_route);
+    return (offers||[]).some(o=>{
+      if(!(o?.offer_token||o?.direct_url||o?.url||o?.affiliate_url||o?.tracking_url))return false;
+      if(['12go','bookaway'].includes(o?.partner?.slug||''))return v190OfferMatchesNeed(o,item);
+      if(o?.need_id && item?.id && o.need_id===item.id)return true;
+      if(o?.partner?.slug==='omio' && route?.legs?.length){
+        const seg=o.route_segment||{};
+        const from=v190CommercialEndpoint(seg.commercial_origin),to=v190CommercialEndpoint(seg.commercial_destination);
+        return Boolean(from&&to&&route.legs.some(leg=>v190CommercialEndpoint(leg.commercial_origin||leg.origin)===from&&v190CommercialEndpoint(leg.commercial_destination||leg.destination)===to));
+      }
+      return false;
+    });
+  };
+  if(sectionType==='transport')ordered.sort((a,b)=>Number(hasMobilityCTA(b))-Number(hasMobilityCTA(a)));
+
   const sectionKey=`${city||''}:${sectionId||sectionType}`;
   const expanded=expandedContextSections.has(sectionKey);
-  const initialLimit=initialSectionLimit(ordered,sectionType);
+  const initialLimit=sectionType==='transport'?ordered.filter(hasMobilityCTA).length:initialSectionLimit(ordered,sectionType);
   const visibleCount=expanded?ordered.length:initialLimit;
   const hiddenCount=Math.max(0,ordered.length-visibleCount);
   const toggle=ordered.length>initialLimit
