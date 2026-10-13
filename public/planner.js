@@ -3947,6 +3947,7 @@ function openImmersiveItinerary(){
       ? ((_currentTravelModelV2_()?.trip_story?.stays)||[]).filter(st=>!st?.transitOnly).map(st=>({city:st?.place||'',country:st?.country||'',days:Number(st?.days||0)||0,baseDate:st?.startDate?_tripStoryDMY_(st.startDate):null}))
       : (savedDestinations||[]).map(d=>({city:d?.city||'',country:d?.country||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null})))
       .filter(d=>d.city),
+    journey_story:(()=>{const st=_currentTravelModelV2_()?.trip_story;return st?.stays?.length?JSON.parse(JSON.stringify({stays:st.stays,start:st.start,returnTrip:st.returnTrip})):null;})(),
     workspace_source_map:workspaceViews.source_map||{},
     city_meta:cityMeta||{},
     itineraries:workspaceViews.itineraries||{}
