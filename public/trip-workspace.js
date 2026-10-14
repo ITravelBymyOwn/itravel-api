@@ -817,6 +817,12 @@ function contextLabel(item){
   return '';
 }
 
+function v210TransportLabel(value){
+  const raw=String(value||'').trim();
+  const modes={plane:['Avión','Plane'],train:['Tren','Train'],bus:['Autobús','Bus'],car:['Automóvil','Car'],ferry:['Ferry','Ferry'],transfer:['Traslado','Transfer'],other:['Otro','Other']};
+  const mode=modes[raw.toLowerCase()];
+  return mode?mode[lang==='es'?0:1]:raw;
+}
 function sectionSort(items=[],sectionType=''){
   const ordered=[...items];
   const priority=item=>{
@@ -1028,7 +1034,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       ${originalNote?`<details class="tw-context-original-note"><summary><span>${esc(t.details)} ＋</span><span>${esc(t.hide)} −</span></summary><div><small>${esc(t.notes)}</small><p>${esc(originalNote)}</p></div></details>`:''}
       ${sourceCopy?`<small class="tw-context-source">${sourceCopy}</small>`:''}
       ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && !parseResolvedRouteSource(item.source_route)
-        ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`
+        ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(v210TransportLabel(item.transport))}`:''}</small>`
         : ''}
       ${(item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && parseResolvedRouteSource(item.source_route)
         // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
@@ -1089,7 +1095,17 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
       return false;
     });
   };
-  if(sectionType==='transport')ordered.sort((a,b)=>Number(hasMobilityCTA(b))-Number(hasMobilityCTA(a)));
+  if(sectionType==='transport')ordered.sort((a,b)=>{
+    // V210: chronological journey boundaries outrank affiliate CTA ranking.
+    // Within the remaining legs, retain the existing bookable-first behavior.
+    const rank=x=>x?.derived_by==='journey_start'?-2:x?.derived_by==='journey_return'?2:0;
+    const delta=rank(a)-rank(b);
+    if(delta)return delta;
+    const linked=Number(hasMobilityCTA(b))-Number(hasMobilityCTA(a));
+    if(linked)return linked;
+    const da=String(a?.travel_date||''),db=String(b?.travel_date||'');
+    return /^\d{4}-\d{2}-\d{2}$/.test(da)&&/^\d{4}-\d{2}-\d{2}$/.test(db)?da.localeCompare(db):0;
+  });
 
   const sectionKey=`${city||''}:${sectionId||sectionType}`;
   const expanded=expandedContextSections.has(sectionKey);
