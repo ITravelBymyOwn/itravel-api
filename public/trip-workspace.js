@@ -199,39 +199,46 @@ function v198SameAdmissionDecision(a,b){
   return descriptive.test(longer.slice(shorter.length).trim());
 }
 
-// V206: unify representations of the SAME dated intercity journey without
-// touching the commercial resolver, itinerary or independent provider matching.
-// Fail closed when either endpoints or the journey date cannot be established.
-function v206JourneyIdentity(item){
+// V207: One physical, dated transport decision may be represented by the
+// itinerary, journey story and contextual provider requests. Consolidate only
+// exact directional, single-leg journeys with a defensible calendar date.
+// Keep independent resolver offers untouched: the existing physical-leg
+// matcher attaches 12Go/Bookaway to the surviving itinerary card.
+function v207JourneyDate(item){
+  const explicit=parseDate(item?.travel_date);
+  if(explicit)return explicit;
+  const day=Number(item?.day);
+  if(!Number.isInteger(day)||day<1)return null;
+  // The city currently being rendered owns contextual day numbering; an
+  // optional item.city may name a subdestination without its own baseDate.
+  const originBase=base(item?.city||'')||base(city);
+  return originBase?addDays(originBase,day-1):null;
+}
+function v207JourneyIdentity(item){
   if(item?.category!=='transport' && !['intercity_transport','transport_arrangement'].includes(item?.need_type))return '';
   if(isRentalTransportNeed(item))return '';
   const legs=v190NeedLegs(item);
-  if(legs.length!==1)return ''; // Multi-leg journeys remain separate decisions.
+  if(legs.length!==1)return ''; // Do not collapse multi-leg trips or local access.
   const leg=legs[0];
-  if(!leg?.from||!leg?.to||leg.from===leg.to)return '';
-  const baseDate=base(item?.city||city);
-  const dayNumber=Number(item?.day);
-  const inferredDate=baseDate&&Number.isInteger(dayNumber)&&dayNumber>0?addDays(baseDate,dayNumber-1):null;
-  const rawDate=String(item?.travel_date||'').trim();
-  if(!rawDate)return '';
-  const date=parseDate(rawDate)||inferredDate;
-  if(!date)return ''; // No fuzzy merge across visits or unknown dates.
+  if(!leg.from||!leg.to||leg.from===leg.to)return '';
+  const date=v207JourneyDate(item);
+  if(!date)return ''; // Unknown dates remain distinct; never guess.
   const stamp=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
   return `${leg.from}>${leg.to}|${stamp}`;
 }
-function v206JourneyPreference(item){
+function v207JourneyPreference(item){
   const structured=Boolean(parseResolvedRouteSource(item?.source_route)?.legs?.length);
   const source=String(item?.derived_by||'');
-  return (structured?100:0)+ (source==='generated_itinerary'?40:source==='journey_story'||source==='journey_return'?30:source==='trip_sequence'?20:0) + (item?.travel_date?2:0);
+  return (structured?100:0)+(source==='generated_itinerary'?40:source==='journey_story'||source==='journey_return'?30:source==='trip_sequence'?20:0)+(item?.travel_date?2:0);
 }
-function v206ConsolidateJourneyNeeds(items=[]){
+function v207ConsolidateJourneyNeeds(items=[]){
   const out=[],positions=new Map();
   for(const item of items){
-    const key=v206JourneyIdentity(item);
+    const key=v207JourneyIdentity(item);
     if(!key){out.push(item);continue;}
     if(!positions.has(key)){positions.set(key,out.length);out.push(item);continue;}
     const pos=positions.get(key),existing=out[pos];
-    if(v206JourneyPreference(item)>v206JourneyPreference(existing))out[pos]=item;
+    if(v207JourneyPreference(item)>v207JourneyPreference(existing))out[pos]=item;
   }
   return out;
 }
@@ -239,7 +246,7 @@ function v206ConsolidateJourneyNeeds(items=[]){
 function dedupeContextualNeeds(items=[]){
   const rank=item=>item?.need_type==='ticket_required'?4:item?.need_type==='reservation_recommended'?3:item?.confidence==='high'?2:1;
   const out=[];
-  for(const item of items){
+  for(const item of v207ConsolidateJourneyNeeds(items)){
     const category=item?.category||(item?.need_type==='guided_tour_optional'?'tours':item?.need_type?.includes('transport')?'transport':'tickets');
     const overview=item?.need_type==='guided_tour_optional'&&/\b(city tour|tour panoramico|highlights tour)\b/.test(normalizeWorkspaceEntity(item?.entity_name||''));
     const match=out.findIndex(existing=>{
@@ -254,7 +261,11 @@ function dedupeContextualNeeds(items=[]){
       // can erase a legitimate return journey or a different travel day.
       if(category==='transport'){
         const a=v190NeedLegs(item),b=v190NeedLegs(existing);
-        if(a.length&&b.length)return String(item?.day||'')===String(existing?.day||'') && a.length===b.length && a.every((leg,i)=>leg.from===b[i].from&&leg.to===b[i].to);
+        if(a.length&&b.length){
+          const ai=v207JourneyIdentity(item),bi=v207JourneyIdentity(existing);
+          if(ai&&bi)return ai===bi;
+          return Number(item?.day)>0 && Number(existing?.day)>0 && String(item.day)===String(existing.day) && a.length===b.length && a.every((leg,i)=>leg.from===b[i].from&&leg.to===b[i].to);
+        }
         return String(item?.day||'')===String(existing?.day||'') && normalizeWorkspaceEntity(item?.source_route||item?.entity_name||'')===normalizeWorkspaceEntity(existing?.source_route||existing?.entity_name||'');
       }
       if(category==='tickets'&&v198SameAdmissionDecision(item,existing))return true;
@@ -262,7 +273,7 @@ function dedupeContextualNeeds(items=[]){
     });
     if(match<0)out.push(item);else if(rank(item)>rank(out[match]))out[match]=item;
   }
-  return v206ConsolidateJourneyNeeds(out);
+  return v207ConsolidateJourneyNeeds(out);
 }
 function isTourAlternativeEligible(row){
   const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
