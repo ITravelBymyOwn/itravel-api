@@ -139,6 +139,17 @@ function tripRoutes(){
   });
   const story=data?.journey_story;
   if(Array.isArray(story?.stays)&&story.stays.length){
+    // V209: the explicitly configured journey start is a real boundary
+    // movement, even though its origin is outside the first destination.
+    // Never infer a departure city, return trip or flight from a stay alone.
+    const start=story.start||{},first=story.stays[0];
+    const departure=String(start.origin?.label||'').trim();
+    const arrival=String(start.arrival?.label||first?.place||'').trim();
+    if(start.enabled===true&&departure&&arrival&&
+       normalizeWorkspaceEntity(arrival)===normalizeWorkspaceEntity(first?.place||'')){
+      add({id:'journey:start',origin:departure,destination:arrival,
+        travel_date:start.date||'',transport:start.transportMode||'',derived_by:'journey_start'});
+    }
     story.stays.slice(1).forEach((st,index)=>{
       const prev=story.stays[index];
       add({id:`journey:${st.id||index}`,origin:prev.place,destination:st.place,travel_date:st.departureDate||st.startDate,transport:st.transportMode||'',derived_by:'journey_story'});
@@ -724,7 +735,9 @@ function auditContextCoverageForCity(cityName,serverNeeds=[],visibleNeeds=[]){
 }
 
 function contextualNeedsForCity(cityName,needs){
-  if(journeyTransitOnly(cityName))return dedupeContextualNeeds(tripRoutes().filter(route=>normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName)));
+  if(journeyTransitOnly(cityName))return dedupeContextualNeeds(tripRoutes().filter(route=>
+    normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName)||
+    (route.derived_by==='journey_start'&&normalizeWorkspaceEntity(route.destination)===normalizeWorkspaceEntity(cityName))));
   // Server context for a main planning unit can contain rows that physically
   // belong to a subdestination. Keep only needs that belong to this physical
   // workspace slice; transport is re-derived from the authoritative route.
@@ -737,7 +750,9 @@ function contextualNeedsForCity(cityName,needs){
     const name=normalizeWorkspaceEntity(item?.entity_name||item?.source_activity||'');
     return !/\b(city tour|tour panoramico|highlights tour|tour de la ciudad|tour de ciudad)\b/i.test(name);
   });
-  const derivedRoutes=tripRoutes().filter(route=>normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName));
+  const derivedRoutes=tripRoutes().filter(route=>
+    normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName)||
+    (route.derived_by==='journey_start'&&normalizeWorkspaceEntity(route.destination)===normalizeWorkspaceEntity(cityName)));
   const normalizeRoute=value=>String(value||'').toLowerCase().replace(/\s+/g,' ').trim();
   const routeKeys=new Set(derivedRoutes.map(route=>normalizeRoute(route.source_route)));
   const authoritativeRoutes=new Map();
