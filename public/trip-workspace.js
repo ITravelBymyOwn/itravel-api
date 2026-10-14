@@ -199,42 +199,81 @@ function v198SameAdmissionDecision(a,b){
   return descriptive.test(longer.slice(shorter.length).trim());
 }
 
-// V207: One physical, dated transport decision may be represented by the
-// itinerary, journey story and contextual provider requests. Consolidate only
-// exact directional, single-leg journeys with a defensible calendar date.
-// Keep independent resolver offers untouched: the existing physical-leg
-// matcher attaches 12Go/Bookaway to the surviving itinerary card.
-function v207JourneyDate(item){
-  const explicit=parseDate(item?.travel_date);
-  if(explicit)return explicit;
-  const day=Number(item?.day);
-  if(!Number.isInteger(day)||day<1)return null;
-  // The city currently being rendered owns contextual day numbering; an
-  // optional item.city may name a subdestination without its own baseDate.
-  const originBase=base(item?.city||'')||base(city);
-  return originBase?addDays(originBase,day-1):null;
+// V208: An additional mobility suggestion must not create a second commercial
+// decision for a journey already described by the itinerary. Provider offers
+// remain independent; this code consolidates only the visible journey needs.
+function v208TransportNeed(item){
+  return item?.category==='transport'||['intercity_transport','transport_arrangement'].includes(item?.need_type);
+}
+function v208JourneyEndpoints(item){
+  if(!v208TransportNeed(item)||isRentalTransportNeed(item))return null;
+  // The authoritative route has a parent A→B even when its resolved payload
+  // contains station access and multiple physical legs.
+  const resolved=parseResolvedRouteSource(item?.source_route);
+  const parent=resolved?.parent||{};
+  let from=v190CommercialEndpoint(item?.origin||parent.origin||'');
+  let to=v190CommercialEndpoint(item?.destination||parent.destination||'');
+  if(!from||!to){
+    const legs=v190NeedLegs(item);
+    if(legs.length!==1)return null; // Never guess multi-leg endpoints.
+    from=legs[0].from;to=legs[0].to;
+  }
+  return from&&to&&from!==to?{from,to}:null;
+}
+function v208JourneyDate(item){
+  const raw=String(item?.travel_date||'').trim();
+  let date=parseDate(raw);
+  if(!date&&raw){
+    // fmt() emits localized dates (e.g. "24 oct 2026"). parseDate()
+    // intentionally only understands numeric dates, so handle display dates
+    // here without changing any global date or itinerary behavior.
+    const normalized=normalizeWorkspaceEntity(raw);
+    const match=normalized.match(/^(\d{1,2}) (ene|jan|feb|mar|abr|apr|may|jun|jul|ago|aug|sep|sept|oct|nov|dic|dec) (\d{4})$/);
+    const months={ene:0,jan:0,feb:1,mar:2,abr:3,apr:3,may:4,jun:5,jul:6,ago:7,aug:7,sep:8,sept:8,oct:9,nov:10,dic:11,dec:11};
+    if(match)date=new Date(Number(match[3]),months[match[2]],Number(match[1]));
+  }
+  if(!date){
+    const day=Number(item?.day);
+    if(Number.isInteger(day)&&day>0){
+      const origin=v208JourneyEndpoints(item)?.from;
+      const originBase=base(item?.city||'')||base(city)||Object.keys(data?.itineraries||{}).map(c=>normalizeWorkspaceEntity(c)===origin?base(c):null).find(Boolean);
+      if(originBase)date=addDays(originBase,day-1);
+    }
+  }
+  if(!date)return '';
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+}
+function v208JourneyRoute(item){
+  const endpoints=v208JourneyEndpoints(item);
+  return endpoints?`${endpoints.from}>${endpoints.to}`:'';
 }
 function v207JourneyIdentity(item){
-  if(item?.category!=='transport' && !['intercity_transport','transport_arrangement'].includes(item?.need_type))return '';
-  if(isRentalTransportNeed(item))return '';
-  const legs=v190NeedLegs(item);
-  if(legs.length!==1)return ''; // Do not collapse multi-leg trips or local access.
-  const leg=legs[0];
-  if(!leg.from||!leg.to||leg.from===leg.to)return '';
-  const date=v207JourneyDate(item);
-  if(!date)return ''; // Unknown dates remain distinct; never guess.
-  const stamp=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-  return `${leg.from}>${leg.to}|${stamp}`;
+  const route=v208JourneyRoute(item),date=v208JourneyDate(item);
+  return route&&date?`${route}|${date}`:'';
 }
 function v207JourneyPreference(item){
   const structured=Boolean(parseResolvedRouteSource(item?.source_route)?.legs?.length);
   const source=String(item?.derived_by||'');
-  return (structured?100:0)+(source==='generated_itinerary'?40:source==='journey_story'||source==='journey_return'?30:source==='trip_sequence'?20:0)+(item?.travel_date?2:0);
+  return (structured?1000:0)+(source==='generated_itinerary'?400:source==='journey_story'||source==='journey_return'?300:source==='trip_sequence'?200:source==='v187_physical_itinerary'?100:0)+(item?.travel_date?2:0);
 }
 function v207ConsolidateJourneyNeeds(items=[]){
   const out=[],positions=new Map();
+  const authoritativeByRoute=new Map();
   for(const item of items){
-    const key=v207JourneyIdentity(item);
+    const route=v208JourneyRoute(item),date=v208JourneyDate(item);
+    if(!route||!date)continue;
+    const set=authoritativeByRoute.get(route)||new Set();set.add(date);authoritativeByRoute.set(route,set);
+  }
+  for(const item of items){
+    const route=v208JourneyRoute(item);
+    let key=v207JourneyIdentity(item);
+    if(route&&!key){
+      // An undated additional suggestion can join a dated decision ONLY if
+      // this direction occurs on exactly one known date. Never merge repeated
+      // journeys on different dates or silently assign a guessed date.
+      const dates=authoritativeByRoute.get(route);
+      if(dates?.size===1)key=`${route}|${[...dates][0]}`;
+    }
     if(!key){out.push(item);continue;}
     if(!positions.has(key)){positions.set(key,out.length);out.push(item);continue;}
     const pos=positions.get(key),existing=out[pos];
@@ -701,11 +740,19 @@ function contextualNeedsForCity(cityName,needs){
   const derivedRoutes=tripRoutes().filter(route=>normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName));
   const normalizeRoute=value=>String(value||'').toLowerCase().replace(/\s+/g,' ').trim();
   const routeKeys=new Set(derivedRoutes.map(route=>normalizeRoute(route.source_route)));
+  const authoritativeRoutes=new Map();
+  derivedRoutes.forEach(route=>{const key=v208JourneyRoute(route);if(!key)return;const set=authoritativeRoutes.get(key)||new Set();const date=v208JourneyDate(route);if(date)set.add(date);authoritativeRoutes.set(key,set);});
+  const coveredByItinerary=item=>{
+    const key=v208JourneyRoute(item),dates=authoritativeRoutes.get(key);
+    if(!key||!dates?.size)return false;
+    const date=v208JourneyDate(item);
+    return date?dates.has(date):dates.size===1;
+  };
   const rentalPlan=rentalPlanForCity(cityName);
   const withoutDuplicateTopLevelRoutes=source.filter(item=>{
     if(rentalPlan && isRentalTransportNeed(item)) return false;
     if(item?.need_type!=='intercity_transport' && item?.need_type!=='transport_arrangement') return true;
-    return !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
+    return !coveredByItinerary(item) && !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
   const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
   merged.push(...v187ProviderMobilityNeeds(cityName,merged));
@@ -1248,7 +1295,17 @@ function v187ProviderMobilityNeeds(cityName,existing=[]){
       // remain eligible even when ITBMO recommends a private vehicle.
       if(/\b(a pie|walking|caminar|caminata|taxi local|local taxi)\b/i.test(movement)&&!/(tren|train|ferrocarril|rail|bus|autobus|ferry|regreso regional|regional transfer)/i.test(movement))return;
       const source=`${from} → ${to}`,key=normalizeWorkspaceEntity(source)+'|'+dayNo;
-      if(seen.has(key))return;seen.add(key);
+      if(seen.has(key))return;
+      const candidate={category:'transport',need_type:'transport_arrangement',city:cityName,day:dayNo,
+        travel_date:baseDate?fmt(addDays(baseDate,dayNo-1)):'',source_route:source};
+      const candidateIdentity=v207JourneyIdentity(candidate);
+      const alreadyCovered=(existing||[]).some(item=>{
+        if(!v208TransportNeed(item))return false;
+        const identity=v207JourneyIdentity(item);
+        return identity&&candidateIdentity&&identity===candidateIdentity;
+      });
+      if(alreadyCovered)return;
+      seen.add(key);
       out.push({id:`v187-mobility:${cityName}:${dayNo}:${index+1}`,category:'transport',need_type:'transport_arrangement',city:cityName,day:dayNo,
         travel_date:baseDate?fmt(addDays(baseDate,dayNo-1)):'',entity_name:source,source_activity:String(row?.activity||''),source_route:source,
         transport:String(row?.transport||''),derived_by:'v187_physical_itinerary',
