@@ -320,6 +320,59 @@ function v214SameMobilityDecision(a,b){
   return Number.isInteger(da)&&da>0&&da===db &&
     normalizeWorkspaceEntity(a?.city||'')===normalizeWorkspaceEntity(b?.city||'');
 }
+// V215: reconcile mixed GLOBAL vs STAY-LOCAL day numbering only when the
+// itinerary independently proves one unique same-direction physical journey.
+// This is a display/identity correction; route discovery and partner URL
+// generation are unchanged. Ambiguous repeated routes are never guessed.
+function v215ReconcileMobilityDays(cityName,items=[]){
+  const anchors=new Map();
+  for(const item of items){
+    if(item?.derived_by!=='v187_physical_itinerary' || !v208TransportNeed(item))continue;
+    const route=v208JourneyRoute(item),date=v208JourneyDate(item);
+    if(!route||!date)continue;
+    const dates=anchors.get(route)||new Map();
+    dates.set(date,item);anchors.set(route,dates);
+  }
+  return items.map(item=>{
+    if(!v208TransportNeed(item)||isRentalTransportNeed(item)||item?.derived_by==='v187_physical_itinerary')return item;
+    // Preserve complex resolved routes: never confuse a segment with its parent.
+    if((parseResolvedRouteSource(item?.source_route)?.legs?.length||0)>1)return item;
+    const route=v208JourneyRoute(item),matches=anchors.get(route);
+    if(!route||!matches||matches.size!==1)return item;
+    const [date,anchor]=[...matches.entries()][0];
+    const current=v208JourneyDate(item);
+    if(current===date && Number(item?.day)===Number(anchor.day))return item;
+    // A valid explicit date on a different day is authoritative, not an alias.
+    // Only re-anchor when the source is a server Context record, not a
+    // user-specified independent journey or a distinct itinerary transfer.
+    const source=String(item?.derived_by||'');
+    if(source && source!=='server' && source!=='context' && source!=='contextual')return item;
+    const explicit=String(item?.travel_date||'').trim();
+    if(explicit && current && current!==date){
+      // Never overwrite a genuinely different dated journey.
+      // The global/local mismatch is provable only if the itinerary's exact
+      // activity title also matches this contextual need.
+      const activity=normalizeWorkspaceEntity(item?.source_activity||'');
+      const anchorActivity=normalizeWorkspaceEntity(anchor?.source_activity||'');
+      const matchesActivity=Boolean(activity&&activity===anchorActivity);
+      // Context sometimes labels a GLOBAL day using the STAY base date,
+      // yielding a date outside the stay (e.g. local day 2 vs global 13).
+      // Recognize this only if the displayed date is exactly the erroneous
+      // base+global-day offset and the journey has one local occurrence.
+      const stay=base(cityName);
+      const stayDays=days(cityName);
+      const maxLocal=stayDays.length?Math.max(...stayDays):0;
+      const globalDay=Number(item?.day);
+      const inferred=stay&&Number.isInteger(globalDay)&&globalDay>maxLocal?
+        addDays(stay,globalDay-1):null;
+      const inferredDate=inferred?`${inferred.getFullYear()}-${String(inferred.getMonth()+1).padStart(2,'0')}-${String(inferred.getDate()).padStart(2,'0')}`:'';
+      const inferredMismatch=Boolean(inferredDate&&current===inferredDate);
+      if(!matchesActivity&&!inferredMismatch)return item;
+    }
+    return {...item,day:anchor.day,travel_date:anchor.travel_date,
+      _v215_reconciled:true};
+  });
+}
 function dedupeContextualNeeds(items=[]){
   const rank=item=>item?.need_type==='ticket_required'?4:item?.need_type==='reservation_recommended'?3:item?.confidence==='high'?2:1;
   const out=[];
@@ -829,7 +882,7 @@ function contextualNeedsForCity(cityName,needs){
   // only from the itinerary's own paid anchors; never invent destinations.
   const regionalTours=regionalTourAlternativeForCity(cityName,merged);
   if(regionalTours.length) merged.push(...regionalTours);
-  let finalNeeds=dedupeContextualNeeds(merged);
+  let finalNeeds=dedupeContextualNeeds(v215ReconcileMobilityDays(cityName,merged));
   // Deterministic product rule: every real tourist destination gets exactly one
   // destination-wide City Tour option. Never depend on the LLM classifier for it.
   const hasOverview=finalNeeds.some(item=>item?.need_type==='guided_tour_optional' && /\b(city tour|tour panoramico|highlights tour)\b/i.test(normalizeWorkspaceEntity(item?.entity_name||'')));
