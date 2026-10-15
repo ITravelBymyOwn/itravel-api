@@ -216,18 +216,28 @@ function v198SameAdmissionDecision(a,b){
 function v208TransportNeed(item){
   return item?.category==='transport'||['intercity_transport','transport_arrangement'].includes(item?.need_type);
 }
+// V213: narrow equivalence for station-area labels generated from itinerary
+// prose (e.g. "Área de Interlaken Ost") and the actual station endpoint.
+// Do not strip generic "area"/"station" names: only accept a named station
+// with a distinctive station suffix. Provider endpoints and URLs are untouched.
+function v213JourneyEndpoint(value){
+  const key=v190CommercialEndpoint(value);
+  const match=key.match(/^(?:area de|zona de|area of|area around|vicinity of) (.+)$/);
+  if(match && /\b(?:ost|west|hbf|hb|bahnhof|station|estacion|stazione|gare|centrale|central)\b/.test(match[1]))return match[1];
+  return key;
+}
 function v208JourneyEndpoints(item){
   if(!v208TransportNeed(item)||isRentalTransportNeed(item))return null;
   // The authoritative route has a parent A→B even when its resolved payload
   // contains station access and multiple physical legs.
   const resolved=parseResolvedRouteSource(item?.source_route);
   const parent=resolved?.parent||{};
-  let from=v190CommercialEndpoint(item?.origin||parent.origin||'');
-  let to=v190CommercialEndpoint(item?.destination||parent.destination||'');
+  let from=v213JourneyEndpoint(item?.origin||parent.origin||'');
+  let to=v213JourneyEndpoint(item?.destination||parent.destination||'');
   if(!from||!to){
     const legs=v190NeedLegs(item);
     if(legs.length!==1)return null; // Never guess multi-leg endpoints.
-    from=legs[0].from;to=legs[0].to;
+    from=v213JourneyEndpoint(legs[0].from);to=v213JourneyEndpoint(legs[0].to);
   }
   return from&&to&&from!==to?{from,to}:null;
 }
