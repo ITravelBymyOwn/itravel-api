@@ -458,6 +458,11 @@ function rentalPlanForCity(cityName){
   const scopeDays=explicitWholeStay?cityDays:(explicitDays.length?explicitDays:recommendedDays);
   if(!scopeDays.length)return null;
   const userSelected=explicitWholeStay||explicitDays.length>0;
+  // V212: A road-day heuristic is not a traveler rental-car choice.
+  // Explicit train/public-transit preferences take priority over an inferred
+  // optional rental. Preserve rentals actually selected by the traveler.
+  const prefersPublicTransit=/\b(tren|train|ferrocarril|rail|transporte publico|public transport|public transit|autobus|autobus publico|bus publico|bus urbano|autobus urbano|urban bus|metro|subway)\b/i.test(normalizeWorkspaceEntity(metaTransport));
+  if(!userSelected&&prefersPublicTransit)return null;
   const wholeStay=explicitWholeStay||(userSelected&&scopeDays.length===cityDays.length);
   const startDay=scopeDays[0],endDay=scopeDays[scopeDays.length-1];
   const contiguous=scopeDays.every((d,i)=>i===0||d===scopeDays[i-1]+1);
