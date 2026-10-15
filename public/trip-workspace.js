@@ -303,6 +303,23 @@ function v207ConsolidateJourneyNeeds(items=[]){
   return out;
 }
 
+// V214: presentation-only reconciliation for two independently-derived mobility
+// needs. Keep provider route resolution and the physical itinerary untouched.
+// Require one identical directional journey AND an independently corroborated
+// day/date. Never collapse a multi-leg commercial journey into a local leg.
+function v214SameMobilityDecision(a,b){
+  if(!v208TransportNeed(a)||!v208TransportNeed(b)||isRentalTransportNeed(a)||isRentalTransportNeed(b))return false;
+  const aa=parseResolvedRouteSource(a?.source_route),bb=parseResolvedRouteSource(b?.source_route);
+  if((aa?.legs?.length||0)>1||(bb?.legs?.length||0)>1)return false;
+  const x=v208JourneyEndpoints(a),y=v208JourneyEndpoints(b);
+  if(!x||!y||x.from!==y.from||x.to!==y.to)return false;
+  const ad=v208JourneyDate(a),bd=v208JourneyDate(b);
+  if(ad&&bd)return ad===bd;
+  // An unverified date cannot be inferred from a matching route alone.
+  const da=Number(a?.day),db=Number(b?.day);
+  return Number.isInteger(da)&&da>0&&da===db &&
+    normalizeWorkspaceEntity(a?.city||'')===normalizeWorkspaceEntity(b?.city||'');
+}
 function dedupeContextualNeeds(items=[]){
   const rank=item=>item?.need_type==='ticket_required'?4:item?.need_type==='reservation_recommended'?3:item?.confidence==='high'?2:1;
   const out=[];
@@ -320,6 +337,9 @@ function dedupeContextualNeeds(items=[]){
       // V195: mobility is directional and date-sensitive. Fuzzy POI matching
       // can erase a legitimate return journey or a different travel day.
       if(category==='transport'){
+        // V214: resolve station-area aliases consistently before falling back
+        // to legacy leg matching; prefer the richer commercial record below.
+        if(v214SameMobilityDecision(item,existing))return true;
         const a=v190NeedLegs(item),b=v190NeedLegs(existing);
         if(a.length&&b.length){
           const ai=v207JourneyIdentity(item),bi=v207JourneyIdentity(existing);
@@ -331,7 +351,10 @@ function dedupeContextualNeeds(items=[]){
       if(category==='tickets'&&v198SameAdmissionDecision(item,existing))return true;
       return sameWorkspaceEntity(item?.entity_name||item?.source_activity,existing?.entity_name||existing?.source_activity);
     });
-    if(match<0)out.push(item);else if(rank(item)>rank(out[match]))out[match]=item;
+    if(match<0)out.push(item);
+    else if(category==='transport' && v214SameMobilityDecision(item,out[match])){
+      if(v207JourneyPreference(item)>v207JourneyPreference(out[match]))out[match]=item;
+    }else if(rank(item)>rank(out[match]))out[match]=item;
   }
   return v207ConsolidateJourneyNeeds(out);
 }
