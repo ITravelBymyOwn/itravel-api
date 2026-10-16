@@ -16,7 +16,6 @@ const GUEST_HANDOFF_KEY='itbmo_workspace_guest_handoff_v1';
 const WORKSPACE_OPEN_HANDOFF_KEY='itbmo_workspace_open_handoff_v1';
 const PLANNER_OPEN_HANDOFF_KEY='itbmo_planner_open_handoff_v1';
 const $=(s,r=document)=>r.querySelector(s);
-try{if(window.name!=='itbmo-workspace')window.name='itbmo-workspace';}catch(_){}
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 let data=null,city=null,day=null,mode='itinerary';
 let plannerPresenceWatchTimer=null;
@@ -47,17 +46,10 @@ function normalizeTripLanguage(value){
 function parseDate(v){if(!v)return null;let m=String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(m)return new Date(+m[3],+m[2]-1,+m[1]);m=String(v).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);return null}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
 function fmt(d){if(!d)return'';return new Intl.DateTimeFormat(lang==='es'?'es-ES':'en-US',{day:'numeric',month:'short',year:'numeric'}).format(d)}
-// V204: presentation-only journey authority; never alters paid generation or partner resolvers.
-function journeyStays(){return Array.isArray(data?.journey_story?.stays)?data.journey_story.stays:[]}
-function journeyVisits(c){const key=normalizeWorkspaceEntity(c);return journeyStays().filter(st=>normalizeWorkspaceEntity(st?.place)===key)}
-function journeyTouristVisits(c){return journeyVisits(c).filter(st=>!st.transitOnly)}
-function journeyTransitOnly(c){const visits=journeyVisits(c);return visits.length>0&&!visits.some(st=>!st.transitOnly)}
-function journeyTouristDays(c){return journeyTouristVisits(c).reduce((sum,st)=>sum+Math.max(1,Number(st.days)||1),0)}
-function journeyRange(c){const visits=journeyVisits(c);if(!visits.length)return null;const tourist=visits.filter(st=>!st.transitOnly);const selected=tourist.length?tourist:visits;const dates=[];selected.forEach(st=>{const start=parseDate(st.startDate);if(!start)return;dates.push(start);if(!st.transitOnly)dates.push(addDays(start,Math.max(1,Number(st.days)||1)-1))});if(!dates.length)return null;dates.sort((a,b)=>a-b);return fmt(dates[0])===fmt(dates.at(-1))?fmt(dates[0]):`${fmt(dates[0])} – ${fmt(dates.at(-1))}`}
-function cities(){const ordered=(data?.destinations||[]).map(x=>x.city).filter(Boolean),extras=Object.keys(data?.itineraries||{}).filter(x=>!ordered.includes(x));return [...ordered,...extras,...journeyStays().map(st=>st?.place).filter(Boolean)].filter((c,i,a)=>a.findIndex(x=>normalizeWorkspaceEntity(x)===normalizeWorkspaceEntity(c))===i).filter(c=>journeyVisits(c).length||days(c).some(d=>(data?.itineraries?.[c]?.byDay?.[d]||[]).length))}
+function cities(){const ordered=(data?.destinations||[]).map(x=>x.city).filter(Boolean),extras=Object.keys(data?.itineraries||{}).filter(x=>!ordered.includes(x));return [...ordered,...extras].filter(c=>days(c).some(d=>(data?.itineraries?.[c]?.byDay?.[d]||[]).length))}
 function days(c){return Object.keys(data?.itineraries?.[c]?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b)}
 function base(c){return parseDate(data?.itineraries?.[c]?.baseDate||data?.city_meta?.[c]?.baseDate||'')}
-function range(c){const canonical=journeyRange(c);if(canonical)return canonical;const ds=days(c),b=base(c);if(!b||!ds.length)return'';const a=fmt(addDays(b,ds[0]-1)),z=fmt(addDays(b,ds.at(-1)-1));return a===z?a:`${a} – ${z}`}
+function range(c){const ds=days(c),b=base(c);if(!b||!ds.length)return'';const a=fmt(addDays(b,ds[0]-1)),z=fmt(addDays(b,ds.at(-1)-1));return a===z?a:`${a} – ${z}`}
 function dayDate(c,d){const b=base(c),n=Number(d);return b&&Number.isFinite(n)&&n>0?fmt(addDays(b,n-1)):''}
 function travelDateLabel(raw){const parsed=parseDate(raw);return parsed?fmt(parsed):String(raw||'').trim()}
 function encodeWorkspaceResolvedRoute(row){
@@ -75,10 +67,15 @@ const plannerUrl=`./planner.html?lang=${encodeURIComponent(lang)}`;
 const homeUrl=lang==='en'?'./preview-home-en.html':'./preview-home.html';
 try{ localStorage.setItem('itbmo_site_language',lang); }catch(_){ }
 const brand=$('.tw-brand');if(brand)brand.setAttribute('href',homeUrl);
+$('#tw-back-planner').setAttribute('data-planner-url',plannerUrl);
+$('#tw-back-planner').setAttribute('aria-label',t.back);
+$('#tw-empty-back').setAttribute('data-planner-url',plannerUrl);
+$('#tw-empty-back').textContent=t.back;
 const badge=$('#tw-prepare-badge');if(badge)badge.textContent=t.prepareBadge;
-
-$('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
-function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+(journeyVisits(c).length?journeyTouristDays(c):days(c).length),0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${journeyTransitOnly(c)?(lang==='es'?'Sólo tránsito':'Transit only'):`${journeyVisits(c).length?journeyTouristDays(c):days(c).length} ${esc(t.ds)} ${esc(t.organized)}`}</p><span class="tw-city-go">${journeyTransitOnly(c)?(lang==='es'?'Ver conexiones':'View connections'):esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
+$('#tw-back-label').textContent=t.back;
+$('#tw-my-trips-label').textContent=t.myTrips;
+$('#tw-my-trips').setAttribute('aria-label',t.myTrips);$('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
+function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+days(c).length,0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${days(c).length} ${esc(t.ds)} ${esc(t.organized)}</p><span class="tw-city-go">${esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
 function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='prepare';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
 function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw-city-dates').textContent=range(city);const ib=$('#tw-mode-itinerary'),pb=$('#tw-mode-prepare');ib.classList.toggle('active',mode==='itinerary');pb.classList.toggle('active',mode==='prepare');ib.setAttribute('aria-selected',mode==='itinerary');pb.setAttribute('aria-selected',mode==='prepare');renderDays();mode==='itinerary'?renderItinerary():renderPrepare();window.dispatchEvent(new Event('tw:prepare-mode-changed'))}
 function renderDays(){const nav=$('#tw-days');nav.hidden=mode!=='itinerary';nav.innerHTML='';if(nav.hidden)return;days(city).forEach(d=>{const b=document.createElement('button');b.type='button';b.className='tw-day'+(d===day?' active':'');const date=dayDate(city,d);b.textContent=(lang==='es'?`Día ${d}`:`Day ${d}`)+(date?` · ${date}`:'');b.onclick=()=>{day=d;renderCity();window.scrollTo({top:Math.max(0,$('#tw-content').offsetTop-160),behavior:'smooth'})};nav.appendChild(b)})}
@@ -137,25 +134,6 @@ function tripRoutes(){
       });
     });
   });
-  const story=data?.journey_story;
-  if(Array.isArray(story?.stays)&&story.stays.length){
-    // V209: the explicitly configured journey start is a real boundary
-    // movement, even though its origin is outside the first destination.
-    // Never infer a departure city, return trip or flight from a stay alone.
-    const start=story.start||{},first=story.stays[0];
-    const departure=String(start.origin?.label||'').trim();
-    const arrival=String(start.arrival?.label||first?.place||'').trim();
-    if(start.enabled===true&&departure&&arrival&&
-       normalizeWorkspaceEntity(arrival)===normalizeWorkspaceEntity(first?.place||'')){
-      add({id:'journey:start',origin:departure,destination:arrival,
-        travel_date:start.date||'',transport:start.transportMode||'',derived_by:'journey_start'});
-    }
-    story.stays.slice(1).forEach((st,index)=>{
-      const prev=story.stays[index];
-      add({id:`journey:${st.id||index}`,origin:prev.place,destination:st.place,travel_date:st.departureDate||st.startDate,transport:st.transportMode||'',derived_by:'journey_story'});
-    });
-    if(story.returnTrip?.enabled){const last=story.stays.at(-1);const actualOrigin=story.returnTrip.origin?.label||last?.place;add({id:'journey:return',origin:actualOrigin,destination:story.returnTrip.arrival?.label,travel_date:story.returnTrip.departureDate||'',transport:story.returnTrip.transportMode||'',derived_by:'journey_return'});}
-  }
   // Preserve main-destination transitions that may not have an explicit row
   // because they occur between planning units.
   const sourceDestinations=Array.isArray(data?.source_destinations)?data.source_destinations:[];
@@ -172,211 +150,14 @@ function normalizeWorkspaceEntity(value){
 function workspaceEntityCore(value){
   return normalizeWorkspaceEntity(value).replace(/\b(city tour|tour panoramico|highlights tour|guided tour|visita guiada|tour de|entrada|ticket|interior|torres?|tower|patios?|salones?|apartamentos? reales?|royal apartments?)\b/g,' ').replace(/\s+/g,' ').trim();
 }
-function workspaceEntityTokens(value){
-  const stop=new Set(['de','del','la','las','el','los','y','and','the','of','en','in','conjunto','complex','sitio','site','templo','temple']);
-  return workspaceEntityCore(value).split(' ').filter(token=>token.length>2&&!stop.has(token));
-}
 function sameWorkspaceEntity(a,b){
   const x=workspaceEntityCore(a),y=workspaceEntityCore(b);
-  if(!x||!y)return false;
-  if(x===y||(Math.min(x.length,y.length)>=7&&(x.includes(y)||y.includes(x))))return true;
-  // Canonical aliases such as “Qorikancha y conjunto de Santo Domingo” versus
-  // “Templo del Qorikancha” must collapse into one commercial decision without
-  // changing either itinerary row. Require a strong distinctive-token overlap.
-  const xt=workspaceEntityTokens(a),yt=workspaceEntityTokens(b);
-  if(!xt.length||!yt.length)return false;
-  const shared=xt.filter(token=>yt.includes(token));
-  const shortest=Math.min(xt.length,yt.length);
-  return shared.some(token=>token.length>=6) && shared.length/shortest>=0.5;
-}
-
-// V198 · Admission-equivalence guard. A named attraction and a descriptive
-// "surrounding landscape / entorno" card can describe the SAME admission
-// decision on the SAME day. Do not collapse different monuments, tour products,
-// or visits on different days. The check is destination-agnostic.
-function v198SameAdmissionDecision(a,b){
-  if(!['ticket_required','reservation_recommended'].includes(a?.need_type)||
-     !['ticket_required','reservation_recommended'].includes(b?.need_type))return false;
-  if(String(a?.day||'')!==String(b?.day||''))return false;
-  const x=workspaceEntityCore(a?.entity_name||a?.source_activity||'');
-  const y=workspaceEntityCore(b?.entity_name||b?.source_activity||'');
-  if(!x||!y)return false;
-  const descriptive=/^(?:y |and |& )?(?:entorno|alrededores|paisaje|area circundante|surroundings|surrounding area|surrounding landscape|landscape|landscapes|landscape and surroundings)\b/;
-  const shorter=x.length<=y.length?x:y;
-  const longer=x.length<=y.length?y:x;
-  // Require an identifiable attraction name, not generic words such as "park".
-  if(shorter.length<5||shorter.split(' ').length>5)return false;
-  if(!longer.startsWith(shorter+' '))return false;
-  return descriptive.test(longer.slice(shorter.length).trim());
-}
-
-// V208: An additional mobility suggestion must not create a second commercial
-// decision for a journey already described by the itinerary. Provider offers
-// remain independent; this code consolidates only the visible journey needs.
-function v208TransportNeed(item){
-  return item?.category==='transport'||['intercity_transport','transport_arrangement'].includes(item?.need_type);
-}
-// V213: narrow equivalence for station-area labels generated from itinerary
-// prose (e.g. "Área de Interlaken Ost") and the actual station endpoint.
-// Do not strip generic "area"/"station" names: only accept a named station
-// with a distinctive station suffix. Provider endpoints and URLs are untouched.
-function v213JourneyEndpoint(value){
-  const key=v190CommercialEndpoint(value);
-  const match=key.match(/^(?:area de|zona de|area of|area around|vicinity of) (.+)$/);
-  if(match && /\b(?:ost|west|hbf|hb|bahnhof|station|estacion|stazione|gare|centrale|central)\b/.test(match[1]))return match[1];
-  return key;
-}
-function v208JourneyEndpoints(item){
-  if(!v208TransportNeed(item)||isRentalTransportNeed(item))return null;
-  // The authoritative route has a parent A→B even when its resolved payload
-  // contains station access and multiple physical legs.
-  const resolved=parseResolvedRouteSource(item?.source_route);
-  const parent=resolved?.parent||{};
-  let from=v213JourneyEndpoint(item?.origin||parent.origin||'');
-  let to=v213JourneyEndpoint(item?.destination||parent.destination||'');
-  if(!from||!to){
-    const legs=v190NeedLegs(item);
-    if(legs.length!==1)return null; // Never guess multi-leg endpoints.
-    from=v213JourneyEndpoint(legs[0].from);to=v213JourneyEndpoint(legs[0].to);
-  }
-  return from&&to&&from!==to?{from,to}:null;
-}
-function v208JourneyDate(item){
-  const raw=String(item?.travel_date||'').trim();
-  let date=parseDate(raw);
-  if(!date&&raw){
-    // fmt() emits localized dates (e.g. "24 oct 2026"). parseDate()
-    // intentionally only understands numeric dates, so handle display dates
-    // here without changing any global date or itinerary behavior.
-    const normalized=normalizeWorkspaceEntity(raw);
-    const match=normalized.match(/^(\d{1,2}) (ene|jan|feb|mar|abr|apr|may|jun|jul|ago|aug|sep|sept|oct|nov|dic|dec) (\d{4})$/);
-    const months={ene:0,jan:0,feb:1,mar:2,abr:3,apr:3,may:4,jun:5,jul:6,ago:7,aug:7,sep:8,sept:8,oct:9,nov:10,dic:11,dec:11};
-    if(match)date=new Date(Number(match[3]),months[match[2]],Number(match[1]));
-  }
-  if(!date){
-    const day=Number(item?.day);
-    if(Number.isInteger(day)&&day>0){
-      const origin=v208JourneyEndpoints(item)?.from;
-      const originBase=base(item?.city||'')||base(city)||Object.keys(data?.itineraries||{}).map(c=>normalizeWorkspaceEntity(c)===origin?base(c):null).find(Boolean);
-      if(originBase)date=addDays(originBase,day-1);
-    }
-  }
-  if(!date)return '';
-  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-}
-function v208JourneyRoute(item){
-  const endpoints=v208JourneyEndpoints(item);
-  return endpoints?`${endpoints.from}>${endpoints.to}`:'';
-}
-function v207JourneyIdentity(item){
-  const route=v208JourneyRoute(item),date=v208JourneyDate(item);
-  return route&&date?`${route}|${date}`:'';
-}
-function v207JourneyPreference(item){
-  const structured=Boolean(parseResolvedRouteSource(item?.source_route)?.legs?.length);
-  const source=String(item?.derived_by||'');
-  return (structured?1000:0)+(source==='generated_itinerary'?400:source==='journey_story'||source==='journey_return'?300:source==='trip_sequence'?200:source==='v187_physical_itinerary'?100:0)+(item?.travel_date?2:0);
-}
-function v207ConsolidateJourneyNeeds(items=[]){
-  const out=[],positions=new Map();
-  const authoritativeByRoute=new Map();
-  for(const item of items){
-    const route=v208JourneyRoute(item),date=v208JourneyDate(item);
-    if(!route||!date)continue;
-    const set=authoritativeByRoute.get(route)||new Set();set.add(date);authoritativeByRoute.set(route,set);
-  }
-  for(const item of items){
-    const route=v208JourneyRoute(item);
-    let key=v207JourneyIdentity(item);
-    if(route&&!key){
-      // An undated additional suggestion can join a dated decision ONLY if
-      // this direction occurs on exactly one known date. Never merge repeated
-      // journeys on different dates or silently assign a guessed date.
-      const dates=authoritativeByRoute.get(route);
-      if(dates?.size===1)key=`${route}|${[...dates][0]}`;
-    }
-    if(!key){out.push(item);continue;}
-    if(!positions.has(key)){positions.set(key,out.length);out.push(item);continue;}
-    const pos=positions.get(key),existing=out[pos];
-    if(v207JourneyPreference(item)>v207JourneyPreference(existing))out[pos]=item;
-  }
-  return out;
-}
-
-// V214: presentation-only reconciliation for two independently-derived mobility
-// needs. Keep provider route resolution and the physical itinerary untouched.
-// Require one identical directional journey AND an independently corroborated
-// day/date. Never collapse a multi-leg commercial journey into a local leg.
-function v214SameMobilityDecision(a,b){
-  if(!v208TransportNeed(a)||!v208TransportNeed(b)||isRentalTransportNeed(a)||isRentalTransportNeed(b))return false;
-  const aa=parseResolvedRouteSource(a?.source_route),bb=parseResolvedRouteSource(b?.source_route);
-  if((aa?.legs?.length||0)>1||(bb?.legs?.length||0)>1)return false;
-  const x=v208JourneyEndpoints(a),y=v208JourneyEndpoints(b);
-  if(!x||!y||x.from!==y.from||x.to!==y.to)return false;
-  const ad=v208JourneyDate(a),bd=v208JourneyDate(b);
-  if(ad&&bd)return ad===bd;
-  // An unverified date cannot be inferred from a matching route alone.
-  const da=Number(a?.day),db=Number(b?.day);
-  return Number.isInteger(da)&&da>0&&da===db &&
-    normalizeWorkspaceEntity(a?.city||'')===normalizeWorkspaceEntity(b?.city||'');
-}
-// V215: reconcile mixed GLOBAL vs STAY-LOCAL day numbering only when the
-// itinerary independently proves one unique same-direction physical journey.
-// This is a display/identity correction; route discovery and partner URL
-// generation are unchanged. Ambiguous repeated routes are never guessed.
-function v215ReconcileMobilityDays(cityName,items=[]){
-  const anchors=new Map();
-  for(const item of items){
-    if(item?.derived_by!=='v187_physical_itinerary' || !v208TransportNeed(item))continue;
-    const route=v208JourneyRoute(item),date=v208JourneyDate(item);
-    if(!route||!date)continue;
-    const dates=anchors.get(route)||new Map();
-    dates.set(date,item);anchors.set(route,dates);
-  }
-  return items.map(item=>{
-    if(!v208TransportNeed(item)||isRentalTransportNeed(item)||item?.derived_by==='v187_physical_itinerary')return item;
-    // Preserve complex resolved routes: never confuse a segment with its parent.
-    if((parseResolvedRouteSource(item?.source_route)?.legs?.length||0)>1)return item;
-    const route=v208JourneyRoute(item),matches=anchors.get(route);
-    if(!route||!matches||matches.size!==1)return item;
-    const [date,anchor]=[...matches.entries()][0];
-    const current=v208JourneyDate(item);
-    if(current===date && Number(item?.day)===Number(anchor.day))return item;
-    // A valid explicit date on a different day is authoritative, not an alias.
-    // Only re-anchor when the source is a server Context record, not a
-    // user-specified independent journey or a distinct itinerary transfer.
-    const source=String(item?.derived_by||'');
-    if(source && source!=='server' && source!=='context' && source!=='contextual')return item;
-    const explicit=String(item?.travel_date||'').trim();
-    if(explicit && current && current!==date){
-      // Never overwrite a genuinely different dated journey.
-      // The global/local mismatch is provable only if the itinerary's exact
-      // activity title also matches this contextual need.
-      const activity=normalizeWorkspaceEntity(item?.source_activity||'');
-      const anchorActivity=normalizeWorkspaceEntity(anchor?.source_activity||'');
-      const matchesActivity=Boolean(activity&&activity===anchorActivity);
-      // Context sometimes labels a GLOBAL day using the STAY base date,
-      // yielding a date outside the stay (e.g. local day 2 vs global 13).
-      // Recognize this only if the displayed date is exactly the erroneous
-      // base+global-day offset and the journey has one local occurrence.
-      const stay=base(cityName);
-      const stayDays=days(cityName);
-      const maxLocal=stayDays.length?Math.max(...stayDays):0;
-      const globalDay=Number(item?.day);
-      const inferred=stay&&Number.isInteger(globalDay)&&globalDay>maxLocal?
-        addDays(stay,globalDay-1):null;
-      const inferredDate=inferred?`${inferred.getFullYear()}-${String(inferred.getMonth()+1).padStart(2,'0')}-${String(inferred.getDate()).padStart(2,'0')}`:'';
-      const inferredMismatch=Boolean(inferredDate&&current===inferredDate);
-      if(!matchesActivity&&!inferredMismatch)return item;
-    }
-    return {...item,day:anchor.day,travel_date:anchor.travel_date,
-      _v215_reconciled:true};
-  });
+  return Boolean(x&&y&&(x===y||(Math.min(x.length,y.length)>=7&&(x.includes(y)||y.includes(x)))));
 }
 function dedupeContextualNeeds(items=[]){
   const rank=item=>item?.need_type==='ticket_required'?4:item?.need_type==='reservation_recommended'?3:item?.confidence==='high'?2:1;
   const out=[];
-  for(const item of v207ConsolidateJourneyNeeds(items)){
+  for(const item of items){
     const category=item?.category||(item?.need_type==='guided_tour_optional'?'tours':item?.need_type?.includes('transport')?'transport':'tickets');
     const overview=item?.need_type==='guided_tour_optional'&&/\b(city tour|tour panoramico|highlights tour)\b/.test(normalizeWorkspaceEntity(item?.entity_name||''));
     const match=out.findIndex(existing=>{
@@ -387,29 +168,11 @@ function dedupeContextualNeeds(items=[]){
       // to one monument. Never let entity similarity ("... de Segovia") erase
       // the overview card; only overview cards may dedupe other overviews.
       if(overview||otherOverview)return overview&&otherOverview;
-      // V195: mobility is directional and date-sensitive. Fuzzy POI matching
-      // can erase a legitimate return journey or a different travel day.
-      if(category==='transport'){
-        // V214: resolve station-area aliases consistently before falling back
-        // to legacy leg matching; prefer the richer commercial record below.
-        if(v214SameMobilityDecision(item,existing))return true;
-        const a=v190NeedLegs(item),b=v190NeedLegs(existing);
-        if(a.length&&b.length){
-          const ai=v207JourneyIdentity(item),bi=v207JourneyIdentity(existing);
-          if(ai&&bi)return ai===bi;
-          return Number(item?.day)>0 && Number(existing?.day)>0 && String(item.day)===String(existing.day) && a.length===b.length && a.every((leg,i)=>leg.from===b[i].from&&leg.to===b[i].to);
-        }
-        return String(item?.day||'')===String(existing?.day||'') && normalizeWorkspaceEntity(item?.source_route||item?.entity_name||'')===normalizeWorkspaceEntity(existing?.source_route||existing?.entity_name||'');
-      }
-      if(category==='tickets'&&v198SameAdmissionDecision(item,existing))return true;
       return sameWorkspaceEntity(item?.entity_name||item?.source_activity,existing?.entity_name||existing?.source_activity);
     });
-    if(match<0)out.push(item);
-    else if(category==='transport' && v214SameMobilityDecision(item,out[match])){
-      if(v207JourneyPreference(item)>v207JourneyPreference(out[match]))out[match]=item;
-    }else if(rank(item)>rank(out[match]))out[match]=item;
+    if(match<0)out.push(item);else if(rank(item)>rank(out[match]))out[match]=item;
   }
-  return v207ConsolidateJourneyNeeds(out);
+  return out;
 }
 function isTourAlternativeEligible(row){
   const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
@@ -435,7 +198,7 @@ function isPhysicalTouristDestination(cityName){
   // Physical manifests should already expose real places. This fail-closed
   // guard also prevents legacy pseudo-destinations from becoming tour cards.
   if(/\b(hotel|alojamiento|accommodation|lodging|airport|aeropuerto|station|estacion|terminal|transit day|dia de transito|check in|check out)\b/i.test(key))return false;
-  return !journeyTransitOnly(cityName)&&workspaceRowsForCity(cityName).length>0;
+  return workspaceRowsForCity(cityName).length>0;
 }
 function cityOverviewTourForCity(cityName,existingNeeds=[]){
   if(!isPhysicalTouristDestination(cityName))return null;
@@ -475,12 +238,8 @@ function tourAlternativesForCity(cityName,existingNeeds=[]){
     const canonical=String(cc?.canonical_place||row?.to||activity).trim();
     const item={day,index,row,activity,canonical,guided,semantic};
     if(!byDay.has(day))byDay.set(day,[]);byDay.get(day).push(item);
-    // Standalone guided cards are reserved for explicit experiences or for
-    // complex ticketed anchors where a guide adds a genuinely different way to
-    // execute the visit. A free urban POI marked high-priority must not become a
-    // separate affiliate tour merely because it is important to the itinerary.
-    const standaloneGuided=semantic==='TOUR_EXPERIENCE'||(semantic==='ATTRACTION_TICKET'&&(guided==='high'||priority==='essential'||priority==='high'));
-    if(standaloneGuided){
+    // Standalone guided value is reserved for genuinely complex/high-value anchors.
+    if(guided==='high'||semantic==='TOUR_EXPERIENCE'||priority==='essential'||priority==='high'){
       const key=normalizeWorkspaceEntity(canonical);
       if(key&&!existingKeys.has(key)){
         derived.push({id:`workspace-tour-anchor:${day}:${index+1}`,category:'tours',city:cityName,day,entity_name:canonical,entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',user_message:lang==='es'?`Una visita guiada puede aportar contexto y ayudarte a aprovechar mejor ${canonical}; compárala con la visita por tu cuenta.`:`A guided visit can add context and help you get more from ${canonical}; compare it with visiting independently.`,source_activity:activity,source_route:[row?.from,row?.to].filter(Boolean).join(' → '),transport:String(row?.transport||'').trim(),derived_by:'commerce_context_guided'});
@@ -488,86 +247,63 @@ function tourAlternativesForCity(cityName,existingNeeds=[]){
       }
     }
   });
-  // The destination-wide City Tour already represents the broad urban overview.
-  // Do not manufacture additional same-day “panoramic” cards from individual
-  // POIs; explicit/complex guided anchors above remain eligible on their merits.
-  return derived;
+  // Build at most one coherent overview experience per sightseeing day instead
+  // of turning every itinerary row into a separate tour product.
+  for(const [day,items] of byDay.entries()){
+    const cluster=items.filter(x=>!['RESTAURANT','LOGISTICS','NONE'].includes(x.semantic));
+    if(cluster.length<2)continue;
+    const label=lang==='es'?`Tour panorámico de ${cityName}`:`${cityName} highlights tour`;
+    const key=normalizeWorkspaceEntity(label);
+    if(existingKeys.has(key))continue;
+    derived.push({id:`workspace-tour-cluster:${normalizeWorkspaceEntity(cityName)}:${day}`,category:'tours',city:cityName,day,entity_name:label,entity_type:'experience',need_type:'guided_tour_optional',confidence:'medium',user_message:lang==='es'?`Puede reunir en una experiencia guiada varios de los lugares que ya tienes previstos este día, manteniendo el foco en tu ruta.`:`A guided experience can combine several places already planned for this day while staying aligned with your route.`,source_activity:cluster.slice(0,4).map(x=>x.canonical||x.activity).join(' · '),source_route:'',derived_by:'itinerary_experience_cluster'});
+    existingKeys.add(key);
+  }
+  return derived.slice(0,4);
 }
 function rentalTransportTextMatches(value){
   const text=normalizeWorkspaceEntity(value);
   if(!text) return false;
   return /\b(rental car|car rental|rent a car|rented car|alquiler de coche|coche de alquiler|alquiler de auto|auto de alquiler|vehiculo de alquiler|vehiculo rentado|carro de alquiler|aluguel de carro|carro alugado|voiture de location|location de voiture|mietwagen|autonoleggio|noleggio auto)\b/i.test(text);
 }
-// V177: Rental is a *date-window decision*, not an intercity segment.
-// Respect the traveler's city-wide choice. Per-day rental mentions remain scoped
-// to those days. Otherwise recommend only for evidenced regional road days.
 function rentalPlanForCity(cityName){
   const cityDays=days(cityName);
-  if(!cityDays.length)return null;
+  if(!cityDays.length) return null;
+
   const meta=data?.city_meta?.[cityName]||{};
   const metaTransport=String(meta?.transport||meta?.transportation||'').trim();
   const explicitWholeStay=rentalTransportTextMatches(metaTransport);
+  const rentalDays=[];
   const byDay=data?.itineraries?.[cityName]?.byDay||{};
-  const explicitDays=[];
-  const recommendedDays=[];
-  const reasons=new Map();
-  const norm=v=>normalizeWorkspaceEntity(v||'');
-  const localTransport=/\b(a pie|walking|walk|caminata|peatonal|metro|subway|urban bus|bus urbano|taxi local|uber)\b/i;
-  const roadTransport=/\b(vehiculo privado|private vehicle|vehiculo terrestre|transporte turistico|tourist transport|carretera|road|auto|coche|carro|taxi contratado|hired driver|conductor privado)\b/i;
-  const riskText=/\b(nieve|snow|hielo|ice|icy|ventisca|blizzard|carretera cerrada|road closure|inundacion|flood|lluvia intensa|heavy rain|conduccion peligrosa|dangerous driving)\b/i;
-  cityDays.forEach(day=>{
-    const rows=Array.isArray(byDay?.[day])?byDay[day]:[];
-    // Only transport fields or an explicit traveler selection count as a rental
-    // commitment. Narrative notes can mention rentals as a hypothetical option.
-    if(rows.some(row=>rentalTransportTextMatches(row?.transport||''))){explicitDays.push(day);return;}
-    const moves=rows.filter(row=>{
-      const cc=row?.commerce_context||{};
-      const semantic=String(cc?.semantic_type||'').toUpperCase();
-      const activity=norm(row?.activity);
-      return semantic==='TRANSPORT'||/\b(traslado|regreso|retorno|transfer|drive|conducir|desplazamiento)\b/.test(activity);
-    });
-    const regional=moves.filter(row=>{
-      const from=norm(row?.from),to=norm(row?.to),transport=norm(row?.transport);
-      if(!from||!to||from===to||localTransport.test(transport))return false;
-      return roadTransport.test(transport);
-    });
-    const distinctStops=new Set(regional.map(row=>norm(row?.to)).filter(Boolean));
-    // Two meaningful regional legs plus two distinct endpoints demonstrate a
-    // multi-stop road itinerary. Avoid recommending cars for isolated transfers.
-    if(regional.length<2||distinctStops.size<2)return;
-    const risky=rows.some(row=>riskText.test(`${row?.notes||''} ${row?.transport||''}`));
-    // A risk is not a reason to push a rental: suppress proactive recommendations.
-    if(risky)return;
-    recommendedDays.push(day);
-    reasons.set(day,distinctStops.size);
+
+  cityDays.forEach(dayNumber=>{
+    const rows=Array.isArray(byDay?.[dayNumber])?byDay[dayNumber]:[];
+    const found=rows.some(row=>rentalTransportTextMatches(`${row?.transport||''} ${row?.notes||''}`));
+    if(found) rentalDays.push(dayNumber);
   });
-  const scopeDays=explicitWholeStay?cityDays:(explicitDays.length?explicitDays:recommendedDays);
-  if(!scopeDays.length)return null;
-  const userSelected=explicitWholeStay||explicitDays.length>0;
-  // V212: A road-day heuristic is not a traveler rental-car choice.
-  // Explicit train/public-transit preferences take priority over an inferred
-  // optional rental. Preserve rentals actually selected by the traveler.
-  const prefersPublicTransit=/\b(tren|train|ferrocarril|rail|transporte publico|public transport|public transit|autobus|autobus publico|bus publico|bus urbano|autobus urbano|urban bus|metro|subway)\b/i.test(normalizeWorkspaceEntity(metaTransport));
-  if(!userSelected&&prefersPublicTransit)return null;
-  const wholeStay=explicitWholeStay||(userSelected&&scopeDays.length===cityDays.length);
-  const startDay=scopeDays[0],endDay=scopeDays[scopeDays.length-1];
-  const contiguous=scopeDays.every((d,i)=>i===0||d===scopeDays[i-1]+1);
-  // Non-consecutive days must not be presented as one continuous paid rental.
-  const scopeLabel=wholeStay?t.rentalAll:`${t.rentalDays} ${scopeDays.join(', ')}`;
-  const dateIso=day=>{const b=base(cityName);if(!b)return'';const d=addDays(b,day-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
-  const explanation=userSelected
-    ? (lang==='es'?'Respetamos tu elección de vehículo alquilado. Comprueba recogida, devolución y condiciones para los días indicados.':'Your rental-car choice is respected. Check pickup, return and driving conditions for the indicated days.')
-    : (lang==='es'?'Tu ruta incluye varias conexiones regionales por carretera. Alquilar podría darte flexibilidad; compara también tours o transporte con conductor y verifica condiciones de conducción.':'Your route includes several regional road connections. A rental could add flexibility; also compare guided tours or a driver and check driving conditions.');
+
+  if(!explicitWholeStay && !rentalDays.length) return null;
+  const scopeDays=explicitWholeStay ? cityDays : [...new Set(rentalDays)].sort((a,b)=>a-b);
+  const wholeStay=explicitWholeStay || (scopeDays.length===cityDays.length && cityDays.every(d=>scopeDays.includes(d)));
+  const scopeLabel=wholeStay
+    ? t.rentalAll
+    : `${t.rentalDays} ${scopeDays.join(', ')}`;
+
   return {
-    id:`workspace-rental:${norm(cityName)||'city'}:${scopeDays.join('-')}`,
-    category:'transport',city:cityName,day:'',entity_name:t.rentalTitle,entity_type:'transport',
-    need_type:'transport_arrangement',confidence:userSelected?'high':'medium',
-    user_message:explanation,source_activity:t.rentalTitle,source_route:'',
-    transport:'vehículo alquilado',scope_label:scopeLabel,
-    source_summary:userSelected?t.rentalSource:(lang==='es'?'Alternativa evaluada según tu recorrido regional':'Alternative assessed from your regional itinerary'),
-    rental_scope_days:scopeDays,rental_pickup_date:dateIso(startDay),
-    rental_dropoff_date:contiguous?dateIso(endDay+1):'',
-    rental_user_selected:userSelected,rental_contiguous:contiguous,
+    id:`workspace-rental:${normalizeWorkspaceEntity(cityName)||'city'}`,
+    category:'transport',
+    city:cityName,
+    day:'',
+    entity_name:t.rentalTitle,
+    entity_type:'transport',
+    need_type:'transport_arrangement',
+    confidence:explicitWholeStay?'high':'medium',
+    user_message:wholeStay?t.rentalMessageAll:t.rentalMessageDays,
+    source_activity:t.rentalTitle,
+    source_route:'',
+    transport:metaTransport || t.rentalTitle,
+    scope_label:scopeLabel,
+    source_summary:t.rentalSource,
+    rental_scope_days:scopeDays,
     derived_by:'workspace_rental_plan'
   };
 }
@@ -619,105 +355,6 @@ function contextualNeedBelongsToCitySlice(item,cityName){
     return (entity&&rowText.includes(entity))||(source&&rowText.includes(source))||(target.length>8&&rowText.includes(target));
   });
 }
-function workspaceRowsMatchingNeed(item,cityName){
-  const entity=normalizeWorkspaceEntity(item?.entity_name||'');
-  const source=normalizeWorkspaceEntity(String(item?.source_activity||'').replace(/^rev:\s*/i,''));
-  return workspaceRowsForCity(cityName).filter(({row})=>{
-    const activity=normalizeWorkspaceEntity(String(row?.activity||'').replace(/^rev:\s*/i,''));
-    const canonical=normalizeWorkspaceEntity(row?.commerce_context?.canonical_place||'');
-    const to=normalizeWorkspaceEntity(row?.to||'');
-    const values=[activity,canonical,to].filter(Boolean);
-    return values.some(v=>(entity&&sameWorkspaceEntity(entity,v))||(source&&sameWorkspaceEntity(source,v))||(entity&&v.includes(entity))||(source&&v.includes(source)));
-  });
-}
-function admissionEvidenceFromText(value=''){
-  const text=normalizeWorkspaceEntity(value);
-  if(!text)return {positive:false,negative:false};
-  // V162 · explicit contradiction wins. Keep the expressions broad enough for
-  // natural itinerary prose ("no se presupone una parada concreta ni una reserva")
-  // without turning generic words such as "confirmar" into admission evidence.
-  const negative=/\b(acceso libre|entrada gratuita|free admission|no ticket|sin entrada|no requiere entrada|no necesita entrada|sin necesidad de entrada)\b|\bno se presupone\b.{0,90}\b(parada|reserva|reservacion|entrada|ticket|booking)\b|\b(no requiere|no necesita|sin necesidad de)\b.{0,45}\b(reserva|reservacion|ticket|entrada|booking)\b/i.test(text);
-  const positive=/\b(entrada|ticket|billete|boleto|admission|acceso)\b.{0,65}\b(de pago|pago|necesari|required|obligatori|requiere|requerid|reserva|reserv|anticipad|confirm|verific)\b|\b(requiere|requires?|necesita|necesaria|necesario|es necesaria|es necesario|debe comprar|hay que comprar)\b.{0,45}\b(entrada|ticket|billete|boleto|admission|acceso)\b|\b(entrada|ticket|boleto|admission)\s+(?:es\s+)?(?:necesaria|necesario|obligatoria|obligatorio|required)\b/i.test(text);
-  return {positive,negative};
-}
-function rowHasAdmissionEvidence(row){
-  const cc=row?.commerce_context||{};
-  const semantic=String(cc?.semantic_type||'').toUpperCase();
-  const ticket=String(cc?.ticket_need||'').toLowerCase();
-  const evidence=admissionEvidenceFromText(`${row?.activity||''} ${cc?.canonical_place||''} ${row?.notes||''}`);
-  if(evidence.negative)return false;
-  // Hard semantic exclusions cannot be overridden by incidental reservation
-  // language. FREE_SIGHT may be a classifier miss, so explicit admission prose
-  // is allowed to correct it deterministically.
-  if(['RESTAURANT','NONE'].includes(semantic))return false;
-  // V163 Required Admission Recovery: explicit itinerary evidence may repair a
-  // stale LOGISTICS/TRANSPORT semantic label, but only when the row itself is
-  // attraction-like rather than a movement/access instruction.
-  const rowText=normalizeWorkspaceEntity(`${row?.activity||''} ${cc?.canonical_place||''} ${row?.to||''}`);
-  const movementOnly=/^(traslado|transfer|tren|train|bus|vuelo|flight|ferry|taxi|conduccion|drive|salida|departure|llegada|arrival|acceso ferroviario|railway access)\b/i.test(rowText);
-  if(['LOGISTICS','TRANSPORT'].includes(semantic)&&(!evidence.positive||movementOnly))return false;
-  if(evidence.positive)return true;
-  // V164: ticket_need is the row's specific access decision and is more precise
-  // than a broad FREE_SIGHT semantic label. A required/recommended ticket can
-  // therefore repair that classifier conflict unless explicit negative prose or
-  // a hard non-attraction/movement guard above has already rejected the row.
-  if(['required','recommended'].includes(ticket))return true;
-  if(semantic==='FREE_SIGHT')return false;
-  return semantic==='ATTRACTION_TICKET'&&['optional','unknown'].includes(ticket);
-}
-function contextualCommerceNeedIsSane(item,cityName){
-  if(!['ticket_required','reservation_recommended','guided_tour_optional'].includes(item?.need_type))return true;
-  const text=normalizeWorkspaceEntity(`${item?.entity_name||''} ${item?.source_activity||''} ${item?.user_message||''}`);
-  // Generic commerce guardrails: infrastructure/access points, transit scenery,
-  // meals and accommodation are not attractions simply because Context emitted
-  // reservation language. This is intentionally destination-agnostic.
-  if(/\b(acceso ferroviario|railway access|punto ferroviario|railway point|plataforma ferroviaria|rail platform|estacionamiento|parking|terminal|aeropuerto|airport|hotel|alojamiento|accommodation)\b/i.test(text))return false;
-  if(/\b(paisaje agricola|agricultural landscape|corredor paisajistico|scenic corridor)\b/i.test(text)&&item?.need_type!=='guided_tour_optional')return false;
-  const matches=workspaceRowsMatchingNeed(item,cityName);
-  if(item?.need_type==='ticket_required'||item?.need_type==='reservation_recommended'){
-    // V162 · admission cards are itinerary-bound. If Context cannot bind the
-    // opportunity to a physical row, require strong admission evidence in the
-    // opportunity itself; otherwise fail closed instead of preserving a false
-    // positive merely because the server emitted it.
-    if(!matches.length){
-      const evidence=admissionEvidenceFromText(`${item?.entity_name||''} ${item?.source_activity||''} ${item?.user_message||''}`);
-      return evidence.positive&&!evidence.negative;
-    }
-    return matches.some(({row})=>rowHasAdmissionEvidence(row));
-  }
-  if(!matches.length)return true; // non-admission server intelligence may remain destination-wide.
-
-  // Guided experiences may attach to real sights, but never to rows whose only
-  // semantic purpose is logistics/transport.
-  return matches.some(({row})=>!['LOGISTICS','TRANSPORT','RESTAURANT','NONE'].includes(String(row?.commerce_context?.semantic_type||'').toUpperCase()));
-}
-function regionalTourAlternativeForCity(cityName,existingNeeds=[]){
-  const existing=(Array.isArray(existingNeeds)?existingNeeds:[]).filter(x=>x?.need_type==='guided_tour_optional');
-  const byDay=new Map();
-  workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
-    const mobilityEvidence=normalizeWorkspaceEntity(`${row?.transport||''} ${row?.notes||''}`);
-    const guidedMobility=/\b(traslado guiado|guided transfer|tour organizado|organized tour|excursion organizada|organized excursion|guided transport|vehiculo privado o traslado guiado|private vehicle or guided transfer)\b/i.test(mobilityEvidence);
-    const cc=row?.commerce_context||{};
-    const semantic=String(cc?.semantic_type||'').toUpperCase();
-    if(!byDay.has(day))byDay.set(day,{guidedMobility:false,anchors:[]});
-    const bucket=byDay.get(day);
-    if(guidedMobility)bucket.guidedMobility=true;
-    if(rowHasAdmissionEvidence(row)){
-      const name=String(cc?.canonical_place||row?.to||row?.activity||'').trim();
-      if(name&&!bucket.anchors.some(x=>sameWorkspaceEntity(x,name)))bucket.anchors.push(name);
-    }
-  });
-  const candidates=[];
-  for(const [day,bucket] of byDay){
-    if(!bucket.guidedMobility||bucket.anchors.length<2)continue;
-    const anchors=bucket.anchors.slice(0,3);
-    if(existing.some(x=>anchors.some(a=>sameWorkspaceEntity(x?.entity_name||'',a))&&/excursion|tour|circuit/i.test(normalizeWorkspaceEntity(x?.entity_name||''))))continue;
-    const label=lang==='es'?`Excursión organizada: ${anchors.join(' + ')}`:`Organized day tour: ${anchors.join(' + ')}`;
-    candidates.push({id:`workspace-regional-tour:${day}`,category:'tours',city:cityName,day,entity_name:label,entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',user_message:lang==='es'?`Tu itinerario ya conecta ${anchors.join(', ')} mediante vehículo privado o traslado guiado. Compara una excursión organizada como forma alternativa de ejecutar esta jornada, sin cambiar las visitas previstas.`:`Your itinerary already connects ${anchors.join(', ')} using private or guided transport. Compare an organized day tour as an alternative way to execute this day without changing the planned visits.`,source_activity:label,source_route:'',derived_by:'regional_execution_alternative'});
-  }
-  return candidates;
-}
-
 function localTicketNeedsForCity(cityName,existing=[]){
   const existingKeys=new Set((existing||[]).filter(x=>x?.need_type==='ticket_required'||x?.need_type==='reservation_recommended').map(x=>normalizeWorkspaceEntity(x?.entity_name||x?.source_activity||'')));
   const out=[];
@@ -730,28 +367,20 @@ function localTicketNeedsForCity(cityName,existing=[]){
     const canonical=String(cc?.canonical_place||row?.to||activity).trim();
     const key=normalizeWorkspaceEntity(canonical);
     if(!key||existingKeys.has(key))return;
-    const evidence=admissionEvidenceFromText(`${activity} ${canonical} ${notes}`);
-    // Deterministic contradiction guard: explicit free/no-reservation prose wins
-    // over model metadata. Logistics/restaurants remain hard exclusions.
-    if(evidence.negative)return;
-    if(['RESTAURANT','NONE'].includes(semantic))return;
+    const admissionText=normalizeWorkspaceEntity(`${activity} ${canonical} ${notes}`);
+    const explicitlyFree=/\b(sin necesidad de entrada|no requiere entrada|entrada gratuita|acceso gratuito|free admission|no ticket|outdoor free|al aire libre)\b/i.test(admissionText);
+    // Deterministic contradiction guard: server/model metadata cannot turn a
+    // clearly free exterior, plaza, viewpoint or street into a paid ticket.
+    if(explicitlyFree)return;
+    // Ticket cards are fail-closed. Reservation language in a restaurant,
+    // lodging or logistics note is not attraction-admission evidence.
+    if(['RESTAURANT','LOGISTICS','FREE_SIGHT','NONE','TRANSPORT'].includes(semantic))return;
     const activityKey=normalizeWorkspaceEntity(activity);
-    const movementOnly=/^(traslado|transfer|tren|train|bus|vuelo|flight|ferry|taxi|conduccion|drive|salida|departure|llegada|arrival|acceso ferroviario|railway access)\b/i.test(normalizeWorkspaceEntity(`${activity} ${canonical}`));
-    // V163: explicit paid/required admission prose outranks a stale
-    // LOGISTICS/TRANSPORT classifier, except for genuine movement rows.
-    if(['LOGISTICS','TRANSPORT'].includes(semantic)&&(!evidence.positive||movementOnly))return;
     if(/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|restaurante|restaurant|brasserie|trattoria|cafe|alojamiento|hotel|check in|check out)\b/i.test(activityKey))return;
-    // V164 Required Recall: a specific required/recommended ticket_need may
-    // recover an attraction even when the broad semantic_type was stale. Hard
-    // exclusions, movement rows and explicit free/no-ticket prose were already
-    // rejected above, so this does not turn logistics into admission products.
-    const explicitRequired=ticket==='required';
-    const explicitRecommended=ticket==='recommended'||(semantic==='ATTRACTION_TICKET'&&['optional','unknown'].includes(ticket));
-    // Strong itinerary prose may repair a FREE_SIGHT/unknown classifier miss.
-    // This is what protects required-ticket recall without making the LLM the
-    // authority for commercial eligibility.
-    const noteRequired=evidence.positive&&/\b(necesari|required|obligatori|requiere|requires?|de pago|pago)\b/i.test(normalizeWorkspaceEntity(notes));
-    const noteRecommended=evidence.positive&&!noteRequired;
+    const explicitRequired=semantic==='ATTRACTION_TICKET'&&ticket==='required';
+    const explicitRecommended=semantic==='ATTRACTION_TICKET'&&['recommended','optional','unknown'].includes(ticket);
+    const noteRequired=/\b(entrada|ticket|billete|boleto).{0,45}\b(necesari|required|obligatori|imprescindible)\b|\b(requiere|requires?).{0,35}\b(entrada|ticket|admission)\b/i.test(notes);
+    const noteRecommended=/\b(reserva|reservar|booking|book|timed entry|entrada con hora|anticipad)\b/i.test(notes);
     if(!explicitRequired&&!explicitRecommended&&!noteRequired&&!noteRecommended)return;
     const needType=(explicitRequired||noteRequired)?'ticket_required':'reservation_recommended';
     out.push({id:`workspace-ticket:${day}:${index+1}`,category:'tickets',city:cityName,day,entity_name:canonical,entity_type:'attraction',need_type:needType,confidence:(explicitRequired||noteRequired)?'high':'medium',user_message:lang==='es'?(needType==='ticket_required'?`Necesitas resolver la entrada para ${canonical} antes de esta visita.`:`Conviene revisar y reservar con antelación el acceso a ${canonical}.`):(needType==='ticket_required'?`Plan the admission for ${canonical} before this visit.`:`It is worth checking and booking ${canonical} in advance.`),source_activity:activity,source_route:[row?.from,row?.to].filter(Boolean).join(' → '),transport:String(row?.transport||'').trim(),derived_by:'commerce_context'});
@@ -777,92 +406,27 @@ function transportNeedBelongsToOriginWorkspace(item,cityName){
   return !origin || normalizeWorkspaceEntity(origin)===normalizeWorkspaceEntity(cityName);
 }
 
-// V176: read-only coverage audit. This deliberately does not synthesize
-// tickets from another planning unit or mutate itinerary/context state.
-// Enable with sessionStorage.setItem('itbmo_context_audit','1') and reload.
-function auditContextCoverageForCity(cityName,serverNeeds=[],visibleNeeds=[]){
-  try{
-    if(sessionStorage.getItem('itbmo_context_audit')!=='1')return;
-    const cityKey=normalizeWorkspaceEntity(cityName);
-    const itinerary=data?.itineraries||{};
-    const local=workspaceRowsForCity(cityName);
-    const visible=(Array.isArray(visibleNeeds)?visibleNeeds:[]).filter(n=>['ticket_required','reservation_recommended'].includes(n?.need_type));
-    const record=(sourceCity,day,index,row)=>{
-      const cc=row?.commerce_context||{};
-      const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
-      const canonical=String(cc?.canonical_place||row?.to||activity).trim();
-      const physical=String(row?.physical_location||cc?.physical_destination||'').trim();
-      const note=String(row?.notes||'');
-      const evidence=admissionEvidenceFromText(`${activity} ${canonical} ${note}`);
-      const semantic=String(cc?.semantic_type||'').toUpperCase();
-      const ticket=String(cc?.ticket_need||'').toLowerCase();
-      const positive=rowHasAdmissionEvidence(row);
-      const matching=visible.filter(n=>sameWorkspaceEntity(n?.entity_name||n?.source_activity,canonical));
-      return {sourceCity,day,index:index+1,activity,canonical,physical,semantic,ticket,explicitAdmission:evidence.positive,explicitExclusion:evidence.negative,admissionEligible:positive,shown:matching.length>0,matchedCards:matching.map(n=>n.entity_name)};
-    };
-    const localRecords=local.map(({day,index,row})=>record(cityName,day,index,row));
-    const external=[];
-    for(const [sourceCity,unit] of Object.entries(itinerary)){
-      if(normalizeWorkspaceEntity(sourceCity)===cityKey)continue;
-      for(const [day,rows] of Object.entries(unit?.byDay||{})){
-        if(!Array.isArray(rows))continue;
-        rows.forEach((row,index)=>{
-          if(!row||typeof row!=='object')return;
-          const cc=row.commerce_context||{};
-          const base=String(cc?.base_city||cc?.planning_base||cc?.parent_city||row?.base_city||'');
-          if(normalizeWorkspaceEntity(base)===cityKey)external.push(record(sourceCity,Number(day),index,row));
-        });
-      }
-    }
-    const omissions=localRecords.filter(r=>r.admissionEligible&&!r.shown);
-    const server=(Array.isArray(serverNeeds)?serverNeeds:[]).map(n=>({entity:n?.entity_name,source:n?.source_activity,day:n?.day,type:n?.need_type,passedCitySlice:contextualNeedBelongsToCitySlice(n,cityName),passedSanity:contextualCommerceNeedIsSane(n,cityName)}));
-    console.groupCollapsed(`[ITBMO V176 CONTEXT AUDIT] ${cityName} · ${localRecords.length} rows · ${omissions.length} potential missing admissions`);
-    console.table(localRecords);
-    if(omissions.length){console.warn('Admission evidence without visible card');console.table(omissions);}
-    if(external.length){console.warn('Rows explicitly owned by this base city in another physical unit');console.table(external);}
-    console.table(server);
-    console.groupEnd();
-  }catch(error){console.warn('[ITBMO V176 CONTEXT AUDIT] unavailable',String(error?.message||error));}
-}
-
 function contextualNeedsForCity(cityName,needs){
-  if(journeyTransitOnly(cityName))return dedupeContextualNeeds(tripRoutes().filter(route=>
-    normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName)||
-    (route.derived_by==='journey_start'&&normalizeWorkspaceEntity(route.destination)===normalizeWorkspaceEntity(cityName))));
   // Server context for a main planning unit can contain rows that physically
   // belong to a subdestination. Keep only needs that belong to this physical
   // workspace slice; transport is re-derived from the authoritative route.
-  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName)).filter(item=>transportNeedBelongsToOriginWorkspace(item,cityName)).filter(item=>contextualCommerceNeedIsSane(item,cityName)).filter(item=>{
-    const text=normalizeWorkspaceEntity(`${item?.entity_name||''} ${item?.source_activity||''}`);
-    if(/\b(hotel|alojamiento|accommodation|check in|check out|desayuno|almuerzo|cena|breakfast|lunch|dinner|airport|aeropuerto|station|estacion|terminal)\b/i.test(text) && ['ticket_required','reservation_recommended','guided_tour_optional'].includes(item?.need_type))return false;
+  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName)).filter(item=>transportNeedBelongsToOriginWorkspace(item,cityName)).filter(item=>{
     // City Tour is transversal: Context may discover one on a particular day,
     // but Workspace renders exactly one destination-wide card above daily tours.
     if(item?.need_type!=='guided_tour_optional')return true;
     const name=normalizeWorkspaceEntity(item?.entity_name||item?.source_activity||'');
     return !/\b(city tour|tour panoramico|highlights tour|tour de la ciudad|tour de ciudad)\b/i.test(name);
   });
-  const derivedRoutes=tripRoutes().filter(route=>
-    normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName)||
-    (route.derived_by==='journey_start'&&normalizeWorkspaceEntity(route.destination)===normalizeWorkspaceEntity(cityName)));
+  const derivedRoutes=tripRoutes().filter(route=>normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName));
   const normalizeRoute=value=>String(value||'').toLowerCase().replace(/\s+/g,' ').trim();
   const routeKeys=new Set(derivedRoutes.map(route=>normalizeRoute(route.source_route)));
-  const authoritativeRoutes=new Map();
-  derivedRoutes.forEach(route=>{const key=v208JourneyRoute(route);if(!key)return;const set=authoritativeRoutes.get(key)||new Set();const date=v208JourneyDate(route);if(date)set.add(date);authoritativeRoutes.set(key,set);});
-  const coveredByItinerary=item=>{
-    const key=v208JourneyRoute(item),dates=authoritativeRoutes.get(key);
-    if(!key||!dates?.size)return false;
-    const date=v208JourneyDate(item);
-    return date?dates.has(date):dates.size===1;
-  };
   const rentalPlan=rentalPlanForCity(cityName);
   const withoutDuplicateTopLevelRoutes=source.filter(item=>{
     if(rentalPlan && isRentalTransportNeed(item)) return false;
     if(item?.need_type!=='intercity_transport' && item?.need_type!=='transport_arrangement') return true;
-    return !coveredByItinerary(item) && !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
+    return !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
   const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
-  merged.push(...v187ProviderMobilityNeeds(cityName,merged));
-  merged.push(...v192ExcursionMobilityNeeds(cityName,merged));
   // Ticket/access needs are first-class deterministic data. V3 emits
   // commerce_context on each row; use it directly so subdestination cards do
   // not depend on the parent planning-unit classifier.
@@ -877,25 +441,13 @@ function contextualNeedsForCity(cityName,needs){
   // itinerary and deduplicate against server needs.
   const derivedTours=tourAlternativesForCity(cityName,merged);
   if(derivedTours.length) merged.push(...derivedTours);
-  // A regional day already written as private vehicle OR guided transfer is a
-  // legitimate execution decision. Offer one organized-day alternative built
-  // only from the itinerary's own paid anchors; never invent destinations.
-  const regionalTours=regionalTourAlternativeForCity(cityName,merged);
-  if(regionalTours.length) merged.push(...regionalTours);
-  let finalNeeds=dedupeContextualNeeds(v215ReconcileMobilityDays(cityName,merged));
+  let finalNeeds=dedupeContextualNeeds(merged);
   // Deterministic product rule: every real tourist destination gets exactly one
   // destination-wide City Tour option. Never depend on the LLM classifier for it.
   const hasOverview=finalNeeds.some(item=>item?.need_type==='guided_tour_optional' && /\b(city tour|tour panoramico|highlights tour)\b/i.test(normalizeWorkspaceEntity(item?.entity_name||'')));
   if(!hasOverview){
     const forced=cityOverviewTourForCity(cityName,[]);
     if(forced) finalNeeds=[forced,...finalNeeds];
-  }
-  auditContextCoverageForCity(cityName,needs,finalNeeds);
-  // Opt-in local diagnosis; no itinerary text, account IDs or tokens logged.
-  // In browser console: sessionStorage.setItem('itbmo_context_debug','1'); reload.
-  if(sessionStorage.getItem('itbmo_context_debug')==='1'){
-    console.table(finalNeeds.filter(x=>x.category==='transport').map(x=>({day:x.day||'',route:x.source_route||'',source:x.derived_by||'server',type:x.need_type})));
-    console.info('[ITBMO V195 CONTEXT]',{city:cityName,serverNeeds:Array.isArray(needs)?needs.length:0,derivedMobility:v192ExcursionMobilityNeeds(cityName,[]).length,finalMobility:finalNeeds.filter(x=>x.category==='transport').length});
   }
   return finalNeeds;
 }
@@ -908,12 +460,6 @@ function contextLabel(item){
   return '';
 }
 
-function v210TransportLabel(value){
-  const raw=String(value||'').trim();
-  const modes={plane:['Avión','Plane'],train:['Tren','Train'],bus:['Autobús','Bus'],car:['Automóvil','Car'],ferry:['Ferry','Ferry'],transfer:['Traslado','Transfer'],other:['Otro','Other']};
-  const mode=modes[raw.toLowerCase()];
-  return mode?mode[lang==='es'?0:1]:raw;
-}
 function sectionSort(items=[],sectionType=''){
   const ordered=[...items];
   const priority=item=>{
@@ -932,19 +478,9 @@ function sectionSort(items=[],sectionType=''){
     return String(a?.entity_name||a?.source_activity||'').localeCompare(String(b?.entity_name||b?.source_activity||''),lang==='es'?'es':'en',{sensitivity:'base'});
   });
 }
-function isMandatoryItineraryTour(item){
-  if(item?.need_type!=='guided_tour_optional')return false;
-  const derived=String(item?.derived_by||'');
-  // Context-authored tours without a Workspace derivation originate in the itinerary
-  // and must never be hidden. Destination overview is also intentionally visible.
-  return !derived || derived==='physical_destination_overview';
-}
 function initialSectionLimit(items=[],sectionType=''){
-  if(sectionType==='tickets') return items.length; // Required/recommended access stays exhaustive.
-  if(sectionType==='tours'){
-    const mandatory=items.filter(isMandatoryItineraryTour).length;
-    return Math.min(items.length,Math.max(4,mandatory));
-  }
+  if(sectionType==='tickets') return items.length; // access needs are execution-critical: never hide them behind 'Ver más'
+  if(sectionType==='tours') return Math.min(items.length,4);
   if(sectionType==='transport') return Math.min(items.length,3);
   return items.length;
 }
@@ -963,14 +499,9 @@ function mobilityLegNote(note=''){
   return `${raw} ${verification}`;
 }
 function omioOptions(offers=[]){
-  const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='omio' && /^https:\/\/omio\.sjv\.io\/c\/7727455\/\d+\/7385(?:\?|$)/i.test(String(o?.direct_url||'')));
+  const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='omio');
   if(!list.length)return'';
-  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><a class="tw-partner-direct-link" href="${esc(offer.direct_url||'')}" target="_blank" rel="noopener noreferrer" data-omio-direct="1">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</a></div>`).join('')}</div>`;
-}
-function twelveGoOptions(offers=[]){
-  const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='12go');
-  if(!list.length)return'';
-  return `<div class="tw-partner-options tw-partner-options--12go">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="12go" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>12Go</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(lang==='es'?'Buscar opciones en 12Go':'Search options on 12Go')} →</button></div>`).join('')}</div>`;
+  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}" data-partner-direct="${esc(offer.direct_url||'')}">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</button></div>`).join('')}</div>`;
 }
 function renderResolvedTransportSegments(item,matched=[]){
   const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
@@ -994,114 +525,38 @@ function renderResolvedTransportSegments(item,matched=[]){
     console.info('[ITBMO OMIO V63][CARD BIND]',{need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${markets.from} → ${markets.to}`,offer_need_id:offer?.need_id||'',offer_index:Number(seg.index||0),offer_route:`${seg.commercial_origin||''} → ${seg.commercial_destination||''}`,sameNeed,sameIndex,byIdentity,byRoute,matched,direct_url:!!offer?.direct_url});
     return matched;
   };
-  const offerMatches12GoLeg=(offer,leg,index)=>{
-    if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return false;
-    const markets=localizedMarkets(leg),seg=offer?.route_segment||{};
-    const sameNeed=String(offer?.need_id||'')===String(item?.id||'');
-    const sameIndex=Number(seg.index||0)===Number(leg.index||index+1);
-    // V188: indices are not physical route identities. Require exact directional endpoints.
-    const canon=v=>v190CommercialEndpoint(v);
-    const byRoute=sameNeed&&seg.commercial_origin&&seg.commercial_destination&&canon(seg.commercial_origin)===canon(markets.from)&&canon(seg.commercial_destination)===canon(markets.to);
-    return !!byRoute;
-  };
-  const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)||offerMatches12GoLeg(o,leg,index)));
+  const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)));
   const localLegs=allLegs.filter((leg,index)=>!legs.includes(leg));
-  const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg)=>{
-    const index=allLegs.indexOf(leg);
+  const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
     const markets=localizedMarkets(leg),marketFrom=markets.from,marketTo=markets.to;
-    const omioLegOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
-    const twelveGoLegOffers=(matched||[]).filter(o=>offerMatches12GoLeg(o,leg,index)&&o?.partner?.slug==='12go');
-    const bookawayLegOffers=(matched||[]).filter(o=>offerMatches12GoLeg(o,leg,index)&&o?.partner?.slug==='bookaway');
-    console.info('[ITBMO OMIO V63][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:omioLegOffers.length,button_expected:omioLegOffers.length>0,stop_reason:omioLegOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
-    console.info('[ITBMO 12GO V160][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='12go').length,matched_offers:twelveGoLegOffers.length,button_expected:twelveGoLegOffers.length>0});
+    const legOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
+    console.info('[ITBMO OMIO V63][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:legOffers.length,button_expected:legOffers.length>0,stop_reason:legOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
-    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([v210TransportLabel(leg.mode),times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${omioLegOffers.length?omioOptions(omioLegOffers):''}${twelveGoLegOffers.length?twelveGoOptions(twelveGoLegOffers):''}${bookawayLegOffers.length?partnerOptions(bookawayLegOffers):''}</div>`;
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${legOffers.length?omioOptions(legOffers):''}</div>`;
   }).join('')}</div>`:'';
-  const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([v210TransportLabel(leg.mode),leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
+  const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
   return commercial+logistics;
 }
 
-// V190: provider offers may originate from synthetic itinerary-row needs while
-// the visible Context card has a different need_id. Bind by physical route AND
-// itinerary day/date, never by synthetic id or segment index alone.
-function v190CommercialEndpoint(value){
-  const key=normalizeWorkspaceEntity(value);
-  const centre=key.match(/^(?:centro historico|historic center|city center|downtown|centro de|centre ville) (?:de |of )?(.+)$/);
-  return centre&&centre[1]?centre[1]:key;
-}
-function v190NeedLegs(item){
-  const structured=parseResolvedRouteSource(item?.source_route);
-  if(structured?.legs?.length)return structured.legs.map(leg=>({
-    from:v190CommercialEndpoint((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
-    to:v190CommercialEndpoint((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
-  })).filter(x=>x.from&&x.to&&x.from!==x.to);
-  const parts=String(item?.source_route||'').split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/);
-  return parts.length===2?[{from:v190CommercialEndpoint(parts[0]),to:v190CommercialEndpoint(parts[1])}]:[];
-}
-function v190OfferMatchesNeed(offer,item){
-  if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return false;
-  const seg=offer?.route_segment||{};
-  const from=v190CommercialEndpoint(seg.commercial_origin),to=v190CommercialEndpoint(seg.commercial_destination);
-  if(!from||!to||from===to)return false;
-  const legs=v190NeedLegs(item);
-  const exactLeg=legs.some(leg=>leg.from===from&&leg.to===to);
-  const verifiedJourneyLeg=item?.derived_by==='v192_explicit_excursion_mobility' &&
-    seg.market_resolution==='v187_publisher_graph' &&
-    v190CommercialEndpoint(seg.journey_origin)===legs[0]?.from &&
-    v190CommercialEndpoint(seg.journey_destination)===legs[0]?.to;
-  if(!exactLeg&&!verifiedJourneyLeg)return false;
-  // Explicit dates must agree; if one side has no date, use the trip day when
-  // available. A missing date must not erase an otherwise exact physical match.
-  const normalizeDate=value=>{const raw=String(value||'').trim();const parsed=parseDate(raw);return parsed?`${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`:raw.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');};
-  const itemDate=normalizeDate(item?.travel_date||dayDate(city,item?.day)||'');
-  const offerDate=normalizeDate(offer?.travel_date||'');
-  if(itemDate&&offerDate&&itemDate!==offerDate)return false;
-  return true;
-}
-function v190UniqueMobilityOffers(offers){
-  const seen=new Set();return (offers||[]).filter(offer=>{
-    if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return true;
-    const seg=offer?.route_segment||{};
-    const key=[offer.partner.slug,v190CommercialEndpoint(seg.commercial_origin),v190CommercialEndpoint(seg.commercial_destination)].join('|');
-    if(seen.has(key))return false;seen.add(key);return true;
-  });
-}
 function renderNeedItems(items,offers=[],visibleCount=Infinity){
   if(!items.length)return'';
   const ordered=items;
   return `<div class="tw-context-list">${ordered.map((item,index)=>{
     const itemRoute=(item?.need_type==='intercity_transport' || item?.need_type==='transport_arrangement') ? parseResolvedRouteSource(item?.source_route) : null;
     const normRoute=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-    // V189: canonicalize an itinerary city-centre label to the commercial city,
-    // but ONLY when the full city name is explicitly present. Never fuzzy-match Chinchero to Ollantaytambo.
-    const commercialEndpoint=value=>{
-      const key=normRoute(value);
-      const centre=key.match(/^(?:centro historico|historic center|city center|downtown|centro de|centre ville) (?:de |of )?(.+)$/);
-      return centre&&centre[1]?centre[1]:key;
-    };
-    const samePhysicalLeg=(from,to,seg)=>commercialEndpoint(from)===commercialEndpoint(seg?.commercial_origin)&&commercialEndpoint(to)===commercialEndpoint(seg?.commercial_destination);
-
     const itemCommercialLegs=(itemRoute?.legs||[]).map(leg=>({
       index:Number(leg.index||0),
       from:normRoute((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
       to:normRoute((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
     })).filter(leg=>leg.from&&leg.to);
-    const rawMatched=(Array.isArray(offers)?offers:[]).filter(offer=>{
-      if(['12go','bookaway'].includes(offer?.partner?.slug||'')){
-        return v190OfferMatchesNeed(offer,item);
-      }
-      // Preserve existing Omio matching and all other affiliates unchanged.
-      if(offer?.need_id===item?.id)return true;
-      if(!itemCommercialLegs.length || offer?.placement!=='city_transport')return false;
+    const matched=(Array.isArray(offers)?offers:[]).filter(offer=>{
+      if(offer?.need_id===item?.id) return true;
+      if(!itemCommercialLegs.length || offer?.placement!=='city_transport') return false;
       const seg=offer?.route_segment||{};
       const from=normRoute(seg.commercial_origin||''),to=normRoute(seg.commercial_destination||'');
-      if(!from||!to)return false;
+      if(!from||!to) return false;
       return itemCommercialLegs.some(leg=>(leg.from===from&&leg.to===to) || (Number(seg.index||0)>0&&Number(seg.index)===leg.index&&leg.from===from&&leg.to===to));
     });
-    const matched=v190UniqueMobilityOffers(rawMatched);
-    const mobilityOffersForCard=item.derived_by==='v192_explicit_excursion_mobility'
-      ? matched.map(offer=>({...offer,partner:{...offer.partner,name:`${offer.partner?.name||''} · ${offer.route_segment?.commercial_origin||''} → ${offer.route_segment?.commercial_destination||''}`}}))
-      : matched;
     const scopeOrDay=item?.scope_label
       ? `<span class="tw-context-day">${esc(item.scope_label)}</span>`
       : item.day
@@ -1111,102 +566,38 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       ? esc(item.source_summary)
       : item.derived_by==='trip_sequence'
         ? (lang==='es'?'Basado en el orden de tus destinos':'Based on your destination order')
-        : item.day ? esc(t.basedOn) : '';
+        : `${esc(t.basedOn)} · ${esc(t.dayLabel)} ${esc(item.day)}${dayDate(city,item.day)?` · ${esc(dayDate(city,item.day))}`:''}`;
     const originalNote=originalNoteForNeed(item,city);
     return `
-    <article class="tw-context-item${isRentalTransportNeed(item)?' tw-context-item--mobility-decision':''}${isMandatoryItineraryTour(item)?' tw-context-item--must':''}"${index>=visibleCount?' hidden data-context-extra="1"':''}>
+    <article class="tw-context-item"${index>=visibleCount?' hidden data-context-extra="1"':''}>
       <div class="tw-context-item-top">
         ${scopeOrDay}
-        <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : ((item.need_type==='transport_arrangement' || item.need_type==='intercity_transport') && !matched.length && /(?:taxi local|local taxi|a pie|walking|caminar)/i.test(String(item.transport||'')+' '+String(item.source_summary||'')) ? (lang==='es'?'Transporte local recomendado':'Local transport recommended') : ((item.need_type==='transport_arrangement'||item.need_type==='intercity_transport') && !matched.length && (item.transport||item.source_route) ? (lang==='es'?'Transporte recomendado':'Suggested transport') : contextLabel(item))))}</span>
+        <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : contextLabel(item))}</span>
       </div>
       <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
       ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
-      ${['transport_arrangement','intercity_transport'].includes(item?.need_type)&&matched.some(o=>['12go','bookaway'].includes(o?.partner?.slug))?`<small class="tw-context-source">${esc(lang==='es'?'Los enlaces permiten comparar ofertas publicadas, no confirman una reserva ni que cubran todo el recorrido. Comprueba origen, destino, estaciones, transbordos, accesos, fecha y servicios incluidos antes de pagar.':'Links compare published offers; they do not confirm a booking or coverage of the entire journey. Check origin, destination, stations, transfers, access, date and included services before paying.')}</small>`:''}
       ${originalNote?`<details class="tw-context-original-note"><summary><span>${esc(t.details)} ＋</span><span>${esc(t.hide)} −</span></summary><div><small>${esc(t.notes)}</small><p>${esc(originalNote)}</p></div></details>`:''}
-      ${sourceCopy?`<small class="tw-context-source">${sourceCopy}</small>`:''}
+      <small class="tw-context-source">${sourceCopy}</small>
       ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && !parseResolvedRouteSource(item.source_route)
-        ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(v210TransportLabel(item.transport))}`:''}</small>`
+        ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`
         : ''}
       ${(item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && parseResolvedRouteSource(item.source_route)
         // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
         // outer need-card association suppress a valid feed offer after the UI
         // changed from one simple card to a parent card containing 1..N legs.
-        ? `${renderResolvedTransportSegments(item,[...offers.filter(o=>(o?.partner?.slug||'')==='omio'),...matched.filter(o=>['12go','bookaway'].includes(o?.partner?.slug||''))])}${partnerOptions(matched.filter(offer=>{
-            const slug=offer?.partner?.slug||'';
-            if(slug==='omio')return !offer?.route_segment;
-            if(!['12go','bookaway'].includes(slug))return true;
-            // V184: never silently discard a partner CTA merely because a route
-            // segment exists; show it on the parent when it did not bind to an
-            // actual displayed leg. The inner segment renderer still owns matches.
-            const seg=offer?.route_segment||{};
-            if(!seg.commercial_origin||!seg.commercial_destination)return true;
-            return !itemCommercialLegs.some(leg=>samePhysicalLeg(leg.from,leg.to,seg));
-          }))}`
-        : partnerOptions(mobilityOffersForCard)}
+        ? renderResolvedTransportSegments(item,offers)
+        : partnerOptions(matched)}
     </article>`;
   }).join('')}</div>`;
 }
 
-// V192: remove routine pedestrian hops from the display, without affecting
-// provider generation or the authoritative itinerary. Do not suppress any
-// transport card with an actual commercial offer.
-function v192VisibleContextItems(items,offers,sectionType){
-  if(sectionType!=='transport')return items;
-  return items.filter(item=>{
-    if(!['transport_arrangement','intercity_transport'].includes(item?.need_type))return true;
-    if(isRentalTransportNeed(item))return true;
-    if((offers||[]).some(offer=>v190OfferMatchesNeed(offer,item)))return true;
-    const text=normalizeWorkspaceEntity(`${item.transport||''} ${item.source_summary||''} ${item.user_message||''}`);
-    const walk=/\b(a pie|walking|walk|caminar|caminata|on foot)\b/.test(text);
-    const regional=/\b(tren|train|rail|bus interurbano|regional|intercity|ferry|barco|boat)\b/.test(text);
-    return !(walk&&!regional);
-  });
-}
 function contextSection(icon,title,description,items,offers=[],sectionId='',sectionType=''){
   if(!items.length)return'';
   const id=sectionId?` id="${esc(sectionId)}"`:'';
-  const ordered=sectionSort(v192VisibleContextItems(items,offers,sectionType),sectionType);
-  if(!ordered.length)return'';
-  // V201: all mobility cards with an actual attributable partner CTA stay
-  // visible. Informational cards remain accessible under 'See more'.
-  // Preserve V190 12Go/Bookaway physical-leg matching and Omio route segments.
-  const hasMobilityCTA=item=>{
-    if(sectionType!=='transport')return false;
-    if(isRentalTransportNeed(item))return (offers||[]).some(o=>o?.placement==='city_car_rental' && (o?.offer_token||o?.direct_url||o?.url||o?.affiliate_url||o?.tracking_url));
-    const route=parseResolvedRouteSource(item?.source_route);
-    return (offers||[]).some(o=>{
-      if(!(o?.offer_token||o?.direct_url||o?.url||o?.affiliate_url||o?.tracking_url))return false;
-      if(['12go','bookaway'].includes(o?.partner?.slug||''))return v190OfferMatchesNeed(o,item);
-      if(o?.need_id && item?.id && o.need_id===item.id)return true;
-      if(o?.partner?.slug==='omio' && route?.legs?.length){
-        const seg=o.route_segment||{};
-        const from=v190CommercialEndpoint(seg.commercial_origin),to=v190CommercialEndpoint(seg.commercial_destination);
-        return Boolean(from&&to&&route.legs.some(leg=>v190CommercialEndpoint(leg.commercial_origin||leg.origin)===from&&v190CommercialEndpoint(leg.commercial_destination||leg.destination)===to));
-      }
-      return false;
-    });
-  };
-  if(sectionType==='transport')ordered.sort((a,b)=>{
-    // V210: chronological journey boundaries outrank affiliate CTA ranking.
-    // Within the remaining legs, retain the existing bookable-first behavior.
-    const rank=x=>x?.derived_by==='journey_start'?-2:x?.derived_by==='journey_return'?2:0;
-    const delta=rank(a)-rank(b);
-    if(delta)return delta;
-    const linked=Number(hasMobilityCTA(b))-Number(hasMobilityCTA(a));
-    if(linked)return linked;
-    const da=String(a?.travel_date||''),db=String(b?.travel_date||'');
-    return /^\d{4}-\d{2}-\d{2}$/.test(da)&&/^\d{4}-\d{2}-\d{2}$/.test(db)?da.localeCompare(db):0;
-  });
-
+  const ordered=sectionSort(items,sectionType);
   const sectionKey=`${city||''}:${sectionId||sectionType}`;
   const expanded=expandedContextSections.has(sectionKey);
-  // V227: counts are not indices. A CTA at position 4 must not be hidden by
-  // a count of 1. Keep all actionable and boundary cards visible in collapsed view.
-  const initialLimit=sectionType==='transport'?Math.max(
-    journeyTransitOnly(city)?Math.min(1,ordered.length):0,
-    ordered.reduce((n,item,i)=>hasMobilityCTA(item)?i+1:n,0),
-    ordered.reduce((n,item,i)=>item?.derived_by==='journey_start'||item?.derived_by==='journey_return'?i+1:n,0)
-  ):initialSectionLimit(ordered,sectionType);
+  const initialLimit=initialSectionLimit(ordered,sectionType);
   const visibleCount=expanded?ordered.length:initialLimit;
   const hiddenCount=Math.max(0,ordered.length-visibleCount);
   const toggle=ordered.length>initialLimit
@@ -1218,7 +609,7 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
       <div class="tw-context-section-copy">
         <div class="tw-context-section-title">
           <h3>${esc(title)}</h3>
-          <span>${ordered.length}</span>
+          <span>${items.length}</span>
         </div>
         <p>${esc(description)}</p>
       </div>
@@ -1319,14 +710,7 @@ function partnerOptions(offers=[]){
   return `<div class="tw-partner-options"><small class="tw-partner-options__label">${esc(t.optionsForBooking)}</small>${list.map(offer=>{
     const slug=offer.partner?.slug||'';
     const cta=['ticket_required','reservation_recommended'].includes(offer?.need_type)?t.findTickets:t.viewOptions;
-    // V231: unstructured transit cards use partnerOptions(), not omioOptions().
-    // A feed-direct Omio offer has no stored click-resolver ID; use its already
-    // attributed URL natively, just as the structured-leg renderer does.
-    const directOmio=slug==='omio' && /^https:\/\/omio\.sjv\.io\/c\/7727455\/\d+\/7385(?:\?|$)/i.test(String(offer.direct_url||''));
-    const action=directOmio
-      ? `<a class="tw-partner-direct-link" href="${esc(offer.direct_url)}" target="_blank" rel="noopener noreferrer" data-omio-direct="1">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</a>`
-      : `<button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(cta)} →</button>`;
-    return `<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_contextual')}" data-partner-slug="${esc(slug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>${esc(offer.partner?.name||'')}</strong>${action}</div>`;
+    return `<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_contextual')}" data-partner-slug="${esc(slug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>${esc(offer.partner?.name||'')}</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(cta)} →</button></div>`;
   }).join('')}</div>`;
 }
 
@@ -1339,29 +723,7 @@ function omioTransportRoutesForRequest(needs=[]){
   const out=[];const seen=new Set();
   (Array.isArray(needs)?needs:[]).forEach(need=>{
     if(need?.need_type!=='intercity_transport'&&need?.need_type!=='transport_arrangement')return;
-    const route=parseResolvedRouteSource(need?.source_route);
-    // V229: Transit routes can be represented by either a journey_story stay
-    // OR a generated itinerary transfer. tripRoutes() visits itinerary rows first
-    // and deduplicates identical city/date routes, so the generated row may be
-    // the sole surviving card. V228 accepted only journey_story, inadvertently
-    // excluding Barcelona -> Paris while Brussels -> Amsterdam still matched.
-    // Trust only itinerary-owned route provenance; never parse arbitrary text,
-    // station access or other partner links. The Omio
-    // feed remains the sole authority for creating an attributable CTA.
-    if(!route){
-      // V234: accept every explicit itinerary boundary and the existing
-      // top-level destination sequence as *candidates*, not as verified offers.
-      // Only the approved Omio feed can authorize a CTA. This also covers
-      // persisted trips without journey_story and explicit start/return legs.
-      const trustedProvenance=new Set(['journey_story','generated_itinerary','journey_start','journey_return','trip_sequence']);
-      if(!trustedProvenance.has(need?.derived_by) || !need?.origin || !need?.destination)return;
-      const origin=String(need.origin).trim(),destination=String(need.destination).trim();
-      if(!_v67CommercialIntercityEndpoints_(origin,destination))return;
-      const key=`${need?.id||''}|${normalizeWorkspaceEntity(origin)}|${normalizeWorkspaceEntity(destination)}|1`;
-      if(seen.has(key))return;seen.add(key);
-      out.push({need_id:need.id||'',need_type:need.need_type||'intercity_transport',origin,destination,index:1,mode:String(need.transport||''),travel_date:need.travel_date||'',parent_origin:origin,parent_destination:destination});
-      return;
-    }
+    const route=parseResolvedRouteSource(need?.source_route);if(!route)return;
     (route.legs||[]).forEach((leg,index)=>{
       const localizedOrigin=lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en;
       const localizedDestination=lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en;
@@ -1377,98 +739,6 @@ function omioTransportRoutesForRequest(needs=[]){
   console.table(out.map(r=>({need_id:r.need_id,index:r.index,origin:r.origin,destination:r.destination,mode:r.mode,date:r.travel_date})));
   console.info('candidate_count',out.length);
   console.groupEnd();
-  return out;
-}
-// V187: independent mobility extraction for 12Go and Bookaway.
-// Omio continues to use omioTransportRoutesForRequest() without changes.
-// V192: derive an excursion's transport need from explicit itinerary evidence,
-// even when the row has no from/to transfer pair. The provider graph, not this
-// extractor, decides whether a route is commercially documented. No destination
-// names or guessed connections are embedded here.
-// V193 Journey Evidence Bridge: reconstruct only journeys explicitly described
-// by itinerary rows. This does not infer via-stations or provider inventory.
-function v193ExplicitRowEndpoints(row,cityName){
-  // V195: trust structured transfer fields first, then explicit written routes.
-  // Never treat a destination/attraction field as an origin-destination pair.
-  const valid=(from,to)=>{
-    const a=String(from||'').trim(),b=String(to||'').trim();
-    return a&&b&&v190CommercialEndpoint(a)!==v190CommercialEndpoint(b)?{from:a,to:b}:null;
-  };
-  const direct=valid(row?.from,row?.to);if(direct)return direct;
-  const cc=row?.commerce_context||{};
-  const contextual=valid(cc.physical_origin||cc.canonical_origin,cc.physical_destination);
-  if(contextual)return contextual;
-  const candidates=[row?.activity,row?.transport,row?.notes,row?.source_route].filter(x=>typeof x==='string');
-  for(const value of candidates){
-    const text=value.trim();
-    // Require a bounded, explicit transfer phrase; never infer from a POI name.
-    const arrow=text.match(/(?:^|[:;\n]\s*)([^:;\n→]{2,90}?)\s*(?:→|⇒|⟶|->)\s*([^:;\n→]{2,90})(?:$|[.;\n])/);
-    if(arrow){const result=valid(arrow[1],arrow[2]);if(result)return result;}
-    const movement=text.match(/(?:^|[.;:]\s*)(?:traslado|transfer|transporte|viaje|trayecto|regreso|retorno|return|travel|journey|train|tren|bus|autob[uú]s|desplazamiento|salida|ida)\s+(?:en\s+[^,;:]{2,30}?\s+)?(?:de|desde|from)\s+(.{2,90}?)\s+(?:a|hacia|hasta|to)\s+(.{2,90}?)(?:[.;:]|$)/i);
-    if(movement){const result=valid(movement[1],movement[2]);if(result)return result;}
-  }
-  return null;
-}
-function v192ExcursionMobilityNeeds(cityName,existing=[]){
-  const out=[];const seen=new Set();
-  const base=data?.itineraries?.[cityName];if(!base)return out;
-  const dateBase=parseDate(base.baseDate||'');
-  const existingLegs=new Set((existing||[]).flatMap(need=>v190NeedLegs(need).map(leg=>`${need.day||''}|${leg.from}|${leg.to}`)));
-  workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
-    const activity=String(row?.activity||'');
-    const narrative=normalizeWorkspaceEntity(`${activity} ${row?.notes||''} ${row?.transport||''}`);
-    const mobilityEvidence=/\b(tren|train|ferrocarril|railway|railroad|ferry|ferri|barco|boat|bus interurbano|intercity bus|bus turistico|tourist bus|traslado regional|regional transfer|servicio bimodal|bimodal|traslado|transfer|regreso|retorno|shuttle)\b/.test(narrative);
-    if(!mobilityEvidence)return;
-    const endpoints=v193ExplicitRowEndpoints(row,cityName);if(!endpoints)return;
-    const from=v190CommercialEndpoint(endpoints.from),to=v190CommercialEndpoint(endpoints.to);
-    if(!from||!to||from===to)return;
-    // Preserve direction, day, and the original physical journey. No synthetic
-    // connection via Ollantaytambo (or any other city) is ever asserted here.
-    const key=`${day}|${from}|${to}`;
-    if(seen.has(key)||existingLegs.has(key))return;
-    seen.add(key);
-    out.push({id:`v193-explicit-journey:${cityName}:${day}:${index+1}`,category:'transport',need_type:'transport_arrangement',city:cityName,day,
-      travel_date:dateBase?fmt(addDays(dateBase,day-1)):'',
-      entity_name:lang==='es'?`Transporte: ${endpoints.from} → ${endpoints.to}`:`Transport: ${endpoints.from} → ${endpoints.to}`,
-      source_activity:activity,source_route:`${endpoints.from} → ${endpoints.to}`,transport:String(row?.transport||''),derived_by:'v192_explicit_excursion_mobility',
-      user_message:lang==='es'?'Compara únicamente los tramos publicados. Verifica estaciones, conexiones, horarios y acceso final; no se presupone una reserva.':'Compare published legs only. Check stations, connections, timetables and final access; no booking is assumed.'});
-  });
-  return out;
-}
-
-function v187ProviderMobilityNeeds(cityName,existing=[]){
-  const out=[];const seen=new Set((existing||[]).map(n=>normalizeWorkspaceEntity(n?.source_route||'')+'|'+String(n?.day||'')));
-  const unit=data?.itineraries?.[cityName];if(!unit)return out;
-  const baseDate=parseDate(unit.baseDate||'');
-  for(const dayNo of Object.keys(unit.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b)){
-    const rows=Array.isArray(unit.byDay[dayNo])?unit.byDay[dayNo]:[];
-    rows.forEach((row,index)=>{
-      const from=String(row?.from||'').trim(),to=String(row?.to||'').trim();
-      if(!from||!to||normalizeWorkspaceEntity(from)===normalizeWorkspaceEntity(to))return;
-      const movement=String(row?.transport||'')+' '+String(row?.activity||'');
-      const isTransfer=/\b(traslado|transfer|transporte|transport|tren|train|ferrocarril|rail|bus|autobus|shuttle|van|ferry|ferri|barco|boat|regreso|return|ida|outbound|vehiculo|vehicle|carretera|road)\b/i.test(movement);
-      if(!isTransfer)return;
-      // Ignore routine urban walking and local taxi hops. Regional journeys
-      // remain eligible even when ITBMO recommends a private vehicle.
-      if(/\b(a pie|walking|caminar|caminata|taxi local|local taxi)\b/i.test(movement)&&!/(tren|train|ferrocarril|rail|bus|autobus|ferry|regreso regional|regional transfer)/i.test(movement))return;
-      const source=`${from} → ${to}`,key=normalizeWorkspaceEntity(source)+'|'+dayNo;
-      if(seen.has(key))return;
-      const candidate={category:'transport',need_type:'transport_arrangement',city:cityName,day:dayNo,
-        travel_date:baseDate?fmt(addDays(baseDate,dayNo-1)):'',source_route:source};
-      const candidateIdentity=v207JourneyIdentity(candidate);
-      const alreadyCovered=(existing||[]).some(item=>{
-        if(!v208TransportNeed(item))return false;
-        const identity=v207JourneyIdentity(item);
-        return identity&&candidateIdentity&&identity===candidateIdentity;
-      });
-      if(alreadyCovered)return;
-      seen.add(key);
-      out.push({id:`v187-mobility:${cityName}:${dayNo}:${index+1}`,category:'transport',need_type:'transport_arrangement',city:cityName,day:dayNo,
-        travel_date:baseDate?fmt(addDays(baseDate,dayNo-1)):'',entity_name:source,source_activity:String(row?.activity||''),source_route:source,
-        transport:String(row?.transport||''),derived_by:'v187_physical_itinerary',
-        user_message:lang==='es'?'Compara alternativas para este desplazamiento; conserva el medio elegido si lo prefieres.':'Compare alternatives for this journey; keep your chosen mode if preferred.'});
-    });
-  }
   return out;
 }
 async function fetchPartnerOffers(action,needs=[]){
@@ -1498,15 +768,10 @@ async function fetchPartnerOffers(action,needs=[]){
   // suppressing a valid mobility CTA. It uses the same /api/partners function,
   // so no additional Vercel Function is introduced.
   const transport_routes=omioTransportRoutesForRequest(needs);
-  const mobilityNeeds=v187ProviderMobilityNeeds(city||'',needs);
-  // V193: resolve the SAME contextual journey needs shown in the Workspace.
-  // Omio's independent feed request remains unchanged.
-  const excursionNeeds=needs.filter(n=>n?.derived_by==='v192_explicit_excursion_mobility');
   const [cityOffers,omioOffers]=await Promise.all([
-    post({...baseBody,needs:[...needs,...mobilityNeeds.filter(n=>!excursionNeeds.some(e=>e.source_route===n.source_route&&e.day===n.day))],action:'resolve_city',transport_routes}),
+    post({...baseBody,action:'resolve_city',transport_routes:[]}),
     transport_routes.length?post({...baseBody,action:'lookup_omio_feed_routes',transport_routes}):Promise.resolve([])
   ]);
-  console.info('[ITBMO V187 TRANSPORT BRIDGE]',{city:city||'',routes_sent:transport_routes.length,city_partner_counts:cityOffers.reduce((acc,o)=>{const k=o?.partner?.slug||'unknown';acc[k]=(acc[k]||0)+1;return acc;},{}),omio_feed:omioOffers.length});
   const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
   console.info('[ITBMO OMIO V63][SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
   return [...experiences,...omioOffers];
@@ -1525,15 +790,7 @@ async function openPartnerOffer(offerId,placement,offerToken,meta={}){
   }catch(error){console.warn('[PARTNER CLICK]',error)}
   if(target)target.close();
 }
-function bindPartnerOffers(){
-  document.querySelectorAll('a[data-omio-direct="1"]').forEach(link=>{
-    link.onclick=()=>{
-      const card=link.closest('[data-placement]');
-      try{window.ITBMOFoundation?.track('partner_offer_click',{partner_name:'Omio',partner_slug:'omio',placement:card?.dataset.placement||'city_transport',destination:city||'',need_type:card?.dataset.needType||'',entity_name:card?.dataset.entityName||'',travel_date:card?.dataset.travelDate||''});}catch(_){}
-      // Native anchor handles opening. Never preventDefault or use window.open.
-    };
-  });
-  document.querySelectorAll('[data-partner-open]').forEach(btn=>{
+function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').forEach(btn=>{
   btn.onclick=(event)=>{
     const card=btn.closest('[data-placement]'),direct=String(btn.dataset.partnerDirect||'');
     if(/^https:\/\/omio\.sjv\.io\/c\/7727455\//i.test(direct)){
@@ -1550,44 +807,21 @@ function bindPartnerOffers(){
 });}
 async function loadTripPartnerOffers(){tripPartnerOffers=await fetchPartnerOffers('resolve_trip');renderTripPartnerOffers();}
 function renderTripPartnerOffers(){
-  const groups=[
-    {placement:'trip_connectivity',status:'#tw-connectivity-status'},
-    {placement:'trip_insurance',status:'#tw-insurance-status'}
-  ];
-  groups.forEach(group=>{
-    const offers=tripPartnerOffers.filter(x=>x.placement===group.placement);
-    const status=$(group.status); const item=status?.closest('.tw-trip-wide__item');
-    if(!item)return;
-    item.querySelectorAll('.tw-partner-offer').forEach(el=>el.remove());
-    if(!offers.length){item.classList.remove('is-live');return;}
-    item.classList.add('is-live'); if(status)status.textContent=t.available;
-    item.insertAdjacentHTML('beforeend',offers.map(offer=>offerCard(offer,group.placement)).join(''));
-    offers.forEach(offer=>{const key=`${offer.id}:${group.placement}`;if(viewedOfferIds.has(key))return;viewedOfferIds.add(key);window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',partner_slug:offer.partner?.slug||'',placement:group.placement});});
+  const offers=tripPartnerOffers.filter(x=>x.placement==='trip_connectivity');
+  const item=$('#tw-connectivity-status')?.closest('.tw-trip-wide__item');
+  if(!offers.length){ if(item) item.classList.remove('is-live'); return; }
+  if(!item)return;item.classList.add('is-live');$('#tw-connectivity-status').textContent=t.available;
+  item.querySelectorAll('.tw-partner-offer').forEach(el=>el.remove());
+  item.insertAdjacentHTML('beforeend',offers.map(offer=>offerCard(offer,'trip_connectivity')).join(''));bindPartnerOffers();
+  offers.forEach(offer=>{
+    if(!viewedOfferIds.has(offer.id)){
+      viewedOfferIds.add(offer.id);
+      window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',partner_slug:offer.partner?.slug||'',placement:'trip_connectivity'});
+    }
   });
-  bindPartnerOffers();
 }
 function renderPrepare(){
   const c=esc(city);
-  if(journeyTransitOnly(city)){
-    const needs=contextualNeedsForCity(city,[]);
-    if(!partnerOffersByCity.has(city)){partnerOffersByCity.set(city,[]);fetchPartnerOffers('resolve_city',needs).then(offers=>{partnerOffersByCity.set(city,offers);if(mode==='prepare')renderPrepare()}).catch(()=>{});}
-    const offers=(partnerOffersByCity.get(city)||[]).filter(x=>x.placement==='city_transport'||x.placement==='city_car_rental');
-    const block=contextSection('↗',t.move,t.moveC,needs,offers,'tw-context-move','transport');
-    $('#tw-content').innerHTML=`<section class="tw-prepare-hero"><span class="tw-prepare-mark">↗</span><span class="tw-kicker">${c} · ${lang==='es'?'Sólo tránsito':'Transit only'}</span><h2>${lang==='es'?'Conexiones de tu viaje':'Your travel connections'}</h2><p>${lang==='es'?'Esta parada no tiene actividades turísticas programadas. Consulta los traslados de tu recorrido.':'No sightseeing is planned at this stop. Review your journey connections.'}</p></section><div class="tw-context-sections">${block||`<div class="tw-context-empty">${esc(t.contextEmpty)}</div>`}</div>`;
-    // V205: Transit-only views must bind the same expandable mobility sections
-    // as tourist workspaces; the early return previously left 'Ver más' inert.
-    document.querySelectorAll('[data-context-toggle]').forEach(button=>{
-      button.onclick=()=>{
-        const key=button.dataset.contextToggle||'';
-        if(!key)return;
-        if(expandedContextSections.has(key))expandedContextSections.delete(key);
-        else expandedContextSections.add(key);
-        renderPrepare();
-        requestAnimationFrame(()=>[...document.querySelectorAll('[data-context-toggle]')].find(el=>el.dataset.contextToggle===key)?.focus());
-      };
-    });
-    bindPartnerOffers();return;
-  }
   const state=contextByCity.get(city);
 
   if(!state){
@@ -1625,7 +859,7 @@ function renderPrepare(){
   // Intercity mobility offers resolved by the Partner Engine are now shown in
   // the same contextual card as the authoritative A→B route. Local/POI mobility
   // remains informational because the server resolver only emits eligible routes.
-  const transportOffers=cityOffers.filter(x=>x.placement==='city_transport'||x.placement==='city_car_rental');
+  const transportOffers=cityOffers.filter(x=>x.placement==='city_transport');
   const activeSections=[
     contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets','tickets'),
     contextSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours','tours'),
@@ -1959,6 +1193,24 @@ function showEmpty(){
 function handoffToPlanner(){
   try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
 }
+function backPlanner(){
+  const params=new URLSearchParams();
+  params.set('lang',lang);
+  if(data?.trip_id) params.set('trip_id',data.trip_id);
+  handoffToPlanner();
+  window.location.replace(`./planner.html?${params.toString()}`);
+}
+function openMyTrips(){
+  const params=new URLSearchParams();
+  params.set('lang',lang);
+  params.set('view','my-trips');
+  if(data?.trip_id) params.set('trip_id',data.trip_id);
+  // Navigation is not logout. Keep the shared session untouched and let the
+  // Planner render the history gate from the same authenticated trip.
+  handoffToPlanner();
+  window.location.assign(`./planner.html?${params.toString()}`);
+}
+
 function setupAllCitiesFloating(){
   const source=$('#tw-all-cities');
   const floating=$('#tw-floating-all-cities');
@@ -2073,6 +1325,9 @@ async function boot(){
     setText();
   }
 
+  $('#tw-back-planner').onclick=backPlanner;
+  $('#tw-my-trips').onclick=openMyTrips;
+  $('#tw-empty-back').onclick=backPlanner;
   $('#tw-all-cities').onclick=overview;const essentialsCta=$('#tw-overview-essentials-cta');if(essentialsCta)essentialsCta.onclick=()=>{const target=$('#tw-trip-wide');if(target)target.scrollIntoView({behavior:'smooth',block:'start'});window.ITBMOFoundation?.track('trip_essentials_cta_clicked',{language:lang,trip_id:data?.trip_id||''});};
   $('#tw-mode-itinerary').onclick=()=>{mode='itinerary';renderCity()};
   $('#tw-mode-prepare').onclick=()=>{mode='prepare';renderCity()};
