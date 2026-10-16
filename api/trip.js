@@ -182,6 +182,29 @@ function tripStoryFromBody(body = {}) {
     : null;
 }
 
+// V218: enforce aggregate effective itinerary days on the server, not only per stay.
+function tripStoryEffectiveDays(story) {
+  const dates = new Set();
+  for (const stay of (story?.stays || [])) {
+    if (stay?.transitOnly) continue;
+    const days = Number(stay?.days || 0);
+    if (!Number.isInteger(days) || days < 1 || days > MAX_TRIP_STORY_DAYS) continue;
+    const start = String(stay?.startDate || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) continue;
+    const base = new Date(`${start}T12:00:00Z`);
+    if (!Number.isFinite(base.getTime())) continue;
+    for (let i = 0; i < days; i++) {
+      const window = stay?.perDay?.[i];
+      if (window && !window.start && !window.end) continue;
+      const from = window?.start || '09:00', to = window?.end || '20:00';
+      if (from >= to) continue;
+      const date = new Date(base.getTime() + i * 86400000).toISOString().slice(0,10);
+      dates.add(date);
+    }
+  }
+  return dates.size;
+}
+
 function tripStoryDayLimitError(body = {}) {
   const story = tripStoryFromBody(body);
   if (!story) return null;
@@ -191,6 +214,8 @@ function tripStoryDayLimitError(body = {}) {
     return !Number.isInteger(days) || days < 1 || days > MAX_TRIP_STORY_DAYS;
   });
   if (invalidStay) return `A Trip Story stay cannot exceed ${MAX_TRIP_STORY_DAYS} days`;
+  const effectiveDays = tripStoryEffectiveDays(story);
+  if (effectiveDays > MAX_TRIP_STORY_DAYS) return `A Trip Story cannot exceed ${MAX_TRIP_STORY_DAYS} effective itinerary days (${effectiveDays} requested)`;
 
   return null;
 }
@@ -203,9 +228,9 @@ function destinationLimitError(body = {}) {
   // journey. Its aggregate day count may legitimately exceed the old 10-day
   // single-destination limit; physical stays are validated above instead.
   if (tripStoryFromBody(body)) {
-    return hasDestinationOverDayLimit(body.destinations, MAX_TRIP_STORY_DAYS)
-      ? `A continuous Trip Story cannot exceed ${MAX_TRIP_STORY_DAYS} days`
-      : null;
+    // V219: the compatibility destination is a calendar envelope, not billable
+    // itinerary days. The authoritative effective-day check ran above.
+    return null;
   }
 
   return hasDestinationOverDayLimit(body.destinations, MAX_DAYS_PER_DESTINATION)
@@ -951,13 +976,16 @@ async function handleInfoChatCheckpoint(res, body, session) {
 
 
 async function handleList(res, body, session) {
-  const requestedLimit = Number(body.limit || 12);
-  const limit = Math.max(1, Math.min(30, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 12));
+  const requestedLimit = Number(body.limit ?? 30);
+  const limit = Math.max(1, Math.min(30, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 30));
+  // V217: bounded pages rather than an overall history cap.
+  const requestedOffset = Number(body.offset ?? 0);
+  const offset = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0 ? requestedOffset : 0;
 
   const rows = await supabaseFetch(
     `/trips?select=id,trip_name,status,destinations,planner_input,itinerary_data,generation_count,` +
     `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
-    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=${limit}`,
+    `status=in.(saved,generating,failed,generated)&order=updated_at.desc,id.desc&limit=${limit}&offset=${offset}`,
     { method:"GET" }
   );
 
