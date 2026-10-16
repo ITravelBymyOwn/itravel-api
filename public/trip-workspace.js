@@ -154,7 +154,7 @@ function tripRoutes(){
       const prev=story.stays[index];
       add({id:`journey:${st.id||index}`,origin:prev.place,destination:st.place,travel_date:st.departureDate||st.startDate,transport:st.transportMode||'',derived_by:'journey_story'});
     });
-    if(story.returnTrip?.enabled){const last=story.stays.at(-1);add({id:'journey:return',origin:story.returnTrip.origin?.label||last?.place,destination:story.returnTrip.arrival?.label,travel_date:story.returnTrip.departureDate||'',transport:story.returnTrip.transportMode||'',derived_by:'journey_return'});}
+    if(story.returnTrip?.enabled){const last=story.stays.at(-1);const actualOrigin=story.returnTrip.origin?.label||last?.place;add({id:'journey:return',origin:actualOrigin,destination:story.returnTrip.arrival?.label,travel_date:story.returnTrip.departureDate||'',transport:story.returnTrip.transportMode||'',derived_by:'journey_return'});}
   }
   // Preserve main-destination transitions that may not have an explicit row
   // because they occur between planning units.
