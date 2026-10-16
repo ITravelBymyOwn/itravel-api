@@ -10280,6 +10280,7 @@ function _generationCheckpointSnapshot_(extra={}){
       preferencesV2:plannerState?.preferencesV2 || null
     },
     last_error:generationRecoveryState?.last_error || null,
+    run_token:generationRecoveryState?.run_token || null,
     ...extra
   };
 }
@@ -10289,23 +10290,27 @@ async function _persistGenerationCheckpoint_(status='generating',extra={}){
   const token=getStoredSessionToken();
   if(!token || !currentTripId) throw new Error('GENERATION_SESSION_REQUIRED');
   const checkpoint=_generationCheckpointSnapshot_(extra);
+  const writeTripId=String(currentTripId);
+  const writeEpoch=generationRunEpoch;
   generationRecoveryState=checkpoint;
 
   let lastError=null;
   for(let attempt=0;attempt<3;attempt++){
-    if(generationResetInProgress) throw _generationCancelledError_();
+    if(generationResetInProgress || writeEpoch!==generationRunEpoch || String(currentTripId)!==writeTripId) throw _generationCancelledError_();
     if(!navigator.onLine) await _waitForGenerationConnection_();
-    if(generationResetInProgress) throw _generationCancelledError_();
+    if(generationResetInProgress || writeEpoch!==generationRunEpoch || String(currentTripId)!==writeTripId) throw _generationCancelledError_();
     try{
       return await tripApi({
         action:'generation_checkpoint',
         session_token:token,
-        trip_id:currentTripId,
+        trip_id:writeTripId,
+        run_token:checkpoint.run_token,
         status,
         checkpoint
       });
     }catch(err){
       lastError=err;
+      if(err?.status===409 || err?.status===400 || err?.status===402 || err?.status===404 || err?.code==='GENERATION_CANCELLED_BY_RESET') throw err;
       if(attempt<2) await new Promise(resolve=>setTimeout(resolve,1500*(attempt+1)));
     }
   }
@@ -10669,12 +10674,11 @@ async function runPaidGeneration({manualRetry=false}={}){
 
     if(begin?.new_run) _v71ClearTripCompletionMarker_(currentTripId);
     if(begin?.already_completed){
-      _v71SetTripCompletionMarker_(currentTripId);
-      _hydrateGenerationTrip_(begin.trip);
-      _applyGeneratedUIState({showModal:true});
-      _tripStoryMarkGeneratedDraftComplete_();
-      completionPublished=true;
-      return;
+      // V243: A completed server record is NOT evidence that the current run
+      // produced it. Never hydrate or publish historical exports here.
+      const conflict=new Error('Este viaje ya figura como generado en el servidor. No se mostrarán documentos anteriores como resultado de esta generación.');
+      conflict.code='GENERATION_ALREADY_COMPLETED';
+      throw conflict;
     }
 
     const serverCheckpoint=begin?.trip?.itinerary_data || generationRecoveryState || {};
@@ -10686,7 +10690,8 @@ async function runPaidGeneration({manualRetry=false}={}){
         : {},
       accepted_stays:(serverCheckpoint.accepted_stays && typeof serverCheckpoint.accepted_stays==='object')
         ? serverCheckpoint.accepted_stays : (generationRecoveryState?.accepted_stays || {}),
-      generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
+      generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1),
+      run_token:String(serverCheckpoint.run_token || '')
     };
 
     if(begin?.new_run && manualRetry){
@@ -10784,6 +10789,10 @@ async function runPaidGeneration({manualRetry=false}={}){
       return;
     }
 
+    // V243: drain every accepted-Stay checkpoint before the terminal commit.
+    // Otherwise an older queued 'generating' write may race the final 'generated'.
+    await _generationCheckpointQueue_;
+    _assertGenerationRunActive_(runEpoch);
     // V72 terminal commit: generated must be persisted synchronously before publication.
     // This prevents a queued/stale failed checkpoint from winning after downloads/workspace navigation.
     await _persistGenerationCheckpoint_('generated',{active_city:null,last_error:null,pending_cities:[]});
@@ -10814,7 +10823,7 @@ async function runPaidGeneration({manualRetry=false}={}){
       generationRecoveryState={...(generationRecoveryState || {}),generation_count:2};
     }
     try{
-      if(err?.code!=='GENERATION_PAYMENT_REQUIRED'){
+      if(!['GENERATION_PAYMENT_REQUIRED','GENERATION_ALREADY_COMPLETED','GENERATION_RUN_MISMATCH','GENERATION_ARCHIVED'].includes(err?.code)){
         await _persistGenerationCheckpoint_('failed',{
           active_city:null,
           last_error:{code:err?.code || 'GENERATION_ORCHESTRATOR_FAILED',at:new Date().toISOString()}
@@ -10832,7 +10841,13 @@ async function runPaidGeneration({manualRetry=false}={}){
       $preferencesGenerateV2.classList.remove('is-generated');
     }
     _pauseAstraGenerationMetrics_();
-    _showGenerationRetry_(recoveryReason);
+    if(['GENERATION_ALREADY_COMPLETED','GENERATION_RUN_MISMATCH','GENERATION_ARCHIVED'].includes(err?.code)){
+      showWOW(false);
+      console.error('[ITBMO V243 GENERATION IDENTITY] Historical/completed trip rejected; no previous exports published', {trip_id:currentTripId,code:err.code});
+      _showGenerationRetry_(recoveryReason);
+    }else{
+      _showGenerationRetry_(recoveryReason);
+    }
     recoveryPublished=true;
   }finally{
     if(Number(runEpoch)===Number(generationRunEpoch)) paidGenerationRunning=false;
