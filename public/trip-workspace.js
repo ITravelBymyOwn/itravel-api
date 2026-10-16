@@ -1319,7 +1319,14 @@ function partnerOptions(offers=[]){
   return `<div class="tw-partner-options"><small class="tw-partner-options__label">${esc(t.optionsForBooking)}</small>${list.map(offer=>{
     const slug=offer.partner?.slug||'';
     const cta=['ticket_required','reservation_recommended'].includes(offer?.need_type)?t.findTickets:t.viewOptions;
-    return `<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_contextual')}" data-partner-slug="${esc(slug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>${esc(offer.partner?.name||'')}</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(cta)} →</button></div>`;
+    // V231: unstructured transit cards use partnerOptions(), not omioOptions().
+    // A feed-direct Omio offer has no stored click-resolver ID; use its already
+    // attributed URL natively, just as the structured-leg renderer does.
+    const directOmio=slug==='omio' && /^https:\/\/omio\.sjv\.io\/c\/7727455\/\d+\/7385(?:\?|$)/i.test(String(offer.direct_url||''));
+    const action=directOmio
+      ? `<a class="tw-partner-direct-link" href="${esc(offer.direct_url)}" target="_blank" rel="noopener noreferrer" data-omio-direct="1">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</a>`
+      : `<button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(cta)} →</button>`;
+    return `<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_contextual')}" data-partner-slug="${esc(slug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>${esc(offer.partner?.name||'')}</strong>${action}</div>`;
   }).join('')}</div>`;
 }
 
