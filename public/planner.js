@@ -7913,6 +7913,39 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
         const exists=fixedTransfers.some(x=>String(x.origin||'').trim().toLowerCase()===String(t.origin||'').trim().toLowerCase()&&String(x.destination||'').trim().toLowerCase()===String(t.destination||'').trim().toLowerCase()&&String(x.departure||'')===String(t.departure||'')&&String(x.arrival||'')===String(t.arrival||''));
         if(!exists)fixedTransfers.push(t);
       });
+      // V242 · Transit-only connections: the traveler fixes DEPARTURES, not
+      // resolver-estimated arrivals. On a same-day transit chain, a resolver
+      // estimate must never extend the previous segment beyond the next
+      // traveler-fixed departure and manufacture a false itinerary overlap.
+      // Scope: main-route transfers INTO transit-only stays only. Tourist stays,
+      // excursions, and traveler-supplied arrival clocks remain unchanged.
+      const storyStays=_currentTravelModelV2_()?.trip_story?.stays||[];
+      const transitIds=new Set(storyStays.filter(st=>st?.transitOnly).map(st=>`story-main-${st.id}`));
+      const chronological=fixedTransfers.filter(t=>t.departure&&t.arrival)
+        .slice().sort((a,b)=>_hhmmToMinutes_(a.departure)-_hhmmToMinutes_(b.departure));
+      for(let j=0;j<chronological.length-1;j++){
+        const current=chronological[j],next=chronological[j+1];
+        if(!transitIds.has(String(current.transfer_id||'')) || current.direction!=='main')continue;
+        if(next.direction!=='main'||!_arePoiAliases_(current.destination,next.origin))continue;
+        const original=storyStays.find(st=>`story-main-${st.id}`===String(current.transfer_id));
+        if(original?._itbmo_user_arrival_time || original?.arrivalTimeStatus==='user_fixed')continue;
+        const dep=_hhmmToMinutes_(current.departure),arr=_hhmmToMinutes_(current.arrival),nextDep=_hhmmToMinutes_(next.departure);
+        if(dep==null||arr==null||nextDep==null||nextDep<=dep||arr<=nextDep)continue;
+        // This is a planning boundary, NOT a claim of physical arrival.
+        // Preserve the resolver's estimate for warnings and transparency.
+        current.resolver_estimated_arrival=current.arrival;
+        current.arrival=_minutesToHHMM_(nextDep);
+        current.arrival_user_fixed=false;
+        current.arrival_source='TRANSIT_CONNECTION_BOUNDARY';
+        current.route_estimated=true;
+        current.transit_connection_boundary=true;
+        const ledgerItem=canonicalLedger.find(t=>t.transfer_id===current.transfer_id);
+        if(ledgerItem){ledgerItem.resolver_estimated_arrival=current.resolver_estimated_arrival;ledgerItem.arrival=current.arrival;ledgerItem.arrival_source=current.arrival_source;ledgerItem.transit_connection_boundary=true;}
+        console.warn('[ITBMO V242 TRANSIT CONNECTION] Estimated arrival exceeds next user departure; planning segment bounded without changing departure or claiming feasibility',{
+          day:dayNum,origin:current.origin,via:current.destination,next:next.destination,
+          departure:current.departure,resolver_estimated_arrival:current.resolver_estimated_arrival,next_user_departure:next.departure
+        });
+      }
       const inferredTerminalTransfer=isFinalDay
         ? fixedTransfers.find(t=>t?.destination && !_arePoiAliases_(t.destination,city) && !fixedTransfers.some(later=>later!==t && later?.origin && later?.destination && _arePoiAliases_(later.origin,t.destination) && _arePoiAliases_(later.destination,city)))
         : null;
@@ -7964,6 +7997,8 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
           arrival_source:String(t.arrival_source||t.source||'USER_FIXED').toUpperCase(),
           transport_source:String(t.transport_source||t.source||'USER_FIXED').toUpperCase(),
           route_estimated:Boolean(t.route_estimated ?? (String(t.arrival_source||t.transport_source||t.source||'').toUpperCase()==='ROUTE_ESTIMATED')),
+          transit_connection_boundary:Boolean(t.transit_connection_boundary),
+          resolver_estimated_arrival:t.resolver_estimated_arrival||null,
           source:String(t.source||'USER_FIXED').toUpperCase(),
           route_resolution:t.route_resolution||null,
           mode:t.mode||null,
@@ -8054,7 +8089,9 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
         from:t.origin,to:t.destination,
         transport:[_v3TransportLabel_(t.mode),`~${_minutesToHuman_(duration)}`].filter(Boolean).join(' · '),
         duration:'',
-        notes:t.route_resolution?.summary
+        notes:t.transit_connection_boundary
+          ? (es?`Conexión en tránsito: salida siguiente fijada a las ${t.arrival}. La llegada estimada por ITBMO (${t.resolver_estimated_arrival||'sin confirmar'}) supera esa salida; este bloque es un límite de planificación, NO una llegada confirmada. Verifica la viabilidad real antes de reservar.`:`Transit connection: next departure fixed at ${t.arrival}. ITBMO's estimated arrival (${t.resolver_estimated_arrival||'unconfirmed'}) exceeds that departure; this block is a planning boundary, NOT a confirmed arrival. Verify actual feasibility before booking.`)
+          : t.route_resolution?.summary
           ? `${t.route_resolution.summary}${es?' · Horario estimado para planificación; confirma las opciones reales antes de reservar.':' · Planning estimate; confirm real options before booking.'}`
           : (t.terminal_arrival
             ? (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. Este traslado cierra esta etapa del viaje; para planificar ${t.destination}, agrégalo como un destino principal.`:`Expected arrival in ${t.destination} at ${t.arrival}. This transfer closes this trip stage; add ${t.destination} as a main destination to plan it.`)
