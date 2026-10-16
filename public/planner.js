@@ -8410,6 +8410,56 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     let changed=false;
     const byDay=_rowsByDayObject_(out);
 
+    // V247: transactional, slack-aware repair of short chronological collisions.
+    // The old single-row patch often moved a conflict to the NEXT row, so QA
+    // rejected it despite a valid schedule being possible (Toledo/Montserrat).
+    // Move the entire dependent flexible chain, preserving every experience,
+    // duration, ordering and fixed transport. Never cross planning windows or
+    // hard/calendar-sensitive rows. Commit ONLY after full local QA improves.
+    for(const finding of errors.filter(e=>e.code==='OVERLAP')){
+      const day=Number(finding?.day||0),rowNum=Number(finding?.row||0);
+      if(!day||rowNum<2)continue;
+      const original=_rowsByDayObject_(out)[day]||[];
+      if(rowNum>original.length)continue;
+      const candidate=JSON.parse(JSON.stringify(out));
+      const chain=_rowsByDayObject_(candidate)[day]||[];
+      const previous=chain[rowNum-2],current=chain[rowNum-1];
+      if(_v114IsNightOverlayRow_(previous)||_v114IsNightOverlayRow_(current))continue;
+      const previousEnd=_v114LogicalEndMinutes_(previous),currentStart=_v114LogicalStartMinutes_(current);
+      if(previousEnd==null||currentStart==null||previousEnd<=currentStart||previousEnd-currentStart>45)continue;
+      const windowId=String(current?.planning_window_id||current?.commerce_context?.planning_window_id||'');
+      const previousWindow=String(previous?.planning_window_id||previous?.commerce_context?.planning_window_id||'');
+      if(!windowId||windowId!==previousWindow)continue;
+      let end=previousEnd,ok=true,moved=0,maxDelta=0;
+      for(let j=rowNum-1;j<chain.length;j++){
+        const row=chain[j];
+        const rowWindow=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
+        if(rowWindow!==windowId||_v114IsNightOverlayRow_(row))break;
+        const start=_v114LogicalStartMinutes_(row),finish=_v114LogicalEndMinutes_(row);
+        if(start==null||finish==null||finish<=start){ok=false;break;}
+        if(start>=end)break; // existing slack absorbs the upstream delay
+        const delta=end-start;
+        const calendar=String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase();
+        if(delta>90||_v115IsHardRow_(row)||calendar==='high'||
+           String(row?.kind||'').toLowerCase()==='fixed_transfer'||row?.user_fixed===true||row?.fixed===true){ok=false;break;}
+        const win=_v111WindowForRow_(row,contract),winEnd=_hhmmToMinutes_(win?.end);
+        if(winEnd!=null&&finish+delta>winEnd){ok=false;break;}
+        row.start=_minutesToHHMM_(start+delta);row.end=_minutesToHHMM_(finish+delta);
+        end=finish+delta;moved++;maxDelta=Math.max(maxDelta,delta);
+      }
+      if(!ok||!moved)continue;
+      const nextErrors=_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
+      const oldBlocking=errors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
+      const newBlocking=nextErrors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
+      const oldOverlaps=errors.filter(e=>e.code==='OVERLAP').length;
+      const newOverlaps=nextErrors.filter(e=>e.code==='OVERLAP').length;
+      if(newBlocking>=oldBlocking||newOverlaps>=oldOverlaps||nextErrors.length>errors.length)continue;
+      out=candidate;changed=true;
+      console.info(`[ITBMO V247 CHAIN REPAIR] ${city} · day ${day} · ${moved} flexible row(s) · max +${maxDelta} min · overlaps ${oldOverlaps}→${newOverlaps}`);
+      break; // audit again before touching another collision
+    }
+    if(changed)continue;
+
     // V48 deterministic micro-overlap repair. Treat a <=30 minute activity
     // overlap as arithmetic, but accept the shift only transactionally: re-run
     // the SAME audit and keep the candidate only when it removes that overlap
