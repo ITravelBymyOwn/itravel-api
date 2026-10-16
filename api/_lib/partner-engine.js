@@ -1136,9 +1136,21 @@ function partnerWorkspaceRouteNeeds(needs=[],transportRoutes=[],city=''){
 // V225: offline eligibility is NOT route publication. Never show a provider-home
 // affiliate link as a route-specific result. Flight-only and airport legs are
 // excluded, including the explicit outbound and return journey boundaries.
+// V226: station access is not a commercial intercity market. Keep station
+// names in real sealed legs, but reject local access/shuttle/taxi legs.
+function v226StationAccess(need,route){
+  const text=normalizeKey(`${need?.entity_name||''} ${need?.source_activity||''} ${need?.transport||''}`);
+  const mode=normalizeKey(`${need?.transport||''} ${route?.mode||''}`);
+  const station=/\b(station|estacion|estacoes|gare|bahnhof|terminal|platform|and[eé]n|atocha|chamartin|hbf)\b/;
+  const local=/\b(taxi|uber|walk|walking|caminar|a pie|metro|subway|underground|local bus|bus local|shuttle|transfer|traslado|acceso|access|llegar a|reach|hacia la estacion|to the station)\b/;
+  if(station.test(text)&&local.test(text))return true;
+  if(station.test(normalizeKey(`${route?.origin||''} ${route?.destination||''}`))&&local.test(mode))return true;
+  return false;
+}
 function v225GroundTransportNeed(need,route){
   const mode=twelveGoCommercialMode(`${need?.transport||''} ${need?.transport_mode||''} ${route?.mode==='alternative'?'':route?.mode||''}`);
   if(mode==='flight')return false;
+  if(v226StationAccess(need,route))return false;
   const raw=normalizeKey(`${need?.transport||''} ${need?.source_activity||''}`);
   if(/\b(plane|flight|airplane|aircraft|avion|vuelo|aereo|aeropuerto|airport)\b/.test(raw))return false;
   const a=normalizeKey(route?.origin||''),b=normalizeKey(route?.destination||'');
@@ -1290,8 +1302,10 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
       const verified=route.verified_url||verifiedTransportUrl('bookaway',route,city);
       // V188: verified publisher routes only; generic home searches are not commercial matches.
       if(!v225GroundTransportNeed(need,route))continue;
-      const inferred=verified?'':v225PublisherSearchCandidate('bookaway',route,need,city,destinations);
-      if(!verified&&!inferred)continue;
+      // Bookaway route pages are not predictable from country and city slugs.
+      // Do not emit speculative 404 links until a verified route or API exists.
+      const inferred='';
+      if(!verified)continue;
       seen.add(key);
       const targetUrl=appendParams(verified||inferred,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
