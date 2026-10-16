@@ -825,10 +825,55 @@ function auditContextCoverageForCity(cityName,serverNeeds=[],visibleNeeds=[]){
   }catch(error){console.warn('[ITBMO V176 CONTEXT AUDIT] unavailable',String(error?.message||error));}
 }
 
+// V235: A single, provider-neutral admission rule for commercial mobility cards.
+// The itinerary remains authoritative and untouched; only the Workspace commerce
+// layer is filtered. Station access, local hops and walking never become offers.
+function v235CommercialMobilityNeed(item){
+  if(!v208TransportNeed(item))return true;
+  if(isRentalTransportNeed(item))return true; // Keep the traveller's rental choice.
+  const resolved=parseResolvedRouteSource(item?.source_route||'');
+  const routeText=String(item?.source_route||'');
+  const directOrigin=String(item?.origin||'').trim();
+  const directDestination=String(item?.destination||'').trim();
+  const arrow=routeText.match(/^\s*([^→\n]+?)\s*→\s*([^→\n]+?)\s*$/);
+  const origin=directOrigin||String(resolved?.parent?.origin||arrow?.[1]||'').trim();
+  const destination=directDestination||String(resolved?.parent?.destination||arrow?.[2]||'').trim();
+  if(!origin||!destination||!_v67CommercialIntercityEndpoints_(origin,destination))return false;
+  const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
+  const localNode=/\b(station|stazione|estacion|estacao|gare|bahnhof|hbf|termini|sants|atocha|terminal|airport|aeropuerto|aeroport|aerodrome|aerodromo|hotel|hostal|lodging|alojamiento|downtown|city center|centro|centre|puerto|port|metro|subway)\b/;
+  // An explicit commercial resolved leg may name stations at both ends. Keep
+  // that parent intercity journey, but never expose an individual access leg.
+  if(!resolved && (localNode.test(a)||localNode.test(b)))return false;
+  const mode=normalizeWorkspaceEntity(`${item?.transport||''} ${item?.source_summary||''}`);
+  const localMode=/\b(walking|walk|caminar|caminata|a pie|on foot|metro|subway|taxi local|local taxi|uber urbano|urban taxi)\b/;
+  const intercityMode=/\b(tren|train|rail|autobus|bus interurbano|intercity bus|coach|ferry|ferri|barco|boat)\b/;
+  if(localMode.test(mode)&&!intercityMode.test(mode))return false;
+  // Explicit itinerary boundaries are always useful candidates; availability
+  // and affiliate links remain subject to independent provider verification.
+  const boundary=new Set(['journey_story','journey_start','journey_return','trip_sequence']);
+  if(boundary.has(item?.derived_by))return true;
+  // An itinerary transfer is admitted only with evidence of a substantial
+  // transport decision, not merely a generic 'transfer' or local car hop.
+  const context=normalizeWorkspaceEntity(`${item?.source_activity||''} ${item?.transport||''} ${item?.user_message||''}`);
+  const meaningful=/\b(intercity|interurbano|regional|entre ciudades|between cities|excursion|excursion de dia|day trip|tren|train|ferrocarril|rail|autobus|bus|ferry|ferri|barco|boat|carretera|road trip|vehiculo alquilado|rental car|coche alquilado|auto alquilado)\b/;
+  if(resolved){
+    return (resolved.legs||[]).some(leg=>{
+      const x=String(leg?.commercial_origin||leg?.origin||'');
+      const y=String(leg?.commercial_destination||leg?.destination||'');
+      return _v67CommercialIntercityEndpoints_(x,y) &&
+        (leg?.commerce_eligible===true||meaningful.test(context)||meaningful.test(normalizeWorkspaceEntity(leg?.mode||'')));
+    });
+  }
+  return meaningful.test(context);
+}
+function v235FilterMobilityNeeds(needs=[]){
+  return needs.filter(v235CommercialMobilityNeed);
+}
+
 function contextualNeedsForCity(cityName,needs){
-  if(journeyTransitOnly(cityName))return dedupeContextualNeeds(tripRoutes().filter(route=>
+  if(journeyTransitOnly(cityName))return v235FilterMobilityNeeds(dedupeContextualNeeds(tripRoutes().filter(route=>
     normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName)||
-    (route.derived_by==='journey_start'&&normalizeWorkspaceEntity(route.destination)===normalizeWorkspaceEntity(cityName))));
+    (route.derived_by==='journey_start'&&normalizeWorkspaceEntity(route.destination)===normalizeWorkspaceEntity(cityName)))));
   // Server context for a main planning unit can contain rows that physically
   // belong to a subdestination. Keep only needs that belong to this physical
   // workspace slice; transport is re-derived from the authoritative route.
@@ -882,7 +927,7 @@ function contextualNeedsForCity(cityName,needs){
   // only from the itinerary's own paid anchors; never invent destinations.
   const regionalTours=regionalTourAlternativeForCity(cityName,merged);
   if(regionalTours.length) merged.push(...regionalTours);
-  let finalNeeds=dedupeContextualNeeds(v215ReconcileMobilityDays(cityName,merged));
+  let finalNeeds=v235FilterMobilityNeeds(dedupeContextualNeeds(v215ReconcileMobilityDays(cityName,merged)));
   // Deterministic product rule: every real tourist destination gets exactly one
   // destination-wide City Tour option. Never depend on the LLM classifier for it.
   const hasOverview=finalNeeds.some(item=>item?.need_type==='guided_tour_optional' && /\b(city tour|tour panoramico|highlights tour)\b/i.test(normalizeWorkspaceEntity(item?.entity_name||'')));
@@ -1497,8 +1542,8 @@ async function fetchPartnerOffers(action,needs=[]){
   // Context admission, provider ranking, or another affiliate adapter from
   // suppressing a valid mobility CTA. It uses the same /api/partners function,
   // so no additional Vercel Function is introduced.
-  const transport_routes=omioTransportRoutesForRequest(needs);
-  const mobilityNeeds=v187ProviderMobilityNeeds(city||'',needs);
+  const transport_routes=omioTransportRoutesForRequest(v235FilterMobilityNeeds(needs));
+  const mobilityNeeds=v235FilterMobilityNeeds(v187ProviderMobilityNeeds(city||'',needs));
   // V193: resolve the SAME contextual journey needs shown in the Workspace.
   // Omio's independent feed request remains unchanged.
   const excursionNeeds=needs.filter(n=>n?.derived_by==='v192_explicit_excursion_mobility');
