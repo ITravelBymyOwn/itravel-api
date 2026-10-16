@@ -9262,3 +9262,9 @@ body.itbmo-builder-closed-clean #reset-planner{display:block!important;}
 
 /* V150 UX - visually emphasize the transit-only choice without changing its text or behavior. */
 select option[value="transit"]{font-weight:800;color:#0a7187;background:#e9f8fb}
+
+/* V226: single full-time selectors; no legacy split hour/minute UI. */
+.city-row .time-selector-inputs{display:block!important}
+.city-row .time-selector-inputs .time-hhmm{width:100%;min-width:0;text-align:center}
+.route-v2-time>div{display:block!important}
+.route-v2-time select[data-time-value]{width:100%;min-height:43px;text-align:center;border-radius:12px!important}
