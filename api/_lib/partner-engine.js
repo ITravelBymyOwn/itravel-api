@@ -1133,7 +1133,33 @@ function partnerWorkspaceRouteNeeds(needs=[],transportRoutes=[],city=''){
   }
   return [...base,...extra];
 }
-function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
+// V225: offline eligibility is NOT route publication. Never show a provider-home
+// affiliate link as a route-specific result. Flight-only and airport legs are
+// excluded, including the explicit outbound and return journey boundaries.
+function v225GroundTransportNeed(need,route){
+  const mode=twelveGoCommercialMode(`${need?.transport||''} ${need?.transport_mode||''} ${route?.mode==='alternative'?'':route?.mode||''}`);
+  if(mode==='flight')return false;
+  const raw=normalizeKey(`${need?.transport||''} ${need?.source_activity||''}`);
+  if(/\b(plane|flight|airplane|aircraft|avion|vuelo|aereo|aeropuerto|airport)\b/.test(raw))return false;
+  const a=normalizeKey(route?.origin||''),b=normalizeKey(route?.destination||'');
+  if(/\b(airport|aeropuerto)\b/.test(`${a} ${b}`))return false;
+  return Boolean(a&&b&&a!==b);
+}
+// V225: a country must come from the trip's own destination metadata, not a
+// guessed place name. The link is an *unverified route search*, not inventory.
+function v225PublisherSearchCandidate(provider,route,need,city,destinations=[]){
+  if(!v225GroundTransportNeed(need,route))return '';
+  const country=bookawayCountryForRoute(route,need,city,destinations);
+  if(!country)return '';
+  const from=twelveGoSlug(route.origin).toLowerCase(),to=twelveGoSlug(route.destination).toLowerCase();
+  if(!from||!to||from===to)return '';
+  if(provider==='bookaway')return `https://www.bookaway.com/routes/${country}/${from}-to-${to}`;
+  // 12Go publisher uses /travel/{origin}/{destination} irrespective of country;
+  // a route URL can be attempted but must be labelled unverified.
+  if(provider==='12go')return `https://12go.asia/es/travel/${from}/${to}`;
+  return '';
+}
+function resolve12GoTransportOffers(city,uiLanguage,needs=[],destinations=[]){
   const partner=virtualPartner('12go','12Go','transport'); const out=[]; const seen=new Set();
   for(const need of (Array.isArray(needs)?needs:[])){
     if(!['intercity_transport','transport_arrangement'].includes(need?.need_type))continue;
@@ -1175,20 +1201,14 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[]){
       // V184: A slug is NOT evidence of a published 12Go route.
       // Never turn editorial place names into /travel/A/B/ (404).
       // V188: never emit a generic landing-page CTA as evidence of route existence.
-      // V224: global, offline, deterministic discovery fallback. An explicit
-      // physical intercity market is sufficient for a clearly labelled MANUAL
-      // provider search, NOT proof of a published route or dated inventory.
-      // Keep verified routes first; never manufacture a /travel/A/B URL.
-      const manual=!verified;
-      if(manual && !(need?._workspace_physical || need?.need_type==='intercity_transport'))continue;
+      if(!v225GroundTransportNeed(need,route))continue;
+      const inferred=verified?'':v225PublisherSearchCandidate('12go',route,need,city,destinations);
+      if(!verified&&!inferred)continue;
       seen.add(key);
-      const direct=!manual;
-      const base=verified||'https://12go.asia/';
-      // V190: dates from the Workspace may be localized display strings. The traveler
-      // selects their date at 12Go; never send a malformed prefilled date.
-      const targetUrl=appendParams(base,{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
+      const direct=Boolean(verified);
+      const targetUrl=appendParams(verified||inferred,{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
-      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:verified?'provider_verified_route':'manual_affiliate_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60),journey_origin:clean(route.journey_origin||'',120),journey_destination:clean(route.journey_destination||'',120)},titleEs:label,titleEn:label,descriptionEs:direct?'Busca opciones para este tramo en 12Go. Confirma disponibilidad con el proveedor.':`Buscar manualmente ${label} en 12Go. Ruta y disponibilidad NO verificadas.`,descriptionEn:direct?'Search this leg on 12Go; confirm availability with the provider.':`Manually search ${label} on 12Go. Route and availability NOT verified.`,confidence:direct?'medium':'low'});
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:verified?'provider_verified_route':'unverified_route_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60),journey_origin:clean(route.journey_origin||'',120),journey_destination:clean(route.journey_destination||'',120)},titleEs:label,titleEn:label,descriptionEs:direct?'Busca opciones para este tramo en 12Go. Confirma disponibilidad con el proveedor.':`Buscar manualmente ${label} en 12Go. Ruta y disponibilidad NO verificadas.`,descriptionEn:direct?'Search this leg on 12Go; confirm availability with the provider.':`Manually search ${label} on 12Go. Route and availability NOT verified.`,confidence:direct?'medium':'low'});
       if(offer)out.push(offer);
     }
   }
@@ -1269,15 +1289,14 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
       // route page. Country + slug alone does not establish route existence.
       const verified=route.verified_url||verifiedTransportUrl('bookaway',route,city);
       // V188: verified publisher routes only; generic home searches are not commercial matches.
-      // V224: global offline fallback, without fabricated /routes/ slugs.
-      // This is a provider-home MANUAL search, never route verification.
-      const manual=!verified;
-      if(manual && !(need?._workspace_physical || need?.need_type==='intercity_transport'))continue;
+      if(!v225GroundTransportNeed(need,route))continue;
+      const inferred=verified?'':v225PublisherSearchCandidate('bookaway',route,need,city,destinations);
+      if(!verified&&!inferred)continue;
       seen.add(key);
-      const targetUrl=appendParams(verified||'https://www.bookaway.com/',{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+      const targetUrl=appendParams(verified||inferred,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
-        resolutionType:verified?'provider_verified_route':'manual_affiliate_search',confidence:verified?'high':'low',travelDate:route.date||'',
+        resolutionType:verified?'provider_verified_route':'unverified_route_search',confidence:verified?'high':'low',travelDate:route.date||'',
         routeSegment:{index:Number(route.index||1),mode:route.mode,commercial_origin:route.origin,commercial_destination:route.destination,market_resolution:clean(route.resolution||'',60),journey_origin:clean(route.journey_origin||'',120),journey_destination:clean(route.journey_destination||'',120)},
         titleEs:`Bookaway · ${label}`,titleEn:`Bookaway · ${label}`,
         descriptionEs:verified?'Consulta este trayecto en Bookaway; confirma horarios y disponibilidad.':`Buscar manualmente ${label} en Bookaway. Ruta y disponibilidad NO verificadas.`,
@@ -1440,7 +1459,7 @@ export async function resolveCityOffers({
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[]),
-    Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity))),
+    Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity),bookawayDestinations)),
     Promise.resolve(resolveBookawayTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity),bookawayDestinations)),
     Promise.resolve(resolveDiscoverCarsOffers(safeCity,safeNeeds))
   ]);
