@@ -963,9 +963,9 @@ function mobilityLegNote(note=''){
   return `${raw} ${verification}`;
 }
 function omioOptions(offers=[]){
-  const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='omio');
+  const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='omio' && /^https:\/\/omio\.sjv\.io\/c\/7727455\/\d+\/7385(?:\?|$)/i.test(String(o?.direct_url||'')));
   if(!list.length)return'';
-  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}" data-partner-direct="${esc(offer.direct_url||'')}">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</button></div>`).join('')}</div>`;
+  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><a class="tw-partner-direct-link" href="${esc(offer.direct_url||'')}" target="_blank" rel="noopener noreferrer" data-omio-direct="1">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</a></div>`).join('')}</div>`;
 }
 function twelveGoOptions(offers=[]){
   const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='12go');
@@ -1513,7 +1513,15 @@ async function openPartnerOffer(offerId,placement,offerToken,meta={}){
   }catch(error){console.warn('[PARTNER CLICK]',error)}
   if(target)target.close();
 }
-function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').forEach(btn=>{
+function bindPartnerOffers(){
+  document.querySelectorAll('a[data-omio-direct="1"]').forEach(link=>{
+    link.onclick=()=>{
+      const card=link.closest('[data-placement]');
+      try{window.ITBMOFoundation?.track('partner_offer_click',{partner_name:'Omio',partner_slug:'omio',placement:card?.dataset.placement||'city_transport',destination:city||'',need_type:card?.dataset.needType||'',entity_name:card?.dataset.entityName||'',travel_date:card?.dataset.travelDate||''});}catch(_){}
+      // Native anchor handles opening. Never preventDefault or use window.open.
+    };
+  });
+  document.querySelectorAll('[data-partner-open]').forEach(btn=>{
   btn.onclick=(event)=>{
     const card=btn.closest('[data-placement]'),direct=String(btn.dataset.partnerDirect||'');
     if(/^https:\/\/omio\.sjv\.io\/c\/7727455\//i.test(direct)){
