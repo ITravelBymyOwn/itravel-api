@@ -1333,12 +1333,16 @@ function omioTransportRoutesForRequest(needs=[]){
   (Array.isArray(needs)?needs:[]).forEach(need=>{
     if(need?.need_type!=='intercity_transport'&&need?.need_type!=='transport_arrangement')return;
     const route=parseResolvedRouteSource(need?.source_route);
-    // V228: A transit-only stay is an explicitly configured physical journey,
-    // not a resolver-produced itinerary row. Feed its original city endpoints
-    // to Omio's official catalog; only a verified feed match can create a CTA.
-    // Do not parse arbitrary arrows, station access, or partner-specific links.
+    // V229: Transit routes can be represented by either a journey_story stay
+    // OR a generated itinerary transfer. tripRoutes() visits itinerary rows first
+    // and deduplicates identical city/date routes, so the generated row may be
+    // the sole surviving card. V228 accepted only journey_story, inadvertently
+    // excluding Barcelona -> Paris while Brussels -> Amsterdam still matched.
+    // Trust only these two route provenance types; never parse arbitrary text,
+    // station access, trip_sequence guesses or other partner links. The Omio
+    // feed remains the sole authority for creating an attributable CTA.
     if(!route){
-      if(need?.derived_by!=='journey_story' || !need?.origin || !need?.destination)return;
+      if(!['journey_story','generated_itinerary'].includes(need?.derived_by) || !need?.origin || !need?.destination)return;
       const origin=String(need.origin).trim(),destination=String(need.destination).trim();
       if(!_v67CommercialIntercityEndpoints_(origin,destination))return;
       const key=`${need?.id||''}|${normalizeWorkspaceEntity(origin)}|${normalizeWorkspaceEntity(destination)}|1`;
