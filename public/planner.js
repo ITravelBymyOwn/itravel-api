@@ -11116,11 +11116,11 @@ async function restorePaidGenerationIfNeeded(preferredTripId=""){
     }
 
     if(!trip || !['generating','failed'].includes(trip.status)){
-      // Server is the authority for a paid interrupted generation. A stale
-      // saved/generated active ID must not hide another recoverable trip.
+      // V245: A stale active generated/saved ID cannot hide a different
+      // interrupted paid generation. Never hydrate historical exports.
       const data=await tripApi({action:'recoverable',session_token:token});
       const recoverable=data?.trip || null;
-      if(recoverable && ['generating','failed'].includes(recoverable.status)) trip=recoverable;
+      trip=(recoverable && ['generating','failed'].includes(recoverable.status)) ? recoverable : null;
     }
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
     if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
