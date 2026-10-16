@@ -12296,14 +12296,14 @@ function _v39VisibleDuration_(row={}){
 }
 
 function _v3VisibleTransportLabel_(value){
-  const raw=String(value||'').trim();
+  const raw=_v126TransportText_(value);
   if(!raw)return '';
   if(/^recomi[eé]ndame$/i.test(raw)||/^recommend$/i.test(raw)||/^recommend me$/i.test(raw)) return getLang()==='es'?'Por definir · ITBMO te ayudará a elegir':'To be decided · ITBMO will help you choose';
   return raw.replace(/\/(recomendado|recommended)/ig,'').replace(/\s{2,}/g,' ').trim();
 }
 
 function _v40VisibleTransportForRow_(row={}){
-  const raw=_v3VisibleTransportLabel_(row?.transport||'');
+  const raw=_v3VisibleTransportLabel_(_v126TransportText_(row?.transport||''));
   if(!/^por definir\b|^to be decided\b/i.test(raw)) return raw;
   const text=`${row?.notes||''} ${row?.activity||''}`;
   if(/\bRER\b/i.test(text)) return raw.replace(/^Por definir|^To be decided/i,'RER');
@@ -12681,12 +12681,29 @@ async function exportItineraryToPDF(options={}){
       if(!day){day={globalDay:Math.max(1,Math.round((Date.parse(iso+'T12:00:00Z')-Date.parse(itineraryFirst+'T12:00:00Z'))/86400000)+1),date:key,destinations:[],rows:[]};byDate.set(key,day);days.push(day);}
       group.forEach(e=>{
         const modeNames={plane:es?'Avión':'Plane',train:es?'Tren':'Train',bus:es?'Autobús':'Bus',car:es?'Automóvil':'Car',ferry:'Ferry',transfer:es?'Traslado':'Transfer'};
-        const visibleMode=modeNames[String(e.mode||'').toLowerCase()]||e.mode;
+        const modeText=_v126TransportText_(e.mode);
+        const visibleMode=modeNames[modeText.toLowerCase()]||modeText;
         day.rows.push({activity:e.activity,from:e.from,to:e.to,start:e.time||'',end:'',transport:visibleMode,notes:es?'Logística de viaje basada en los datos indicados. Confirma horarios y disponibilidad con el proveedor antes de reservar.':'Journey logistics based on the supplied details. Confirm schedules and availability with the provider before booking.',_pdfLogistic:true});
       });
     });
   }
   days.sort((a,b)=>(parseDMY(a.date)?.getTime?.()||0)-(parseDMY(b.date)?.getTime?.()||0)||Number(a.globalDay)-Number(b.globalDay));
+  // V246 PDF-only: resolve the physical base by calendar date. The printed
+  // destination must not depend on semantic activity titles or row locations.
+  const pdfBaseForDay=(day)=>{
+    const parsed=parseDMY(day?.date||'');
+    const iso=parsed?`${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`:'';
+    const stays=(pdfStory?.stays||[]).filter(st=>st?.place&&!st?.transitOnly);
+    const match=stays.find(st=>{
+      if(!iso||!st.startDate)return false;
+      const end=_tripStoryAddDays_(st.startDate,Math.max(0,Number(st.days||1)-1));
+      return iso>=st.startDate&&iso<=end;
+    });
+    if(match)return String(match.place).trim();
+    const saved=(savedDestinations||[]).find(d=>
+      String(d?.city||'').trim() && (itineraries?.[d.city]?.byDay?.[day.globalDay]));
+    return String(saved?.city||day?.destinations?.[0]||'').trim();
+  };
   // V121 PDF-only aurora restoration. TIE remains the sole semantic authority.
   // Propagate its already-stamped aurora context across sibling physical units of
   // the same stay for presentation only; never alter planner rows or generation.
@@ -12734,7 +12751,15 @@ async function exportItineraryToPDF(options={}){
       doc.setDrawColor(8,123,250);doc.setLineWidth(1.4);doc.line(W/2-36,146,W/2+36,146);
       font('bold',6.6);doc.setTextColor(32,122,145);doc.text(es?'IDA Y VUELTA · EXCURSIÓN':'ROUND TRIP · DAY TRIP',W/2,162,{align:'center'});
     }else{
-      font('bold',15);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(_v106PdfSemanticDayTitle_(day)||route),34,135,{maxWidth:W-68});
+      const base=pdfBaseForDay(day);
+      const semantic=_v106PdfSemanticDayTitle_(day)||route;
+      const different=base&&semantic&&!_arePoiAliases_(base,semantic);
+      if(different){
+        font('bold',13);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(base),34,125,{maxWidth:W-68});
+        font('normal',10);doc.setTextColor(73,94,115);doc.text(_itbmoPdfSafeText_(semantic),34,141,{maxWidth:W-68});
+      }else{
+        font('bold',15);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(base||semantic),34,135,{maxWidth:W-68});
+      }
     }
     if(_v106PdfAuroraContext_(day,pdfAuroraRoots)){doc.setFillColor(249,252,255);doc.rect(W-225,76,191,20,'F');font('bold',7.2);doc.setTextColor(32,122,145);doc.text(es?'ZONA Y ÉPOCA DE AURORAS BOREALES':'NORTHERN LIGHTS AREA & SEASON',W-34,88,{align:'right',maxWidth:185});}
     if(continued){font('normal',7);doc.text(es?'Continuación':'Continued',W-34,154,{align:'right'});}
