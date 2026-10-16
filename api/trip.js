@@ -1020,7 +1020,9 @@ async function handleRecoverable(res, session) {
   const rows = await supabaseFetch(
     `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
     `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
-    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=10`,
+    // V245: Only an interrupted paid generation is eligible. A recent
+    // generated/saved record must never shadow a pending failed/generating run.
+    `status=in.(generating,failed)&order=updated_at.desc&limit=100`,
     { method:"GET" }
   );
 
