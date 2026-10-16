@@ -793,6 +793,7 @@ async function handleGenerationBegin(res, body, session) {
 
   const nextCheckpoint = {
     ...checkpoint,
+    run_token:newRun || !checkpoint.run_token ? require('crypto').randomUUID() : checkpoint.run_token,
     schema_version:1,
     run_status:"generating",
     completed_cities:completed,
@@ -844,6 +845,20 @@ async function handleGenerationCheckpoint(res, body, session) {
     return res.status(409).json({ ok:false, code:"GENERATION_ALREADY_COMPLETED", error:"Generation already completed" });
   }
 
+  // V243: each paid generation has an independent server-issued identity.
+  // Reject stale tabs, old queued checkpoints and writes against a completed run.
+  const serverRunToken=String(generationCheckpoint(trip.itinerary_data).run_token || '');
+  const incomingRunToken=String(body.run_token || checkpoint.run_token || '');
+  if (!serverRunToken || incomingRunToken !== serverRunToken) {
+    return res.status(409).json({ok:false,code:'GENERATION_RUN_MISMATCH',error:'Generation run identity mismatch'});
+  }
+  if (trip.status === 'generated') {
+    return res.status(409).json({ok:false,code:'GENERATION_ALREADY_COMPLETED',error:'Generation already completed'});
+  }
+  if (trip.status !== 'generating' && trip.status !== 'failed') {
+    return res.status(409).json({ok:false,code:'GENERATION_STATE_CONFLICT',error:'Generation is not active'});
+  }
+
   const destinations = Array.isArray(trip.destinations) ? trip.destinations : [];
   const expectedCities = destinations.map(x => String(x?.city || "").trim()).filter(Boolean);
   const completedCities = Array.isArray(checkpoint.completed_cities)
@@ -867,12 +882,17 @@ async function handleGenerationCheckpoint(res, body, session) {
     ...(status === "generated" ? { completed_at:now, last_error:null } : {})
   };
 
-  const updated = await patchOwnedTrip(tripId, session.user_id, {
-    status,
-    itinerary_data:persistedCheckpoint,
-    ...(status === "generated" ? { generated_at:now } : {})
-  });
-
+  const updatedRows = await supabaseFetch(
+    `/trips?id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(session.user_id)}&status=in.(generating,failed)&itinerary_data->>run_token=eq.${encodeURIComponent(serverRunToken)}`,
+    {method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({
+      status,
+      itinerary_data:persistedCheckpoint,
+      ...(status === 'generated' ? {generated_at:now} : {})
+    })}
+  );
+  const updated = Array.isArray(updatedRows) ? updatedRows[0] || null : null;
+  if (!updated) return res.status(409).json({ok:false,code:'GENERATION_RUN_MISMATCH',error:'Generation changed while saving checkpoint'});
+  // V243 checkpoint committed under matching active run.
   return res.status(200).json({
     ok:true,
     action:"generation_checkpoint",
