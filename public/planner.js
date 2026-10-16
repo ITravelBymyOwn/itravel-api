@@ -2200,44 +2200,35 @@ function addMinutes(hhmm, min){
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-function timeSelectOptions(kind='hour'){
-  if(kind==='minute'){
-    return `<option value="">00</option>${['15','30','45'].map(v=>`<option value="${v}">${v}</option>`).join('')}`;
-  }
-  const values=Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
-  return `<option value="">--</option>${values.map(v=>`<option value="${v}">${v}</option>`).join('')}`;
+// V226: one HH:MM control, 15-minute increments. Keep previously saved
+// non-quarter times intact instead of rounding confirmed user transport times.
+function timeSelectOptions(value=''){
+  const current=String(value||'');
+  const options=Array.from({length:96},(_,i)=>`${String(Math.floor(i/4)).padStart(2,'0')}:${String((i%4)*15).padStart(2,'0')}`);
+  if(/^([01]\d|2[0-3]):[0-5]\d$/.test(current)&&!options.includes(current))options.push(current);
+  options.sort();
+  return `<option value="">--:--</option>`+options.map(v=>`<option value="${v}" ${v===current?'selected':''}>${v}</option>`).join('');
 }
-
 function timeSelectorMarkup(type,ariaLabel){
   const visibleLabel=type==='start' ? t('uiStartTime') : t('uiEndTime');
   return `<div class="time-selector" data-time-type="${type}" role="group" aria-label="${ariaLabel}">
     <span class="time-selector-label">${visibleLabel}</span>
-    <div class="time-selector-inputs">
-      <select class="time-hour" aria-label="${ariaLabel} · ${getLang()==='es'?'hora':'hour'}">${timeSelectOptions('hour')}</select>
-      <span class="time-selector-colon" aria-hidden="true">:</span>
-      <select class="time-minute" aria-label="${ariaLabel} · ${getLang()==='es'?'minutos':'minutes'}">${timeSelectOptions('minute')}</select>
-    </div>
+    <div class="time-selector-inputs"><select class="time-hhmm" aria-label="${ariaLabel}">${timeSelectOptions()}</select></div>
     <input class="${type}" type="hidden" value="">
   </div>`;
 }
-
 function syncTimeSelector(group){
-  if(!group) return '';
-  const hour=qs('.time-hour',group)?.value || '';
-  const minute=qs('.time-minute',group)?.value || '00';
-  const value=hour!=='' ? `${hour}:${minute}` : '';
+  if(!group)return '';
+  const value=qs('.time-hhmm',group)?.value||'';
   const hidden=qs('input[type="hidden"]',group);
-  if(hidden) hidden.value=value;
+  if(hidden)hidden.value=value;
   return value;
 }
-
 function setTimeSelectorValue(group,value=''){
-  if(!group) return;
-  const normalized=/^(\d{2}):(\d{2})$/.exec(String(value||''));
-  const hour=qs('.time-hour',group);
-  const minute=qs('.time-minute',group);
-  if(hour) hour.value=normalized?.[1] || '';
-  if(minute) minute.value=['15','30','45'].includes(normalized?.[2]) ? normalized[2] : '';
+  if(!group)return;
+  const select=qs('.time-hhmm',group);
+  const current=String(value||'');
+  if(select){select.innerHTML=timeSelectOptions(current);select.value=current;}
   syncTimeSelector(group);
 }
 
@@ -3755,16 +3746,24 @@ function _immersiveViewerCopy_(){
 function _immersiveAvailableCities_(){
   const workspace=_workspaceSnapshotViews_();
   const physical=(workspace?.destinations||[]).map(x=>x?.city).filter(Boolean);
-  if(physical.length) return physical;
+  // V223: transit-only journey stops are transport context, not sightseeing cards.
+  // Keep day trips and cities that also have a non-transit stay.
+  const journey=(_travelV2()?.state?.tripStory?.stays||[]);
+  const norm=v=>String(v||'').trim().toLocaleLowerCase();
+  const transitOnlyCity=city=>{
+    const visits=journey.filter(st=>norm(st?.place)===norm(city));
+    return visits.length>0&&visits.every(st=>st?.transitOnly===true);
+  };
+  if(physical.length) return physical.filter(city=>!transitOnlyCity(city));
   const ordered=(savedDestinations||[]).map(x=>x.city).filter(Boolean);
   const extras=Object.keys(itineraries||{}).filter(c=>!ordered.includes(c));
-  return [...ordered,...extras].filter(city=>Object.values(itineraries?.[city]?.byDay||{}).some(rows=>Array.isArray(rows)&&rows.length));
+  return [...ordered,...extras].filter(city=>!transitOnlyCity(city)&&Object.values(itineraries?.[city]?.byDay||{}).some(rows=>Array.isArray(rows)&&rows.length));
 }
 function _immersiveDaysForCity_(city){ return Object.keys(itineraries?.[city]?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b); }
 function syncImmersiveItineraryLauncher(){
   const wrap=qs('#itinerary-focus-launch'),btn=qs('#open-itinerary-focus'); if(!wrap||!btn)return;
   const workspace=_workspaceSnapshotViews_();
-  const cities=(workspace?.destinations||[]).map(d=>d.city).filter(Boolean);
+  const cities=_immersiveAvailableCities_();
   const uniqueDates=new Set();
   (workspace?.destinations||[]).forEach(d=>{const base=parseDMY(String(d?.baseDate||''));for(let i=0;i<Number(d?.days||0);i++){if(base)uniqueDates.add(formatDMY(addDays(base,i)));}});
   const fallbackCities=_immersiveAvailableCities_(),effectiveCities=cities.length?cities:fallbackCities,totalDays=uniqueDates.size||fallbackCities.reduce((sum,c)=>sum+_immersiveDaysForCity_(c).length,0),hasRows=effectiveCities.length>0&&totalDays>0,copy=_immersiveViewerCopy_();
@@ -15163,7 +15162,7 @@ function _tripStoryDMY_(iso=''){const m=String(iso).match(/^(\d{4})-(\d{2})-(\d{
 function _tripStoryTimeMinutes_(v=''){const m=String(v).match(/^(\d{2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):null;}
 function _tripStoryClampArrivalStart_(st){if(!st?.arrivalTime||!st?.perDay?.[0])return;const a=_tripStoryTimeMinutes_(st.arrivalTime),cur=_tripStoryTimeMinutes_(st.perDay[0].start);if(a!=null&&(cur==null||cur<a))st.perDay[0].start=st.arrivalTime;}
 function _tripStoryTransportOptions_(selected=''){const es=getLang()==='es';return [['',es?'Que ITBMO lo resuelva':'Let ITBMO resolve it'],['plane',es?'Avión':'Plane'],['train',es?'Tren':'Train'],['bus','Bus'],['car',es?'Automóvil':'Car'],['ferry','Ferry'],['transfer','Transfer'],['other',es?'Otro':'Other']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
-function _tripStoryTimeOptions_(selected='',allowBlank=true){const es=getLang()==='es';let out=allowBlank?`<option value="">${es?'Aún no lo sé':'Not sure yet'}</option>`:'';for(let h=0;h<24;h++)for(const m of [0,30]){const v=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;out+=`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`;}return out;}
+function _tripStoryTimeOptions_(selected='',allowBlank=true){const es=getLang()==='es';let out=allowBlank?`<option value="">${es?'Aún no lo sé':'Not sure yet'}</option>`:'';for(let h=0;h<24;h++)for(const m of [0,15,30,45]){const v=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;out+=`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`;}return out;}
 function _tripStoryRequiredTimeOptions_(selected=''){const es=getLang()==='es';return _tripStoryTimeOptions_(selected,true).replace(es?'Aún no lo sé':'Not sure yet',es?'Selecciona una hora':'Select a time');}
 function _tripStoryTimeStatusOptions_(selected='estimated'){const es=getLang()==='es';return [['confirmed',es?'Confirmado · ya tengo el horario':'Confirmed · I have the schedule'],['estimated',es?'Estimado · podré ajustarlo después':'Estimated · I can update it later']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
 function _tripStoryDaysOptions_(selected=1,transitOnly=false){
@@ -15591,7 +15590,7 @@ function openTripStoryBuilder(){
     }
     if(phase==='movement'){
       const st=story.stays[activeStay],prev=story.stays[activeStay-1];
-      active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?'Sólo dinos cuándo puedes comenzar. Si ya tienes el transporte, agrégalo; si no, ITBMO resolverá la logística.':'Just tell us when you can start. Add transport if you already have it; otherwise ITBMO will resolve the logistics.',`<div class="gj-form"><label>${es?`Fecha de traslado desde ${_tripStoryEsc_(prev?.place||'el destino anterior')}`:`Transfer date from ${_tripStoryEsc_(prev?.place||'the previous destination')}`}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(st.place||'el destino siguiente')}`:`Transport departure time to ${_tripStoryEsc_(st.place||'the next destination')}`}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya tienes este traslado definido?':'Do you already have this transfer defined?'}</b><div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full gj-resolvable-details" data-move-details><label>${es?'Medio de transporte':'Transport'}<select data-move="transportMode">${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?`Fecha de llegada a ${_tripStoryEsc_(st.place||'nuevo destino')} (opcional)`:`Arrival date in ${_tripStoryEsc_(st.place||'new destination')} (optional)`}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label><label>${es?`Hora de inicio de recorridos en ${_tripStoryEsc_(st.place||'nuevo destino')}`:`Time to start exploring ${_tripStoryEsc_(st.place||'new destination')}`} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-ready-help aria-expanded="false">ⓘ ${es?'Ver instrucciones':'View instructions'}</button><span class="gj-help-bubble" data-ready-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-ready-help-close aria-label="${es?'Cerrar':'Close'}">×</button><b>${es?'¿Qué hora debes indicar?':'Which time should you enter?'}</b><span>${es?`Indica la hora a la que ya estarás listo para comenzar a conocer ${_tripStoryEsc_(st.place||'el nuevo destino')}, después de llegar, trasladarte y dejar tu equipaje si fuera necesario.`:`Enter the time when you will actually be ready to start exploring ${_tripStoryEsc_(st.place||'the new destination')}, after arriving, transferring and leaving your luggage if needed.`}</span></span></span><select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label></div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
+      active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?'Sólo dinos cuándo puedes comenzar. Si ya tienes el transporte, agrégalo; si no, ITBMO resolverá la logística.':'Just tell us when you can start. Add transport if you already have it; otherwise ITBMO will resolve the logistics.',`<div class="gj-form"><label>${es?`Fecha de traslado desde ${_tripStoryEsc_(prev?.place||'el destino anterior')}`:`Transfer date from ${_tripStoryEsc_(prev?.place||'the previous destination')}`}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(st.place||'el destino siguiente')}`:`Transport departure time to ${_tripStoryEsc_(st.place||'the next destination')}`}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya tienes este traslado definido?':'Do you already have this transfer defined?'}</b><div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full gj-resolvable-details" data-move-details><label>${es?'Medio de transporte':'Transport'}<select data-move="transportMode">${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?`Fecha de llegada a ${_tripStoryEsc_(st.place||'nuevo destino')} (opcional)`:`Arrival date in ${_tripStoryEsc_(st.place||'new destination')} (optional)`}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label>${st.transitOnly?'':`<label>${es?`Hora de inicio de recorridos en ${_tripStoryEsc_(st.place||'nuevo destino')}`:`Time to start exploring ${_tripStoryEsc_(st.place||'new destination')}`} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-ready-help aria-expanded="false">ⓘ ${es?'Ver instrucciones':'View instructions'}</button><span class="gj-help-bubble" data-ready-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-ready-help-close aria-label="${es?'Cerrar':'Close'}">×</button><b>${es?'¿Qué hora debes indicar?':'Which time should you enter?'}</b><span>${es?`Indica la hora a la que ya estarás listo para comenzar a conocer ${_tripStoryEsc_(st.place||'el nuevo destino')}, después de llegar, trasladarte y dejar tu equipaje si fuera necesario.`:`Enter the time when you will actually be ready to start exploring ${_tripStoryEsc_(st.place||'the new destination')}, after arriving, transferring and leaving your luggage if needed.`}</span></span></span><select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label>`}</div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
       const departureTimeControl=active.querySelector('[data-move="departureTime"]');if(departureTimeControl){departureTimeControl.disabled=false;departureTimeControl.removeAttribute('disabled');departureTimeControl.setAttribute('aria-required','true');}const moveKnown=st.transportStatus==='user_defined';active.querySelectorAll('[data-move-details] select,[data-move-details] input').forEach(x=>{x.disabled=!moveKnown;x.setAttribute('aria-disabled',String(!moveKnown));});active.querySelector('[data-move-details]')?.classList.toggle('is-itbmo-resolved',!moveKnown);const readyHelp=active.querySelector('[data-ready-help]'),readyBubble=active.querySelector('[data-ready-help-bubble]');if(readyHelp&&readyBubble){const closeReadyHelp=()=>{readyBubble.hidden=true;readyHelp.setAttribute('aria-expanded','false');};readyHelp.onclick=e=>{e.preventDefault();e.stopPropagation();const willOpen=readyBubble.hidden;active.querySelectorAll('.gj-help-bubble').forEach(x=>x.hidden=true);readyBubble.hidden=!willOpen;readyHelp.setAttribute('aria-expanded',willOpen?'true':'false');if(willOpen)setTimeout(()=>document.addEventListener('click',closeReadyHelp,{once:true}),0);};active.querySelector('[data-ready-help-close]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeReadyHelp();});readyBubble.addEventListener('click',e=>e.stopPropagation());}
       active.querySelectorAll('[data-move-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.moveKnowledge==='known';st.transportStatus=known?'user_defined':'route_to_resolve';active.querySelectorAll('[data-move-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelectorAll('[data-move-details] select,[data-move-details] input').forEach(x=>{x.disabled=!known;x.setAttribute('aria-disabled',String(!known));});active.querySelector('[data-move-details]')?.classList.toggle('is-itbmo-resolved',!known);if(!known){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}if(departureTimeControl){departureTimeControl.disabled=false;departureTimeControl.removeAttribute('disabled');}persist();});active.querySelectorAll('[data-move]').forEach(x=>x.onchange=()=>{st[x.dataset.move]=x.value;persist();});active.querySelector('[data-save-movement]').onclick=()=>{const depDate=active.querySelector('[data-move="departureDate"]')?.value||'';const depTime=active.querySelector('[data-move="departureTime"]')?.value||'';st.departureDate=depDate;st.departureTime=depTime;if(!depDate||!depTime){active.querySelector('[data-move="departureDate"]')?.classList.toggle('is-invalid',!depDate);active.querySelector('[data-move="departureTime"]')?.classList.toggle('is-invalid',!depTime);return;}const prevEnd=_tripStoryStayEnd_(prev);if(prevEnd&&depDate<prevEnd){alert(es?`La salida de ${prev.place} hacia ${st.place} no puede ser el ${_tripStoryDMY_(depDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}. Usa ${_tripStoryDMY_(prevEnd)} o una fecha posterior.`:`The departure from ${prev.place} to ${st.place} cannot be ${_tripStoryDMY_(depDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}. Use ${_tripStoryDMY_(prevEnd)} or a later date.`);active.querySelector('[data-move="departureDate"]')?.classList.add('is-invalid');return;}if(st.transportStatus!=='user_defined'){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}else{active.querySelectorAll('[data-move]').forEach(x=>st[x.dataset.move]=x.value);}persist();phase='decision';render();};return;
     }
