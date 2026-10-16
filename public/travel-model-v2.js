@@ -94,10 +94,11 @@
     return out;
   }
   function _timeSelect(field,value='',label=''){
-    const [hh='',mm='00']=String(value||'').split(':');
-    const hours=['',...Array.from({length:24},(_,i)=>String(i).padStart(2,'0'))];
-    const mins=['00','15','30','45'];
-    return `<div class="route-v2-time" data-time-field="${field}"><span>${esc(label)}</span><div><select data-time-hour="${field}">${hours.map(h=>`<option value="${h}" ${h===hh?'selected':''}>${h||'--'}</option>`).join('')}</select><b>:</b><select data-time-minute="${field}">${mins.map(m=>`<option value="${m}" ${m===mm?'selected':''}>${m}</option>`).join('')}</select></div></div>`;
+    const current=String(value||'');
+    const options=Array.from({length:96},(_,i)=>`${String(Math.floor(i/4)).padStart(2,'0')}:${String((i%4)*15).padStart(2,'0')}`);
+    if(/^([01]\d|2[0-3]):[0-5]\d$/.test(current)&&!options.includes(current))options.push(current);
+    options.sort();
+    return `<div class="route-v2-time" data-time-field="${field}"><span>${esc(label)}</span><div><select data-time-value="${field}" aria-label="${esc(label)}"><option value="">--:--</option>${options.map(v=>`<option value="${v}" ${v===current?'selected':''}>${v}</option>`).join('')}</select></div></div>`;
   }
   function _routeTransportOptions(selected=''){
     return [
@@ -120,12 +121,14 @@
     return Math.max(0,Math.round((dateKey(departureISO)-dateKey(arrivalISO))/86400000));
   }
   function _setPlannerTimeGroup(group,value='',disabled=false){
-    if(!group) return;
-    const match=/^(\d{2}):(\d{2})$/.exec(String(value||''));
-    const hour=group.querySelector('.time-hour'), minute=group.querySelector('.time-minute'), hidden=group.querySelector('input[type="hidden"]');
-    if(hour){ hour.value=match?.[1]||''; hour.disabled=Boolean(disabled); }
-    if(minute){ minute.value=['15','30','45'].includes(match?.[2])?match[2]:''; minute.disabled=Boolean(disabled); }
-    if(hidden) hidden.value=match?`${match[1]}:${match[2]}`:'';
+    if(!group)return;
+    const select=group.querySelector('.time-hhmm'),hidden=group.querySelector('input[type="hidden"]');
+    const current=String(value||'');
+    if(select){
+      if(current&&!Array.from(select.options).some(o=>o.value===current)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(current))select.add(new Option(current,current));
+      select.value=current;select.disabled=Boolean(disabled);
+    }
+    if(hidden)hidden.value=current;
     group.classList.toggle('route-v2-time-locked',Boolean(disabled));
   }
   function syncPlannerAvailability(row){
@@ -354,7 +357,7 @@
       ui.body.querySelector('[data-field="transportMode"]')?.addEventListener('change',e=>{seg.transportMode=e.target.value||'';render();});
       ui.body.querySelector('[data-field="nextTransportMode"]')?.addEventListener('change',e=>{seg.nextTransportMode=e.target.value||'';});
       ui.body.querySelector('[data-field="returnTransportMode"]')?.addEventListener('change',e=>{seg.returnTransportMode=e.target.value||'';});
-      ui.body.querySelectorAll('[data-time-field]').forEach(group=>{const field=group.dataset.timeField;const sync=()=>{const h=group.querySelector(`[data-time-hour="${field}"]`)?.value||'',m=group.querySelector(`[data-time-minute="${field}"]`)?.value||'00';seg[field]=h?`${h}:${m}`:'';};group.querySelectorAll('select').forEach(x=>x.onchange=()=>{sync();if(field==='returnArrivalTime')seg.resumeTime=seg.returnArrivalTime;render();});});
+      ui.body.querySelectorAll('[data-time-field]').forEach(group=>{const field=group.dataset.timeField;const sync=()=>{seg[field]=group.querySelector(`[data-time-value="${field}"]`)?.value||'';};group.querySelectorAll('select').forEach(x=>x.onchange=()=>{sync();if(field==='returnArrivalTime')seg.resumeTime=seg.returnArrivalTime;render();});});
       ui.body.querySelectorAll('input[name="route-disposition"]').forEach(r=>r.onchange=()=>{if(!r.checked)return;seg.disposition=r.value;if(r.value==='roundtrip'){seg.returnDepartureDate=seg.arrivalDate;seg.nights=0;}render();});
       ui.body.querySelector('.route-v2-cancel')?.addEventListener('click',ui.close);
       ui.body.querySelector('.route-v2-continue')?.addEventListener('click',()=>{
@@ -441,8 +444,7 @@
       if(!day || !(rowRoute(row).segments||[]).length) return;
       const group=select.closest('.time-selector');
       const field=group?.dataset.timeType;
-      const h=group?.querySelector('.time-hour')?.value||'', m=group?.querySelector('.time-minute')?.value||'00';
-      const value=h?`${h}:${m}`:'';
+      const value=group?.querySelector('.time-hhmm')?.value||'';
       if(field==='start') day.dataset.routeV2OriginalStart=value;
       if(field==='end') day.dataset.routeV2OriginalEnd=value;
       setTimeout(()=>syncPlannerAvailability(row),0);
