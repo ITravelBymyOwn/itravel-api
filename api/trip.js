@@ -793,7 +793,7 @@ async function handleGenerationBegin(res, body, session) {
 
   const nextCheckpoint = {
     ...checkpoint,
-    run_token:newRun || !checkpoint.run_token ? require('crypto').randomUUID() : checkpoint.run_token,
+    run_token:newRun || !checkpoint.run_token ? crypto.randomUUID() : checkpoint.run_token,
     schema_version:1,
     run_status:"generating",
     completed_cities:completed,
