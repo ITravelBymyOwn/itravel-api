@@ -1345,11 +1345,16 @@ function omioTransportRoutesForRequest(needs=[]){
     // and deduplicates identical city/date routes, so the generated row may be
     // the sole surviving card. V228 accepted only journey_story, inadvertently
     // excluding Barcelona -> Paris while Brussels -> Amsterdam still matched.
-    // Trust only these two route provenance types; never parse arbitrary text,
-    // station access, trip_sequence guesses or other partner links. The Omio
+    // Trust only itinerary-owned route provenance; never parse arbitrary text,
+    // station access or other partner links. The Omio
     // feed remains the sole authority for creating an attributable CTA.
     if(!route){
-      if(!['journey_story','generated_itinerary'].includes(need?.derived_by) || !need?.origin || !need?.destination)return;
+      // V234: accept every explicit itinerary boundary and the existing
+      // top-level destination sequence as *candidates*, not as verified offers.
+      // Only the approved Omio feed can authorize a CTA. This also covers
+      // persisted trips without journey_story and explicit start/return legs.
+      const trustedProvenance=new Set(['journey_story','generated_itinerary','journey_start','journey_return','trip_sequence']);
+      if(!trustedProvenance.has(need?.derived_by) || !need?.origin || !need?.destination)return;
       const origin=String(need.origin).trim(),destination=String(need.destination).trim();
       if(!_v67CommercialIntercityEndpoints_(origin,destination))return;
       const key=`${need?.id||''}|${normalizeWorkspaceEntity(origin)}|${normalizeWorkspaceEntity(destination)}|1`;
