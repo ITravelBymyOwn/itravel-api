@@ -107,12 +107,41 @@ function _v67CommercialIntercityEndpoints_(origin='',destination=''){
   if(ac&&bc&&(ac===bc||a.includes(bc)||b.includes(ac)))return false;
   return true;
 }
+// V236: classify local access by the physical endpoints, not by a provider CTA
+// or a route_resolution flag. A structured route may still describe a hotel /
+// station access; commerce_eligible is not proof of an intercity journey.
+function v236LocalAccessPair(origin='',destination=''){
+  const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
+  if(!a||!b)return false;
+  const terminal=/\b(estacion|station|stazione|estacao|gare|bahnhof|hbf|termini|sants|atocha|terminal|aeropuerto|airport|aeroport|aerodromo|aerodrome|hotel|hostal|alojamiento|lodging)\b/;
+  const cityCore=/^(?:centro(?: de| del)?|city center|city centre|downtown|centre ville|historic center|centro historico)(?: de| del| of)?(?: (.+))?$/;
+  const city=v=>{const m=v.match(cityCore);return m?(m[1]||''):v;};
+  const x=city(a),y=city(b);
+  const containsWhole=(full,part)=>part.length>=3 && (` ${full} `).includes(` ${part} `);
+  const aLocal=terminal.test(a),bLocal=terminal.test(b);
+  if(!aLocal&&!bLocal)return false;
+  if(a===b)return true;
+  // A named city and its own station/airport/hotel are the same local market.
+  if(aLocal&&containsWhole(a,y))return true;
+  if(bLocal&&containsWhole(b,x))return true;
+  // Two local facilities in the same named city are also local access.
+  // Never collapse different-city station-to-station commercial journeys.
+  const tokens=v=>v.split(' ').filter(t=>t.length>=4&&!/^(estacion|station|stazione|estacao|gare|bahnhof|terminal|airport|aeropuerto|aeroport|hotel|centro|center|centre|puerta|central|centrale)$/.test(t));
+  if(aLocal&&bLocal){
+    const at=tokens(a),bt=tokens(b);
+    if(at.some(t=>bt.includes(t)))return true;
+  }
+  return false;
+}
+function v236CommercialRoutePair(origin='',destination=''){
+  return _v67CommercialIntercityEndpoints_(origin,destination) && !v236LocalAccessPair(origin,destination);
+}
 function tripRoutes(){
   const routes=[];
   const seen=new Set();
   const add=route=>{
     const origin=String(route?.origin||'').trim(),destination=String(route?.destination||'').trim();
-    if(!origin||!destination||!_v67CommercialIntercityEndpoints_(origin,destination))return;
+    if(!origin||!destination||!v236CommercialRoutePair(origin,destination))return;
     const key=`${normalizeWorkspaceEntity(origin)}>${normalizeWorkspaceEntity(destination)}|${route.travel_date||''}`;
     if(seen.has(key))return;seen.add(key);
     routes.push({
@@ -830,7 +859,7 @@ function auditContextCoverageForCity(cityName,serverNeeds=[],visibleNeeds=[]){
 // layer is filtered. Station access, local hops and walking never become offers.
 function v235CommercialMobilityNeed(item){
   if(!v208TransportNeed(item))return true;
-  if(isRentalTransportNeed(item))return true; // Keep the traveller's rental choice.
+  const rental=isRentalTransportNeed(item);
   const resolved=parseResolvedRouteSource(item?.source_route||'');
   const routeText=String(item?.source_route||'');
   const directOrigin=String(item?.origin||'').trim();
@@ -838,12 +867,15 @@ function v235CommercialMobilityNeed(item){
   const arrow=routeText.match(/^\s*([^→\n]+?)\s*→\s*([^→\n]+?)\s*$/);
   const origin=directOrigin||String(resolved?.parent?.origin||arrow?.[1]||'').trim();
   const destination=directDestination||String(resolved?.parent?.destination||arrow?.[2]||'').trim();
-  if(!origin||!destination||!_v67CommercialIntercityEndpoints_(origin,destination))return false;
+  // A rental decision has no endpoints; a rental station-access hop is local.
+  if(rental)return !origin&&!destination || v236CommercialRoutePair(origin,destination);
+  if(!origin||!destination||!v236CommercialRoutePair(origin,destination))return false;
   const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
   const localNode=/\b(station|stazione|estacion|estacao|gare|bahnhof|hbf|termini|sants|atocha|terminal|airport|aeropuerto|aeroport|aerodrome|aerodromo|hotel|hostal|lodging|alojamiento|downtown|city center|centro|centre|puerto|port|metro|subway)\b/;
   // An explicit commercial resolved leg may name stations at both ends. Keep
   // that parent intercity journey, but never expose an individual access leg.
-  if(!resolved && (localNode.test(a)||localNode.test(b)))return false;
+  if(v236LocalAccessPair(origin,destination))return false;
+  // Named intercity station pairs remain eligible; locality is decided above.
   const mode=normalizeWorkspaceEntity(`${item?.transport||''} ${item?.source_summary||''}`);
   const localMode=/\b(walking|walk|caminar|caminata|a pie|on foot|metro|subway|taxi local|local taxi|uber urbano|urban taxi)\b/;
   const intercityMode=/\b(tren|train|rail|autobus|bus interurbano|intercity bus|coach|ferry|ferri|barco|boat)\b/;
@@ -860,7 +892,7 @@ function v235CommercialMobilityNeed(item){
     return (resolved.legs||[]).some(leg=>{
       const x=String(leg?.commercial_origin||leg?.origin||'');
       const y=String(leg?.commercial_destination||leg?.destination||'');
-      return _v67CommercialIntercityEndpoints_(x,y) &&
+      return v236CommercialRoutePair(x,y) &&
         (leg?.commerce_eligible===true||meaningful.test(context)||meaningful.test(normalizeWorkspaceEntity(leg?.mode||'')));
     });
   }
@@ -1198,6 +1230,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
 function v192VisibleContextItems(items,offers,sectionType){
   if(sectionType!=='transport')return items;
   return items.filter(item=>{
+    if(!v235CommercialMobilityNeed(item))return false;
     if(!['transport_arrangement','intercity_transport'].includes(item?.need_type))return true;
     if(isRentalTransportNeed(item))return true;
     if((offers||[]).some(offer=>v190OfferMatchesNeed(offer,item)))return true;
@@ -1401,7 +1434,7 @@ function omioTransportRoutesForRequest(needs=[]){
       const trustedProvenance=new Set(['journey_story','generated_itinerary','journey_start','journey_return','trip_sequence']);
       if(!trustedProvenance.has(need?.derived_by) || !need?.origin || !need?.destination)return;
       const origin=String(need.origin).trim(),destination=String(need.destination).trim();
-      if(!_v67CommercialIntercityEndpoints_(origin,destination))return;
+      if(!v236CommercialRoutePair(origin,destination))return;
       const key=`${need?.id||''}|${normalizeWorkspaceEntity(origin)}|${normalizeWorkspaceEntity(destination)}|1`;
       if(seen.has(key))return;seen.add(key);
       out.push({need_id:need.id||'',need_type:need.need_type||'intercity_transport',origin,destination,index:1,mode:String(need.transport||''),travel_date:need.travel_date||'',parent_origin:origin,parent_destination:destination});
@@ -1412,7 +1445,7 @@ function omioTransportRoutesForRequest(needs=[]){
       const localizedDestination=lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en;
       const origin=String(localizedOrigin||leg?.commercial_origin||leg?.origin||'').trim();
       const destination=String(localizedDestination||leg?.commercial_destination||leg?.destination||'').trim();
-      if(!origin||!destination||!_v67CommercialIntercityEndpoints_(origin,destination))return;
+      if(!origin||!destination||!v236CommercialRoutePair(origin,destination))return;
       const key=`${need?.id||''}|${origin}|${destination}|${leg?.index||index+1}`;
       if(seen.has(key))return;seen.add(key);
       out.push({need_id:need?.id||'',need_type:need?.need_type||'intercity_transport',origin,destination,index:Number(leg?.index||index+1),mode:String(leg?.mode||''),travel_date:need?.travel_date||'',parent_origin:route?.parent?.origin||'',parent_destination:route?.parent?.destination||''});
@@ -1466,7 +1499,7 @@ function v192ExcursionMobilityNeeds(cityName,existing=[]){
     if(!mobilityEvidence)return;
     const endpoints=v193ExplicitRowEndpoints(row,cityName);if(!endpoints)return;
     const from=v190CommercialEndpoint(endpoints.from),to=v190CommercialEndpoint(endpoints.to);
-    if(!from||!to||from===to)return;
+    if(!from||!to||from===to||!v236CommercialRoutePair(endpoints.from,endpoints.to))return;
     // Preserve direction, day, and the original physical journey. No synthetic
     // connection via Ollantaytambo (or any other city) is ever asserted here.
     const key=`${day}|${from}|${to}`;
@@ -1489,7 +1522,7 @@ function v187ProviderMobilityNeeds(cityName,existing=[]){
     const rows=Array.isArray(unit.byDay[dayNo])?unit.byDay[dayNo]:[];
     rows.forEach((row,index)=>{
       const from=String(row?.from||'').trim(),to=String(row?.to||'').trim();
-      if(!from||!to||normalizeWorkspaceEntity(from)===normalizeWorkspaceEntity(to))return;
+      if(!from||!to||!v236CommercialRoutePair(from,to))return;
       const movement=String(row?.transport||'')+' '+String(row?.activity||'');
       const isTransfer=/\b(traslado|transfer|transporte|transport|tren|train|ferrocarril|rail|bus|autobus|shuttle|van|ferry|ferri|barco|boat|regreso|return|ida|outbound|vehiculo|vehicle|carretera|road)\b/i.test(movement);
       if(!isTransfer)return;
