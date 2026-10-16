@@ -8029,7 +8029,14 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
         if(rs==null||re==null) return true;
         const exact=rs===dep&&re===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination);
         const overlaps=Math.max(rs,dep)<Math.min(re,arr);
-        return exact || !overlaps;
+        // V240: never erase another authoritative movement in the same day.
+        // Conflicting fixed movements must remain visible to the hard audit,
+        // rather than silently disappearing and triggering futile Stay retries.
+        const otherFixed=(day.fixed_transfers||[]).some(x=>
+          _hhmmToMinutes_(r.start)===_hhmmToMinutes_(x.departure)
+          && _hhmmToMinutes_(r.end)===_hhmmToMinutes_(x.arrival)
+          && _arePoiAliases_(r.from,x.origin)&&_arePoiAliases_(r.to,x.destination));
+        return exact || otherFixed || !overlaps;
       });
       let idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
       const fixedRow={
@@ -8048,8 +8055,22 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
       };
       if(idx>=0) out[idx]={...out[idx],...fixedRow};
       else out.push(fixedRow);
-      if(t.terminal_arrival||day.terminal_arrival_only){
-        out=out.filter(r=>Number(r.day)!==dayNum || _hhmmToMinutes_(r.start)==null || _hhmmToMinutes_(r.start)<arr || (_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr));
+      // V240: A terminal arrival belongs to the END of the day's complete
+      // movement chain, not to each intermediate connection. In particular,
+      // Paris -> Barcelona -> Madrid must retain BOTH user-fixed transfers.
+      // Never discard a canonical fixed transfer while removing tourism after
+      // the terminal arrival. The final hard audit remains authoritative.
+      const fixedChain=(day.fixed_transfers||[]).filter(x=>x?.departure&&x?.arrival);
+      const lastArrival=Math.max(...fixedChain.map(x=>_hhmmToMinutes_(x.arrival)).filter(x=>x!=null));
+      if((t.terminal_arrival||day.terminal_arrival_only) && arr===lastArrival){
+        out=out.filter(r=>{
+          if(Number(r.day)!==dayNum)return true;
+          const rs=_hhmmToMinutes_(r.start);
+          if(rs==null||rs<arr)return true;
+          return fixedChain.some(x=>_hhmmToMinutes_(r.start)===_hhmmToMinutes_(x.departure)
+            && _hhmmToMinutes_(r.end)===_hhmmToMinutes_(x.arrival)
+            && _arePoiAliases_(r.from,x.origin)&&_arePoiAliases_(r.to,x.destination));
+        });
       }
     });
   });
@@ -9726,6 +9747,21 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       rows=generated.rows||[];
       if(!rows.length) throw new Error(`V3_EMPTY:${city}`);
       const mergeCoverage=_v3Coverage_(rows,dest.days);
+      // V240: normalize immutable movement facts before the merged hard gate.
+      // Accepted Stay rows are not regenerated. If the movement facts overlap
+      // accepted tourism, the audit still reports it as a blocking defect.
+      const preflight=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
+      const preflightCodes=new Set((preflight.errors||[]).map(e=>String(e.code||'')));
+      if(preflightCodes.has('MISSING_USER_FIXED_TRANSFER')){
+        const restored=_v3EnforceHardRouteFacts_(rows,generated.contract);
+        const restoredReport=_v3MergedHardPhysicalAudit_(restored,generated.contract,dest.days);
+        const restoredCodes=new Set((restoredReport.errors||[]).map(e=>String(e.code||'')));
+        if(!restoredCodes.has('MISSING_USER_FIXED_TRANSFER') &&
+           !_v70ExactPhysicalUnitConservation_(restored,generated.stayResults||[]).length){
+          rows=restored;
+          console.info('[ITBMO V240 FIXED CHAIN] restored missing canonical movement(s) before merge QA');
+        }
+      }
       const mergeReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
       const mergeErrors=[...(mergeReport.errors||[]),...(generated.conservationErrors||[])];
       console.info(`[ITBMO V3 INTERNAL MERGE QA] trip · ${mergeAttempt}/${ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS}`,_v3AuditSummary_({errors:mergeErrors}),mergeErrors);
@@ -13445,7 +13481,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     _clearPostPaymentProgressLocal_(tripIdToArchive);
     try{ localStorage.removeItem(ASTRA_COACH_STORAGE_KEY); }catch(_){ }
     try{ localStorage.removeItem('itbmo_trip_workspace_snapshot_v1'); }catch(_){ }
-    try{ _tripStoryClearDraft_(); }catch(_){ }
+    try{ _tripStoryClearDraft_(); localStorage.setItem(ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY,'1'); }catch(_){ }
     try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
     // Clear accepted-stay caches/drafts from the just-archived planning run while
     // preserving account/session identity and unrelated generated-trip history.
@@ -15391,14 +15427,18 @@ function _tripStoryMoveStay_(story,from,to){
   if(story.returnTrip?.enabled){if(oldLast!==newLast)_tripStoryResetReturnMovement_(story);else{story.returnTrip.origin={label:story.stays.at(-1)?.place||'',type:'city'};story.returnTrip.routeResolution=null;}}
   return true;
 }
+// V239: reset must never derive defaults from the current TravelV2 engine,
+// which may still contain inbound and homebound movements from the prior trip.
 function _tripStoryResetRoute_(story){
-  const clean=_tripStoryCurrent_();
-  story.start={...clean.start,enabled:false,origin:{label:'',type:'city'},arrival:{label:'',type:'city'}};
+  const clean=_tripStoryEmptyForNextJourney_();
+  story.schema_version=clean.schema_version;
+  story.start=JSON.parse(JSON.stringify(clean.start));
   story.stays=[_tripStoryEnsureStay_({days:1})];
-  story.returnTrip={...clean.returnTrip,enabled:false,origin:{label:'',type:'city'},arrival:{label:'',type:'city'}};
+  story.returnTrip=JSON.parse(JSON.stringify(clean.returnTrip));
   story.ended=false;
   return story;
 }
+
 let _tripStoryBuilderSession_=null;
 function openTripStoryBuilder(){
   document.body.classList.remove('itbmo-builder-closed-clean');
@@ -15422,7 +15462,12 @@ function openTripStoryBuilder(){
   // can hydrate after DOMContentLoaded, which made V94-V96 reject a valid snapshot.
   const sessionMatches=_tripStoryRecoveryIsUsable_(builderSession) && !_tripStoryUseEmptyAfterGeneration_();
   const minimizedResumeDraft=!_tripStoryUseEmptyAfterGeneration_()&&minimizedResumeState&&_tripStoryDraftIsRecoverableByKey_(minimizedResumeState.draftKey)?_tripStoryLoadDraftByKey_(minimizedResumeState.draftKey):null;
-  let story=JSON.parse(JSON.stringify((sessionMatches&&builderSession.story) || minimizedResumeDraft || _tripStoryLoadDraft_() || (_tripStoryUseEmptyAfterGeneration_()?_tripStoryEmptyForNextJourney_():_tripStoryCurrent_())));
+  // V238: terminal-success is authoritative over stale account-scoped drafts and
+  // engine state. Failed/interrupted runs never set this marker and still resume.
+  const completedRouteMustStartEmpty=_tripStoryUseEmptyAfterGeneration_();
+  let story=JSON.parse(JSON.stringify(completedRouteMustStartEmpty
+    ? _tripStoryEmptyForNextJourney_()
+    : ((sessionMatches&&builderSession.story) || minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryCurrent_())));
   story.start=story.start||{date:'',transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:''};
   story.returnTrip=story.returnTrip||{enabled:false,transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:''};
   story.stays=(story.stays||[]).map(_tripStoryEnsureStay_);
@@ -15430,8 +15475,8 @@ function openTripStoryBuilder(){
   let phase='travelers', activeStay=0, pendingNextStay=null, editReturnPhase=null, editReturnStay=null, dayTripDraft=null, dayTripEditIndex=null, resumeTravelerDraft=null;
   // Restore only validated UI/navigation context. The journey itself was already
   // loaded from the canonical session draft above.
-  const resumeUI=(sessionMatches&&builderSession.ui&&typeof builderSession.ui==='object')?builderSession.ui:(minimizedResumeState?.ui&&typeof minimizedResumeState.ui==='object'?minimizedResumeState.ui:null);
-  const resumeFields=(sessionMatches&&Array.isArray(builderSession.fields))?builderSession.fields:null;
+  const resumeUI=completedRouteMustStartEmpty?null:((sessionMatches&&builderSession.ui&&typeof builderSession.ui==='object')?builderSession.ui:(minimizedResumeState?.ui&&typeof minimizedResumeState.ui==='object'?minimizedResumeState.ui:null));
+  const resumeFields=completedRouteMustStartEmpty?null:((sessionMatches&&Array.isArray(builderSession.fields))?builderSession.fields:null);
   if(resumeUI){
     const allowedPhases=new Set(['travelers','start','stay','decision','daytrip','movement','return','review']);
     if(allowedPhases.has(resumeUI.phase))phase=resumeUI.phase;
@@ -15605,7 +15650,7 @@ function openTripStoryBuilder(){
       active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();_tripStorySetMinimizedState_(false);_tripStorySetWorkspaceResume_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true){_tripStoryClearBuilderSession_();}});return;
     }
   };
-  overlay.querySelector('[data-gj-reset]').onclick=()=>{_tripStorySetMinimizedState_(false);if(!confirm(es?'¿Quieres reiniciar el recorrido? Se eliminarán los destinos, excursiones y traslados que has configurado. Los viajeros se conservarán.':'Reset the route? Destinations, day trips and transfers will be deleted. Travelers will be kept.'))return;_tripStorySetWorkspaceResume_(false);_tripStoryResetRoute_(story);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;dayTripDraft=null;dayTripEditIndex=null;activeStay=0;phase='start';persist();try{engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));}catch(_){};render();};
+  overlay.querySelector('[data-gj-reset]').onclick=()=>{_tripStorySetMinimizedState_(false);if(!confirm(es?'¿Quieres reiniciar el recorrido? Se eliminarán los destinos, excursiones y traslados que has configurado. Los viajeros se conservarán.':'Reset the route? Destinations, day trips and transfers will be deleted. Travelers will be kept.'))return;_tripStorySetWorkspaceResume_(false);_tripStoryClearBuilderSession_();_tripStoryResetRoute_(story);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;dayTripDraft=null;dayTripEditIndex=null;activeStay=0;phase='start';persist();try{engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));}catch(_){};render();};
   overlay.querySelector('[data-gj-copy]').onclick=async()=>{syncTravelers();const txt=_tripStoryCopyText_(story);try{await navigator.clipboard.writeText(txt);const b=overlay.querySelector('[data-gj-copy]'),old=b.textContent;b.textContent=es?'✓ Copiado':'✓ Copied';setTimeout(()=>b.textContent=old,1400);}catch(_){prompt(es?'Copia tu recorrido:':'Copy your journey:',txt);}};
   overlay.querySelector('[data-gj-mobile-story]').onclick=()=>overlay.querySelector('.guided-journey__story').classList.toggle('is-mobile-open');
   overlay.querySelector('[data-stage="travelers"]').onclick=()=>{travelerDraft=travelerSnapshot();phase='travelers';render();};
