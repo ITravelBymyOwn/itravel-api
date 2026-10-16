@@ -491,7 +491,7 @@ function tourAlternativesForCity(cityName,existingNeeds=[]){
   // The destination-wide City Tour already represents the broad urban overview.
   // Do not manufacture additional same-day “panoramic” cards from individual
   // POIs; explicit/complex guided anchors above remain eligible on their merits.
-  return derived.slice(0,4);
+  return derived;
 }
 function rentalTransportTextMatches(value){
   const text=normalizeWorkspaceEntity(value);
@@ -715,7 +715,7 @@ function regionalTourAlternativeForCity(cityName,existingNeeds=[]){
     const label=lang==='es'?`Excursión organizada: ${anchors.join(' + ')}`:`Organized day tour: ${anchors.join(' + ')}`;
     candidates.push({id:`workspace-regional-tour:${day}`,category:'tours',city:cityName,day,entity_name:label,entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',user_message:lang==='es'?`Tu itinerario ya conecta ${anchors.join(', ')} mediante vehículo privado o traslado guiado. Compara una excursión organizada como forma alternativa de ejecutar esta jornada, sin cambiar las visitas previstas.`:`Your itinerary already connects ${anchors.join(', ')} using private or guided transport. Compare an organized day tour as an alternative way to execute this day without changing the planned visits.`,source_activity:label,source_route:'',derived_by:'regional_execution_alternative'});
   }
-  return candidates.slice(0,2);
+  return candidates;
 }
 
 function localTicketNeedsForCity(cityName,existing=[]){
@@ -1200,7 +1200,7 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
 
   const sectionKey=`${city||''}:${sectionId||sectionType}`;
   const expanded=expandedContextSections.has(sectionKey);
-  const initialLimit=sectionType==='transport'?Math.max(journeyTransitOnly(city)?Math.min(1,ordered.length):0,ordered.filter(hasMobilityCTA).length):initialSectionLimit(ordered,sectionType);
+  const initialLimit=sectionType==='transport'?Math.max(journeyTransitOnly(city)?Math.min(1,ordered.length):0,ordered.filter(hasMobilityCTA).length,ordered.reduce((n,item,i)=>item?.derived_by==='journey_start'||item?.derived_by==='journey_return'?i+1:n,0)):initialSectionLimit(ordered,sectionType);
   const visibleCount=expanded?ordered.length:initialLimit;
   const hiddenCount=Math.max(0,ordered.length-visibleCount);
   const toggle=ordered.length>initialLimit
