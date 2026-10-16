@@ -1081,7 +1081,19 @@ function renderResolvedTransportSegments(item,matched=[]){
     const byRoute=sameNeed&&seg.commercial_origin&&seg.commercial_destination&&canon(seg.commercial_origin)===canon(markets.from)&&canon(seg.commercial_destination)===canon(markets.to);
     return !!byRoute;
   };
-  const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)||offerMatches12GoLeg(o,leg,index)));
+  // V237: route-level commerce eligibility is only a hint. Apply the same
+  // physical-leg classifier to every INNER segment, even if a provider has
+  // attached an offer. Local station/hotel/airport access remains itinerary
+  // logistics and must never become an affiliate card.
+  const commercialLegPair=leg=>{
+    const physicalFrom=String(leg?.origin||leg?.commercial_origin||'').trim();
+    const physicalTo=String(leg?.destination||leg?.commercial_destination||'').trim();
+    const markets=localizedMarkets(leg);
+    return v236CommercialRoutePair(physicalFrom,physicalTo) &&
+      v236CommercialRoutePair(markets.from,markets.to);
+  };
+  const legs=allLegs.filter((leg,index)=>commercialLegPair(leg) &&
+    (leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)||offerMatches12GoLeg(o,leg,index))));
   const localLegs=allLegs.filter((leg,index)=>!legs.includes(leg));
   const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg)=>{
     const index=allLegs.indexOf(leg);
@@ -1108,7 +1120,7 @@ function v190CommercialEndpoint(value){
 }
 function v190NeedLegs(item){
   const structured=parseResolvedRouteSource(item?.source_route);
-  if(structured?.legs?.length)return structured.legs.map(leg=>({
+  if(structured?.legs?.length)return structured.legs.filter(leg=>v236CommercialRoutePair(leg?.origin||leg?.commercial_origin,leg?.destination||leg?.commercial_destination) && v236CommercialRoutePair(leg?.commercial_origin||leg?.origin,leg?.commercial_destination||leg?.destination)).map(leg=>({
     from:v190CommercialEndpoint((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
     to:v190CommercialEndpoint((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
   })).filter(x=>x.from&&x.to&&x.from!==x.to);
@@ -1162,7 +1174,7 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       index:Number(leg.index||0),
       from:normRoute((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
       to:normRoute((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
-    })).filter(leg=>leg.from&&leg.to);
+    })).filter(leg=>leg.from&&leg.to&&v236CommercialRoutePair(leg.from,leg.to));
     const rawMatched=(Array.isArray(offers)?offers:[]).filter(offer=>{
       if(['12go','bookaway'].includes(offer?.partner?.slug||'')){
         return v190OfferMatchesNeed(offer,item);
