@@ -1015,9 +1015,9 @@ function renderResolvedTransportSegments(item,matched=[]){
     console.info('[ITBMO OMIO V63][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:omioLegOffers.length,button_expected:omioLegOffers.length>0,stop_reason:omioLegOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
     console.info('[ITBMO 12GO V160][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='12go').length,matched_offers:twelveGoLegOffers.length,button_expected:twelveGoLegOffers.length>0});
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
-    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${omioLegOffers.length?omioOptions(omioLegOffers):''}${twelveGoLegOffers.length?twelveGoOptions(twelveGoLegOffers):''}${bookawayLegOffers.length?partnerOptions(bookawayLegOffers):''}</div>`;
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([v210TransportLabel(leg.mode),times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${omioLegOffers.length?omioOptions(omioLegOffers):''}${twelveGoLegOffers.length?twelveGoOptions(twelveGoLegOffers):''}${bookawayLegOffers.length?partnerOptions(bookawayLegOffers):''}</div>`;
   }).join('')}</div>`:'';
-  const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
+  const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([v210TransportLabel(leg.mode),leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
   return commercial+logistics;
 }
 
@@ -1200,7 +1200,13 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
 
   const sectionKey=`${city||''}:${sectionId||sectionType}`;
   const expanded=expandedContextSections.has(sectionKey);
-  const initialLimit=sectionType==='transport'?Math.max(journeyTransitOnly(city)?Math.min(1,ordered.length):0,ordered.filter(hasMobilityCTA).length,ordered.reduce((n,item,i)=>item?.derived_by==='journey_start'||item?.derived_by==='journey_return'?i+1:n,0)):initialSectionLimit(ordered,sectionType);
+  // V227: counts are not indices. A CTA at position 4 must not be hidden by
+  // a count of 1. Keep all actionable and boundary cards visible in collapsed view.
+  const initialLimit=sectionType==='transport'?Math.max(
+    journeyTransitOnly(city)?Math.min(1,ordered.length):0,
+    ordered.reduce((n,item,i)=>hasMobilityCTA(item)?i+1:n,0),
+    ordered.reduce((n,item,i)=>item?.derived_by==='journey_start'||item?.derived_by==='journey_return'?i+1:n,0)
+  ):initialSectionLimit(ordered,sectionType);
   const visibleCount=expanded?ordered.length:initialLimit;
   const hiddenCount=Math.max(0,ordered.length-visibleCount);
   const toggle=ordered.length>initialLimit
@@ -1326,7 +1332,20 @@ function omioTransportRoutesForRequest(needs=[]){
   const out=[];const seen=new Set();
   (Array.isArray(needs)?needs:[]).forEach(need=>{
     if(need?.need_type!=='intercity_transport'&&need?.need_type!=='transport_arrangement')return;
-    const route=parseResolvedRouteSource(need?.source_route);if(!route)return;
+    const route=parseResolvedRouteSource(need?.source_route);
+    // V228: A transit-only stay is an explicitly configured physical journey,
+    // not a resolver-produced itinerary row. Feed its original city endpoints
+    // to Omio's official catalog; only a verified feed match can create a CTA.
+    // Do not parse arbitrary arrows, station access, or partner-specific links.
+    if(!route){
+      if(need?.derived_by!=='journey_story' || !need?.origin || !need?.destination)return;
+      const origin=String(need.origin).trim(),destination=String(need.destination).trim();
+      if(!_v67CommercialIntercityEndpoints_(origin,destination))return;
+      const key=`${need?.id||''}|${normalizeWorkspaceEntity(origin)}|${normalizeWorkspaceEntity(destination)}|1`;
+      if(seen.has(key))return;seen.add(key);
+      out.push({need_id:need.id||'',need_type:need.need_type||'intercity_transport',origin,destination,index:1,mode:String(need.transport||''),travel_date:need.travel_date||'',parent_origin:origin,parent_destination:destination});
+      return;
+    }
     (route.legs||[]).forEach((leg,index)=>{
       const localizedOrigin=lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en;
       const localizedDestination=lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en;
