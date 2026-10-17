@@ -8435,7 +8435,7 @@ function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,
       const previous=chain[index-1],first=chain[index];
       if(rigid(previous)&&rigid(first))continue;
       const referenceWindow=windowOf(first),previousWindow=windowOf(previous);
-      if(!referenceWindow||!previousWindow||referenceWindow!==previousWindow)continue;
+      if(!referenceWindow||!previousWindow||String(referenceWindow.window_id||'')!==String(previousWindow.window_id||'') || String(referenceWindow.start||'')!==String(previousWindow.start||'') || String(referenceWindow.end||'')!==String(previousWindow.end||''))continue;
       const upper=referenceWindow.open_end?null:_hhmmToMinutes_(referenceWindow.end);
       const lower=_hhmmToMinutes_(referenceWindow.start);
       let cursor=_v114LogicalEndMinutes_(previous),moved=0,maxDelta=0,valid=true;
@@ -8444,7 +8444,8 @@ function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,
         const row=chain[j],start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
         if(start==null||end==null||end<=start){valid=false;break;}
         if(start>=cursor)break; // natural slack absorbs all remaining displacement
-        if(windowOf(row)!==referenceWindow||rigid(row)){valid=false;break;}
+        const rowWindow=windowOf(row);
+        if(!rowWindow||String(rowWindow.window_id||'')!==String(referenceWindow.window_id||'')||String(rowWindow.start||'')!==String(referenceWindow.start||'')||String(rowWindow.end||'')!==String(referenceWindow.end||'')||rigid(row)){valid=false;break;}
         const delta=cursor-start;
         if(delta>180||lower!=null&&start<lower||upper!=null&&end+delta>upper){valid=false;break;}
         const rawStart=_hhmmToMinutes_(row.start),rawEnd=_hhmmToMinutes_(row.end);
@@ -8527,7 +8528,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       const newBlocking=nextErrors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
       const oldOverlaps=errors.filter(e=>e.code==='OVERLAP').length;
       const newOverlaps=nextErrors.filter(e=>e.code==='OVERLAP').length;
-      if(newBlocking>=oldBlocking||newOverlaps>=oldOverlaps||nextErrors.length>errors.length)continue;
+      if(newBlocking>oldBlocking||newOverlaps>=oldOverlaps||nextErrors.length>errors.length)continue;
       out=candidate;changed=true;
       console.info(`[ITBMO V247 CHAIN REPAIR] ${city} · day ${day} · ${moved} flexible row(s) · max +${maxDelta} min · overlaps ${oldOverlaps}→${newOverlaps}`);
       break; // audit again before touching another collision
@@ -8561,6 +8562,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       if(sameOverlap||candidateErrors.length>errors.length)continue;
       out=candidate;changed=true;
       console.info(`[ITBMO V3 DETERMINISTIC OVERLAP] ${city} · day ${day} · row ${rowNum} · +${overlap} min`,{from:error.start,to:candidateRow.start,end:candidateRow.end});
+      break; // V253: refresh QA before repairing another collision
     }
 
     // Timeline/duration defects are arithmetic, not creative-writing problems.
