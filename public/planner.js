@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V156';
-const ITBMO_RUNTIME_ASSET='planner.js?v=274';
+const ITBMO_RUNTIME_BUILD='V250';
+const ITBMO_RUNTIME_ASSET='planner.js?v=250';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -8395,12 +8395,70 @@ function _v3FitDurationToInterval_(row={}){
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
+// V249 — Unit-window chronological reconciliation (global; no destination mappings).
+// Main and V248 share the same basic unit QA, but V248's legacy one-row microfix
+// can displace an overlap into the next activity and repeatedly invoke Luna.
+// Repair the COMPLETE flexible dependency chain inside its authoritative window
+// and commit only when the same local QA shows fewer hard overlaps, with no new
+// blocking finding. No generated tourism can displace a fixed transfer or a
+// reservation/calendar-hard row. Infeasible windows remain for scoped model QA.
+function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
+  let accepted=rows;
+  const master=_v3SyntheticMaster_(totalDays);
+  const audit=candidate=>_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
+  const hard=errors=>errors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||'')));
+  for(let pass=0;pass<12;pass++){
+    const before=audit(accepted);
+    if(!before.some(e=>e.code==='OVERLAP'))break;
+    let improved=false;
+    const dayNumbers=[...new Set(accepted.map(r=>Number(r.day)).filter(Boolean))];
+    for(const day of dayNumbers){
+      const candidate=JSON.parse(JSON.stringify(accepted));
+      const dayRows=candidate.filter(r=>Number(r.day)===day).sort(_v114LogicalRowCompare_);
+      let changed=0,valid=true;
+      for(let i=1;i<dayRows.length;i++){
+        const prev=dayRows[i-1],cur=dayRows[i];
+        const prevEnd=_v114LogicalEndMinutes_(prev),start=_v114LogicalStartMinutes_(cur),end=_v114LogicalEndMinutes_(cur);
+        if(prevEnd==null||start==null||end==null||start>=prevEnd)continue;
+        const prevId=String(prev.planning_window_id||prev.commerce_context?.planning_window_id||'');
+        const curId=String(cur.planning_window_id||cur.commerce_context?.planning_window_id||'');
+        if(!prevId||curId!==prevId||_v114IsNightOverlayRow_(cur)||_v114IsNightOverlayRow_(prev)){
+          valid=false;break;
+        }
+        const delta=prevEnd-start;
+        const calendar=String(cur.calendar_sensitivity||cur.commerce_context?.calendar_sensitivity||'').toLowerCase();
+        const window=_v111WindowForRow_(cur,contract);
+        const windowEnd=window?.open_end?null:_hhmmToMinutes_(window?.end);
+        if(delta>180||_v115IsHardRow_(cur)||calendar==='high'||(windowEnd!=null&&end+delta>windowEnd)){
+          valid=false;break;
+        }
+        cur.start=_minutesToHHMM_(start+delta);
+        cur.end=_minutesToHHMM_(end+delta);
+        changed++;
+      }
+      if(!valid||!changed)continue;
+      const after=audit(candidate);
+      const oldOverlaps=before.filter(e=>e.code==='OVERLAP').length;
+      const newOverlaps=after.filter(e=>e.code==='OVERLAP').length;
+      if(newOverlaps>=oldOverlaps||hard(after).length>hard(before).length||after.length>before.length)continue;
+      accepted=candidate;improved=true;
+      console.info(`[ITBMO V249 UNIT WINDOW RECONCILE] ${city} · day ${day} · shifted ${changed} flexible row(s) · overlaps ${oldOverlaps}→${newOverlaps}`);
+      break;
+    }
+    if(!improved)break;
+  }
+  return accepted;
+}
+
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
   const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115: timeline first, then canonical row semantics.
+  // V249: same deterministic, QA-gated chronology for BASE_STAY and DAY_TRIP;
+  // only the unit's supplied windows determine the available clock budget.
+  out=_v249ReconcileUnitWindow_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
@@ -12738,45 +12796,42 @@ async function exportItineraryToPDF(options={}){
     });
   }
   days.sort((a,b)=>(parseDMY(a.date)?.getTime?.()||0)-(parseDMY(b.date)?.getTime?.()||0)||Number(a.globalDay)-Number(b.globalDay));
-  // V248: derive the PDF base from the actual exported day ownership, NOT
-  // from trip_story.stays: that snapshot may be stale or contain inconsistent
-  // stay boundaries after multi-city merges. All rows remain presentation-only.
-  const pdfDayOwners=new Map();
-  _chronologicalExportDays_().forEach(entry=>{
-    const key=String(entry.date||'');
-    if(!key)return;
-    const arr=pdfDayOwners.get(key)||[];
-    arr.push({day:Number(entry.dayNum),base:String(entry.sourceUnit||entry.stayBase||'').trim(),count:(entry.rows||[]).length});
-    pdfDayOwners.set(key,arr);
-  });
-  const pdfBaseForDay=(day)=>{
-    const owners=(pdfDayOwners.get(String(day?.date||''))||[]).filter(x=>x.base);
-    const exact=owners.filter(x=>x.day===Number(day?.globalDay));
-    const candidates=exact.length?exact:owners;
-    if(candidates.length){
-      const totals=new Map();
-      candidates.forEach(x=>totals.set(x.base,(totals.get(x.base)||0)+x.count));
-      return [...totals].sort((a,b)=>b[1]-a[1])[0][0];
+  // V250: PDF headings must use physical geography, never the storage root.
+  const pdfISO=(date)=>{const d=parseDMY(String(date||''));return d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`:'';};
+  const pdfSame=(a,b)=>Boolean(a&&b&&_arePoiAliases_(String(a),String(b)));
+  const pdfTransferForDay=(day)=>{
+    const iso=pdfISO(day?.date),stays=pdfStory?.stays||[];
+    for(let i=1;i<stays.length;i++){
+      const st=stays[i],prev=stays[i-1];
+      const date=String(st?.departureDate||st?.arrivalDate||st?.startDate||'');
+      if(iso&&iso===date&&prev?.place&&st?.place&&!pdfSame(prev.place,st.place))return {origin:String(prev.place),destination:String(st.place)};
     }
-    const fromRows=(day?.rows||[]).find(r=>String(r?._pdfSourceUnit||'').trim())?._pdfSourceUnit;
-    return String(fromRows||day?.destinations?.[0]||'').trim();
+    const row=(day?.rows||[]).find(r=>r?.from&&r?.to&&!pdfSame(r.from,r.to)&&(/traslado de |transfer from |intercity|entre destinos/i.test(String(r.activity||''))||r._pdfLogistic));
+    return row?{origin:String(row.from),destination:String(row.to)}:null;
+  };
+  const pdfBaseForDay=(day)=>{
+    const trip=_v69PdfDayTripMeta_(day);if(trip?.base)return trip.base;
+    const transfer=pdfTransferForDay(day);if(transfer?.origin)return transfer.origin;
+    const counts=new Map();
+    (day?.rows||[]).forEach(r=>{
+      if(r?._pdfLogistic)return;
+      const loc=String(r?.physical_location||r?.commerce_context?.physical_destination||r?._pdfDestination||'').trim();
+      if(loc)counts.set(loc,(counts.get(loc)||0)+1);
+    });
+    if(counts.size)return [...counts].sort((a,b)=>b[1]-a[1])[0][0];
+    const iso=pdfISO(day?.date),stays=pdfStory?.stays||[];
+    const stay=stays.filter(st=>{const first=String(st?.startDate||st?.arrivalDate||'');return first&&iso>=first&&iso<=_tripStoryAddDays_(first,Math.max(0,Number(st.days||1)-1));}).at(-1);
+    return String(stay?.place||day?.destinations?.[0]||'').trim();
   };
   const pdfDayTripForDay=(day)=>{
-    const fromStory=_v69PdfDayTripMeta_(day);
-    const base=pdfBaseForDay(day);
-    // A day-trip unit is authoritative evidence, unlike a semantic activity
-    // title. Detect its destination from the physical row locations.
-    const tripRows=(day?.rows||[]).filter(r=>/daytrip[-_]/i.test(String(r?.stay_unit_id||'')));
-    if(tripRows.length){
-      const counts=new Map();
-      tripRows.forEach(r=>{
-        const loc=String(r?.physical_location||r?._pdfDestination||'').trim();
-        if(loc&&!_arePoiAliases_(loc,base))counts.set(loc,(counts.get(loc)||0)+1);
-      });
-      const destination=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0]||'';
-      if(destination)return {base,destination};
-    }
-    return fromStory?{...fromStory,base}:null;
+    const story=_v69PdfDayTripMeta_(day);if(story)return story;
+    const base=pdfBaseForDay(day),counts=new Map();
+    (day?.rows||[]).filter(r=>/daytrip[-_]/i.test(String(r?.stay_unit_id||''))).forEach(r=>{
+      const loc=String(r?.physical_location||r?._pdfDestination||'').trim();
+      if(loc&&!pdfSame(loc,base))counts.set(loc,(counts.get(loc)||0)+1);
+    });
+    const destination=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0]||'';
+    return destination?{base,destination}:null;
   };
   // V121 PDF-only aurora restoration. TIE remains the sole semantic authority.
   // Propagate its already-stamped aurora context across sibling physical units of
@@ -12826,7 +12881,8 @@ async function exportItineraryToPDF(options={}){
       font('bold',6.6);doc.setTextColor(32,122,145);doc.text(es?'IDA Y VUELTA · EXCURSIÓN':'ROUND TRIP · DAY TRIP',W/2,162,{align:'center'});
     }else{
       const base=pdfBaseForDay(day);
-      const semantic=_v106PdfSemanticDayTitle_(day)||route;
+      const transfer=pdfTransferForDay(day);
+      const semantic=transfer?`${transfer.origin} → ${transfer.destination}`:(_v106PdfSemanticDayTitle_(day)||route);
       const different=base&&semantic&&!_arePoiAliases_(base,semantic);
       if(different){
         font('bold',13);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(base),34,125,{maxWidth:W-68});
@@ -12892,7 +12948,7 @@ async function exportItineraryToPDF(options={}){
             const max=Math.max(a,b);if(!best||max<best.max)best={split,max};
           }
         }
-        if(pageIndex>0){doc.addPage('a4','portrait');header(day,null,route,true);}
+        if(pageIndex>0){doc.addPage('a4','portrait');header(day,dayTrip,route,true);}
         const subset=cards.slice(offset,offset+take);
         let y=pageStart;subset.slice(0,best.split).forEach(c=>{paint(c,left,y);y+=c.height+4;});
         y=pageStart;subset.slice(best.split).forEach(c=>{paint(c,left+width+gap,y);y+=c.height+4;});
