@@ -899,9 +899,6 @@ function v235CommercialMobilityNeed(item){
   // A rental decision has no endpoints; a rental station-access hop is local.
   if(rental)return !origin&&!destination || v236CommercialRoutePair(origin,destination);
   if(!origin||!destination||!v236CommercialRoutePair(origin,destination))return false;
-  // V255: lodging access is always local to the stay; never publish it as
-  // an intercity affiliate card even when the transport says train/bus.
-  if(/\b(alojamiento|lodging|accommodation|hotel|hostal|guesthouse)\b/i.test(`${origin} ${destination}`))return false;
   const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
   const localNode=/\b(station|stazione|estacion|estacao|gare|bahnhof|hbf|termini|sants|atocha|terminal|airport|aeropuerto|aeroport|aerodrome|aerodromo|hotel|hostal|lodging|alojamiento|downtown|city center|centro|centre|puerto|port|metro|subway)\b/;
   // An explicit commercial resolved leg may name stations at both ends. Keep
@@ -970,7 +967,7 @@ function contextualNeedsForCity(cityName,needs){
     return !coveredByItinerary(item) && !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
   const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
-  // V256: do not manufacture affiliate demand from everyday itinerary transfers.
+  merged.push(...v187ProviderMobilityNeeds(cityName,merged));
   merged.push(...v192ExcursionMobilityNeeds(cityName,merged));
   // Ticket/access needs are first-class deterministic data. V3 emits
   // commerce_context on each row; use it directly so subdestination cards do
@@ -1308,16 +1305,6 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
       return false;
     });
   };
-  // V256: commercial admission happens before rendering, not only at provider resolution.
-  // Preserve the rental decision and authoritative intercity boundaries; other
-  // movements require a concrete attributable partner offer.
-  if(sectionType==='transport'){
-    const commercial=ordered.filter(item=>isRentalTransportNeed(item)||
-      ['journey_story','journey_start','journey_return','trip_sequence'].includes(item?.derived_by)||
-      hasMobilityCTA(item));
-    ordered.splice(0,ordered.length,...commercial);
-    if(!ordered.length)return '';
-  }
   if(sectionType==='transport')ordered.sort((a,b)=>{
     // V210: chronological journey boundaries outrank affiliate CTA ranking.
     // Within the remaining legs, retain the existing bookable-first behavior.
@@ -1549,10 +1536,9 @@ function v192ExcursionMobilityNeeds(cityName,existing=[]){
   workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
     const activity=String(row?.activity||'');
     const narrative=normalizeWorkspaceEntity(`${activity} ${row?.notes||''} ${row?.transport||''}`);
-    const mobilityEvidence=/\b(tren|train|ferrocarril|railway|railroad|ferry|ferri|barco|boat|bus interurbano|intercity bus|bus turistico|tourist bus|traslado regional|regional transfer|servicio bimodal|bimodal)\b/.test(narrative);
+    const mobilityEvidence=/\b(tren|train|ferrocarril|railway|railroad|ferry|ferri|barco|boat|bus interurbano|intercity bus|bus turistico|tourist bus|traslado regional|regional transfer|servicio bimodal|bimodal|traslado|transfer|regreso|retorno|shuttle)\b/.test(narrative);
     if(!mobilityEvidence)return;
     const endpoints=v193ExplicitRowEndpoints(row,cityName);if(!endpoints)return;
-    if(/\b(alojamiento|lodging|accommodation|hotel|hostal|guesthouse)\b/i.test(`${endpoints.from} ${endpoints.to}`))return;
     const from=v190CommercialEndpoint(endpoints.from),to=v190CommercialEndpoint(endpoints.to);
     if(!from||!to||from===to||!v236CommercialRoutePair(endpoints.from,endpoints.to))return;
     // Preserve direction, day, and the original physical journey. No synthetic
@@ -1569,6 +1555,41 @@ function v192ExcursionMobilityNeeds(cityName,existing=[]){
   return out;
 }
 
+function v187ProviderMobilityNeeds(cityName,existing=[]){
+  const out=[];const seen=new Set((existing||[]).map(n=>normalizeWorkspaceEntity(n?.source_route||'')+'|'+String(n?.day||'')));
+  const unit=data?.itineraries?.[cityName];if(!unit)return out;
+  const baseDate=parseDate(unit.baseDate||'');
+  for(const dayNo of Object.keys(unit.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b)){
+    const rows=Array.isArray(unit.byDay[dayNo])?unit.byDay[dayNo]:[];
+    rows.forEach((row,index)=>{
+      const from=String(row?.from||'').trim(),to=String(row?.to||'').trim();
+      if(!from||!to||!v236CommercialRoutePair(from,to))return;
+      const movement=String(row?.transport||'')+' '+String(row?.activity||'');
+      const isTransfer=/\b(traslado|transfer|transporte|transport|tren|train|ferrocarril|rail|bus|autobus|shuttle|van|ferry|ferri|barco|boat|regreso|return|ida|outbound|vehiculo|vehicle|carretera|road)\b/i.test(movement);
+      if(!isTransfer)return;
+      // Ignore routine urban walking and local taxi hops. Regional journeys
+      // remain eligible even when ITBMO recommends a private vehicle.
+      if(/\b(a pie|walking|caminar|caminata|taxi local|local taxi)\b/i.test(movement)&&!/(tren|train|ferrocarril|rail|bus|autobus|ferry|regreso regional|regional transfer)/i.test(movement))return;
+      const source=`${from} → ${to}`,key=normalizeWorkspaceEntity(source)+'|'+dayNo;
+      if(seen.has(key))return;
+      const candidate={category:'transport',need_type:'transport_arrangement',city:cityName,day:dayNo,
+        travel_date:baseDate?fmt(addDays(baseDate,dayNo-1)):'',source_route:source};
+      const candidateIdentity=v207JourneyIdentity(candidate);
+      const alreadyCovered=(existing||[]).some(item=>{
+        if(!v208TransportNeed(item))return false;
+        const identity=v207JourneyIdentity(item);
+        return identity&&candidateIdentity&&identity===candidateIdentity;
+      });
+      if(alreadyCovered)return;
+      seen.add(key);
+      out.push({id:`v187-mobility:${cityName}:${dayNo}:${index+1}`,category:'transport',need_type:'transport_arrangement',city:cityName,day:dayNo,
+        travel_date:baseDate?fmt(addDays(baseDate,dayNo-1)):'',entity_name:source,source_activity:String(row?.activity||''),source_route:source,
+        transport:String(row?.transport||''),derived_by:'v187_physical_itinerary',
+        user_message:lang==='es'?'Compara alternativas para este desplazamiento; conserva el medio elegido si lo prefieres.':'Compare alternatives for this journey; keep your chosen mode if preferred.'});
+    });
+  }
+  return out;
+}
 async function fetchPartnerOffers(action,needs=[]){
   const token=getStoredSessionToken();if(!data?.trip_id)return[];
   const baseBody={session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs};
