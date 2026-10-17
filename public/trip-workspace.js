@@ -883,6 +883,46 @@ function auditContextCoverageForCity(cityName,serverNeeds=[],visibleNeeds=[]){
   }catch(error){console.warn('[ITBMO V176 CONTEXT AUDIT] unavailable',String(error?.message||error));}
 }
 
+// V260: provider-neutral *card admission* only. Do not change affiliate URL
+// generation, /api/partners, or ticket/tour needs. Fail open when geography
+// is ambiguous, preserving real intercity and regional journeys.
+function v260RoutineLocalMobility(item,origin,destination){
+  if(!v208TransportNeed(item))return false;
+  const source=String(item?.derived_by||'');
+  if(['journey_story','journey_start','journey_return','trip_sequence'].includes(source))return false;
+  const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
+  if(!a||!b)return false;
+  const context=normalizeWorkspaceEntity(`${item?.source_activity||''} ${item?.source_summary||''} ${item?.transport||''}`);
+  // A bus/train mention alone does not make an urban ride commercial.
+  const regional=/\b(intercity|interurbano|regional|interregional|entre ciudades|between cities|long distance|larga distancia|day trip|excursion|excursion|ferry|ferri|barco|boat|high speed|alta velocidad|shinkansen|limited express|express interurbano)\b/;
+  if(regional.test(context))return false;
+  const accommodation=/\b(alojamiento|hospedaje|hotel|hostal|hostel|lodging|accommodation|guesthouse|ryokan|base de alojamiento|base of accommodation)\b/;
+  if(accommodation.test(a)||accommodation.test(b))return true;
+  // Same physical workspace: identify known urban stops from the actual rows.
+  // Do not assume that an unknown endpoint is local (important for day trips).
+  const cityName=String(item?.city||'');
+  const unit=data?.itineraries?.[cityName];
+  if(!unit)return false;
+  const cityKey=normalizeWorkspaceEntity(cityName);
+  if(a===cityKey||b===cityKey)return false;
+  const localStops=new Set();
+  Object.values(unit.byDay||{}).forEach(rows=>{
+    if(!Array.isArray(rows))return;
+    rows.forEach(row=>{
+      if(!row||typeof row!=='object')return;
+      const activity=normalizeWorkspaceEntity(row.activity||'');
+      const semantic=String(row?.commerce_context?.semantic_type||'').toUpperCase();
+      // A transport row is evidence of movement, not of a local attraction.
+      if(semantic==='TRANSPORT'||/^(traslado|transfer)\b/.test(activity))return;
+      for(const endpoint of [row.from,row.to]){
+        const place=normalizeWorkspaceEntity(endpoint);
+        if(place&&place!==cityKey)localStops.add(place);
+      }
+    });
+  });
+  return localStops.has(a)&&localStops.has(b);
+}
+
 // V235: A single, provider-neutral admission rule for commercial mobility cards.
 // The itinerary remains authoritative and untouched; only the Workspace commerce
 // layer is filtered. Station access, local hops and walking never become offers.
@@ -896,6 +936,8 @@ function v235CommercialMobilityNeed(item){
   const arrow=routeText.match(/^\s*([^→\n]+?)\s*→\s*([^→\n]+?)\s*$/);
   const origin=directOrigin||String(resolved?.parent?.origin||arrow?.[1]||'').trim();
   const destination=directDestination||String(resolved?.parent?.destination||arrow?.[2]||'').trim();
+  // V260: reject only confirmed local movements; all other providers and needs retain V254/V259 behavior.
+  if(!rental&&v260RoutineLocalMobility(item,origin,destination))return false;
   // A rental decision has no endpoints; a rental station-access hop is local.
   if(rental)return !origin&&!destination || v236CommercialRoutePair(origin,destination);
   if(!origin||!destination||!v236CommercialRoutePair(origin,destination))return false;
