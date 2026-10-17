@@ -12704,7 +12704,7 @@ async function exportItineraryToPDF(options={}){
     let item=byDate.get(key);
     if(!item){item={globalDay:day.globalDay,date:day.date||'',destinations:[],rows:[]};byDate.set(key,item);days.push(item);}
     if(!item.destinations.some(x=>_arePoiAliases_(x,block.destination)))item.destinations.push(block.destination);
-    (day.rows||[]).forEach(row=>item.rows.push({...row,_pdfDestination:block.destination}));
+    (day.rows||[]).forEach(row=>item.rows.push({...row,_pdfDestination:block.destination,_pdfSourceUnit:(block.source_units||[])[0]||''}));
   }));
   // V202 · PDF-only journey boundaries. No generated rows, units or checkpoints change.
   const pdfStory=_currentTravelModelV2_()?.trip_story;
@@ -12738,21 +12738,45 @@ async function exportItineraryToPDF(options={}){
     });
   }
   days.sort((a,b)=>(parseDMY(a.date)?.getTime?.()||0)-(parseDMY(b.date)?.getTime?.()||0)||Number(a.globalDay)-Number(b.globalDay));
-  // V246 PDF-only: resolve the physical base by calendar date. The printed
-  // destination must not depend on semantic activity titles or row locations.
+  // V248: derive the PDF base from the actual exported day ownership, NOT
+  // from trip_story.stays: that snapshot may be stale or contain inconsistent
+  // stay boundaries after multi-city merges. All rows remain presentation-only.
+  const pdfDayOwners=new Map();
+  _chronologicalExportDays_().forEach(entry=>{
+    const key=String(entry.date||'');
+    if(!key)return;
+    const arr=pdfDayOwners.get(key)||[];
+    arr.push({day:Number(entry.dayNum),base:String(entry.sourceUnit||entry.stayBase||'').trim(),count:(entry.rows||[]).length});
+    pdfDayOwners.set(key,arr);
+  });
   const pdfBaseForDay=(day)=>{
-    const parsed=parseDMY(day?.date||'');
-    const iso=parsed?`${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`:'';
-    const stays=(pdfStory?.stays||[]).filter(st=>st?.place&&!st?.transitOnly);
-    const match=stays.find(st=>{
-      if(!iso||!st.startDate)return false;
-      const end=_tripStoryAddDays_(st.startDate,Math.max(0,Number(st.days||1)-1));
-      return iso>=st.startDate&&iso<=end;
-    });
-    if(match)return String(match.place).trim();
-    const saved=(savedDestinations||[]).find(d=>
-      String(d?.city||'').trim() && (itineraries?.[d.city]?.byDay?.[day.globalDay]));
-    return String(saved?.city||day?.destinations?.[0]||'').trim();
+    const owners=(pdfDayOwners.get(String(day?.date||''))||[]).filter(x=>x.base);
+    const exact=owners.filter(x=>x.day===Number(day?.globalDay));
+    const candidates=exact.length?exact:owners;
+    if(candidates.length){
+      const totals=new Map();
+      candidates.forEach(x=>totals.set(x.base,(totals.get(x.base)||0)+x.count));
+      return [...totals].sort((a,b)=>b[1]-a[1])[0][0];
+    }
+    const fromRows=(day?.rows||[]).find(r=>String(r?._pdfSourceUnit||'').trim())?._pdfSourceUnit;
+    return String(fromRows||day?.destinations?.[0]||'').trim();
+  };
+  const pdfDayTripForDay=(day)=>{
+    const fromStory=_v69PdfDayTripMeta_(day);
+    const base=pdfBaseForDay(day);
+    // A day-trip unit is authoritative evidence, unlike a semantic activity
+    // title. Detect its destination from the physical row locations.
+    const tripRows=(day?.rows||[]).filter(r=>/daytrip[-_]/i.test(String(r?.stay_unit_id||'')));
+    if(tripRows.length){
+      const counts=new Map();
+      tripRows.forEach(r=>{
+        const loc=String(r?.physical_location||r?._pdfDestination||'').trim();
+        if(loc&&!_arePoiAliases_(loc,base))counts.set(loc,(counts.get(loc)||0)+1);
+      });
+      const destination=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0]||'';
+      if(destination)return {base,destination};
+    }
+    return fromStory?{...fromStory,base}:null;
   };
   // V121 PDF-only aurora restoration. TIE remains the sole semantic authority.
   // Propagate its already-stamped aurora context across sibling physical units of
@@ -12829,7 +12853,7 @@ async function exportItineraryToPDF(options={}){
   for(let i=0;i<days.length;i++){
     if(i)doc.addPage('a4','portrait');
     const day=days[i],rows=day.rows.slice().sort(_v114LogicalRowCompare_);
-    const dayTrip=_v69PdfDayTripMeta_(day),route=_v67PdfDayTripLabel_(day,day.destinations.join('  →  '));
+    const dayTrip=pdfDayTripForDay(day),route=dayTrip?`${dayTrip.base}  <->  ${dayTrip.destination}`:day.destinations.join('  →  ');
     let start=dayTrip?178:150,available=footer-start;
     let choice=null;
     for(const size of [9.0,8.7,8.4,8.1]){const candidate=layout(rows,size);if(candidate.max<=available){choice=candidate;break;}}
