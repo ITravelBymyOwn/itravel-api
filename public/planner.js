@@ -8467,6 +8467,76 @@ function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,
   return accepted;
 }
 
+// V254: single transactional forward propagation over a complete physical-day chain.
+// Unlike V48, this never commits a one-row shift that merely relocates the collision.
+// Unlike V252, absent optional planning_window_id does not block a safe repair.
+// All rows, fixed anchors, contract boundaries and authoritative QA remain protected.
+function _v254PropagatePhysicalChain_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
+  let accepted=rows;
+  const master=_v3SyntheticMaster_(totalDays);
+  const audit=value=>_localGlobalAudit_(city,value,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
+  const hard=_v3HardBlockingCodes_();
+  const measure=issues=>({overlap:issues.filter(e=>e.code==='OVERLAP').length,
+    hard:issues.filter(e=>hard.has(String(e?.code||''))).length,total:issues.length});
+  const rigid=row=>_v115IsHardRow_(row)||_v114IsNightOverlayRow_(row)||row?.fixed===true||row?.user_fixed===true||
+    String(row?.kind||'').toLowerCase()==='fixed_transfer'||
+    String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high';
+  const window=row=>{
+    const id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
+    const options=(contract?.route_days||[]).find(d=>Number(d?.day)===Number(row?.day))?.location_windows||[];
+    if(id)return options.find(w=>String(w?.window_id||'')===id)||null;
+    const start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
+    const matches=options.filter(w=>{const a=_hhmmToMinutes_(w.start),b=_hhmmToMinutes_(w.end);
+      return a!=null&&start>=a&&(w.open_end||b==null||end<=b);});
+    return matches.length===1?matches[0]:null;
+  };
+  const key=w=>w?`${String(w.window_id||'')}|${w.start||''}|${w.end||''}`:null;
+  for(let pass=0;pass<12;pass++){
+    const before=audit(accepted),old=measure(before);
+    if(!old.overlap)break;
+    let committed=false;
+    for(const issue of before.filter(e=>e.code==='OVERLAP')){
+      const day=Number(issue.day),rowNum=Number(issue.row);
+      if(!day||rowNum<2)continue;
+      const candidate=JSON.parse(JSON.stringify(accepted));
+      const chain=_rowsByDayObject_(candidate)[day]||[];
+      if(rowNum>chain.length)continue;
+      const previous=chain[rowNum-2],first=chain[rowNum-1];
+      if(rigid(first)||_v114IsNightOverlayRow_(previous))continue;
+      const anchorWindow=window(first),priorWindow=window(previous);
+      // Explicit windows must agree; when neither exists, respect fixed anchors
+      // and accept only a full authoritative audit improvement.
+      if((anchorWindow||priorWindow)&&(!anchorWindow||!priorWindow||key(anchorWindow)!==key(priorWindow)))continue;
+      const ceiling=anchorWindow&&!anchorWindow.open_end?_hhmmToMinutes_(anchorWindow.end):null;
+      let cursor=_v114LogicalEndMinutes_(previous),moved=0,valid=cursor!=null;
+      for(let j=rowNum-1;valid&&j<chain.length;j++){
+        const r=chain[j],start=_v114LogicalStartMinutes_(r),end=_v114LogicalEndMinutes_(r);
+        if(start==null||end==null||end<=start){valid=false;break;}
+        if(start>=cursor)break;
+        if(rigid(r)){valid=false;break;}
+        const rw=window(r);
+        if((anchorWindow||rw)&&(!anchorWindow||!rw||key(anchorWindow)!==key(rw))){valid=false;break;}
+        const delta=cursor-start;
+        const rawStart=_hhmmToMinutes_(r.start),rawEnd=_hhmmToMinutes_(r.end);
+        if(delta>180||rawStart==null||rawEnd==null||(ceiling!=null&&end+delta>ceiling)){
+          valid=false;break;
+        }
+        r.start=_minutesToHHMM_(rawStart+delta);
+        r.end=_minutesToHHMM_(rawEnd+delta);
+        cursor=end+delta;moved++;
+      }
+      if(!valid||!moved)continue;
+      const next=measure(audit(candidate));
+      if(next.overlap>=old.overlap||next.hard>old.hard||next.total>old.total)continue;
+      accepted=candidate;committed=true;
+      console.info(`[ITBMO V254 PHYSICAL CHAIN TRANSACTION] ${city} · day ${day} · ${moved} rows · overlaps ${old.overlap}→${next.overlap}`);
+      break;
+    }
+    if(!committed)break;
+  }
+  return accepted;
+}
+
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
@@ -8475,6 +8545,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
   const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115: timeline first, then canonical row semantics.
   // V252: QA-gated chronology for BASE_STAY and DAY_TRIP;
   // only the unit's supplied windows determine the available clock budget.
+  out=_v254PropagatePhysicalChain_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
   out=_v249ReconcileUnitWindow_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
 
   const master=_v3SyntheticMaster_(totalDays);
@@ -8559,7 +8630,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       const candidateReport=_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride);
       const candidateErrors=candidateReport?.errors||[];
       const sameOverlap=candidateErrors.some(e=>e.code==='OVERLAP'&&Number(e?.day||0)===day&&Number(e?.row||0)===rowNum);
-      if(sameOverlap||candidateErrors.length>errors.length)continue;
+      if(sameOverlap||candidateErrors.length>errors.length||candidateErrors.filter(e=>e.code==='OVERLAP').length>=errors.filter(e=>e.code==='OVERLAP').length)continue;
       out=candidate;changed=true;
       console.info(`[ITBMO V3 DETERMINISTIC OVERLAP] ${city} · day ${day} · row ${rowNum} · +${overlap} min`,{from:error.start,to:candidateRow.start,end:candidateRow.end});
       break; // V253: refresh QA before repairing another collision
