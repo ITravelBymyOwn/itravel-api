@@ -23,7 +23,7 @@
 
 
 const ITBMO_RUNTIME_BUILD='V250';
-const ITBMO_RUNTIME_ASSET='planner.js?v=250';
+const ITBMO_RUNTIME_ASSET='planner.js?v=252';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -8395,52 +8395,70 @@ function _v3FitDurationToInterval_(row={}){
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
-// V251 — Transactional unit-window reconciliation. Operates exclusively on
-// generated rows, after the existing chronology compiler; no Luna prompts,
-// unit contracts, checkpoints or generation decisions are changed.
-// One transaction covers a complete flexible dependency chain, rather than
-// shifting an individual row and leaving a new collision downstream.
+// V252 — Constraint-aware transactional scheduler for generated physical units.
+// No model calls, no changes to the TIE/physical-unit generator or its contracts.
+// Operates on an isolated copy, commits only on strictly improved authoritative QA.
 function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
   let accepted=rows;
   const master=_v3SyntheticMaster_(totalDays);
   const audit=candidate=>_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-  const blocking=errors=>errors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
-  const overlapCount=errors=>errors.filter(e=>e.code==='OVERLAP').length;
-  // Each successful pass must strictly reduce errors: no oscillations.
+  const hardCodes=_v3HardBlockingCodes_();
+  const score=errors=>({overlaps:errors.filter(e=>e.code==='OVERLAP').length,
+    hard:errors.filter(e=>hardCodes.has(String(e?.code||''))).length,total:errors.length});
+  // Use the actual authoritative window, not merely its optional row identifier.
+  // Missing identifiers may be inferred ONLY from an unambiguous contract window.
+  const windowOf=row=>{
+    const day=Number(row?.day||0),id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
+    const windows=(contract?.route_days||[]).find(d=>Number(d?.day)===day)?.location_windows||[];
+    if(id){const exact=windows.find(w=>String(w?.window_id||'')===id);if(exact)return exact;return null;}
+    const start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
+    if(start==null||end==null)return null;
+    const matches=windows.filter(w=>{
+      const a=_hhmmToMinutes_(w?.start),b=_hhmmToMinutes_(w?.end);
+      return a!=null&&start>=a&&(b==null||start<b)&&(w?.open_end||b==null||end<=b);
+    });
+    return matches.length===1?matches[0]:null;
+  };
+  const rigid=row=>_v115IsHardRow_(row)||_v114IsNightOverlayRow_(row)||
+    String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high';
+  // A maximum of one accepted transaction per pass prevents oscillation.
   for(let pass=0;pass<12;pass++){
-    const before=audit(accepted);
-    if(!overlapCount(before))break;
+    const before=audit(accepted),baseline=score(before);
+    if(!baseline.overlaps)break;
     let committed=false;
-    for(const day of [...new Set(accepted.map(r=>Number(r.day)).filter(Boolean))]){
+    for(const issue of before.filter(e=>e.code==='OVERLAP')){
+      const day=Number(issue?.day||0),index=Number(issue?.row||0)-1;
+      if(!day||index<1)continue;
       const candidate=JSON.parse(JSON.stringify(accepted));
-      const dayRows=candidate.filter(r=>Number(r.day)===day).sort(_v114LogicalRowCompare_);
-      let moved=0,valid=true;
-      for(let i=1;i<dayRows.length;i++){
-        const prev=dayRows[i-1],cur=dayRows[i];
-        if(_v114IsNightOverlayRow_(prev)||_v114IsNightOverlayRow_(cur))continue;
-        const previousEnd=_v114LogicalEndMinutes_(prev);
-        const start=_v114LogicalStartMinutes_(cur),end=_v114LogicalEndMinutes_(cur);
-        if(previousEnd==null||start==null||end==null||start>=previousEnd)continue;
-        const prevWindow=String(prev.planning_window_id||prev.commerce_context?.planning_window_id||'');
-        const windowId=String(cur.planning_window_id||cur.commerce_context?.planning_window_id||'');
-        if(!prevWindow||prevWindow!==windowId){valid=false;break;}
-        const delta=previousEnd-start;
-        const calendar=String(cur.calendar_sensitivity||cur.commerce_context?.calendar_sensitivity||'').toLowerCase();
-        const win=_v111WindowForRow_(cur,contract);
-        const endLimit=win?.open_end?null:_hhmmToMinutes_(win?.end);
-        if(delta>180||_v115IsHardRow_(cur)||calendar==='high'||
-           (endLimit!=null&&end+delta>endLimit)){valid=false;break;}
-        const rawStart=_hhmmToMinutes_(cur.start),rawEnd=_hhmmToMinutes_(cur.end);
+      const chain=_rowsByDayObject_(candidate)[day]||[];
+      if(index>=chain.length)continue;
+      const previous=chain[index-1],first=chain[index];
+      if(rigid(previous)&&rigid(first))continue;
+      const referenceWindow=windowOf(first),previousWindow=windowOf(previous);
+      if(!referenceWindow||!previousWindow||referenceWindow!==previousWindow)continue;
+      const upper=referenceWindow.open_end?null:_hhmmToMinutes_(referenceWindow.end);
+      const lower=_hhmmToMinutes_(referenceWindow.start);
+      let cursor=_v114LogicalEndMinutes_(previous),moved=0,maxDelta=0,valid=true;
+      if(cursor==null)continue;
+      for(let j=index;j<chain.length;j++){
+        const row=chain[j],start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
+        if(start==null||end==null||end<=start){valid=false;break;}
+        if(start>=cursor)break; // natural slack absorbs all remaining displacement
+        if(windowOf(row)!==referenceWindow||rigid(row)){valid=false;break;}
+        const delta=cursor-start;
+        if(delta>180||lower!=null&&start<lower||upper!=null&&end+delta>upper){valid=false;break;}
+        const rawStart=_hhmmToMinutes_(row.start),rawEnd=_hhmmToMinutes_(row.end);
         if(rawStart==null||rawEnd==null){valid=false;break;}
-        cur.start=_minutesToHHMM_(rawStart+delta);
-        cur.end=_minutesToHHMM_(rawEnd+delta);
-        moved++;
+        row.start=_minutesToHHMM_(rawStart+delta);
+        row.end=_minutesToHHMM_(rawEnd+delta);
+        cursor=end+delta;moved++;maxDelta=Math.max(maxDelta,delta);
       }
       if(!valid||!moved)continue;
-      const after=audit(candidate);
-      if(overlapCount(after)>=overlapCount(before)||blocking(after)>blocking(before)||after.length>before.length)continue;
+      const after=audit(candidate),next=score(after);
+      // Never trade one blocking issue for another or hide an error in a new row.
+      if(next.overlaps>=baseline.overlaps||next.hard>baseline.hard||next.total>baseline.total)continue;
       accepted=candidate;committed=true;
-      console.info(`[ITBMO V251 WINDOW TRANSACTION] ${city} · day ${day} · ${moved} dependent row(s) · overlaps ${overlapCount(before)}→${overlapCount(after)}`);
+      console.info(`[ITBMO V252 CONSTRAINT TRANSACTION] ${city} · day ${day} · ${moved} rows · max +${maxDelta} min · overlaps ${baseline.overlaps}→${next.overlaps}`);
       break;
     }
     if(!committed)break;
@@ -8454,7 +8472,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
   const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115: timeline first, then canonical row semantics.
-  // V249: same deterministic, QA-gated chronology for BASE_STAY and DAY_TRIP;
+  // V252: QA-gated chronology for BASE_STAY and DAY_TRIP;
   // only the unit's supplied windows determine the available clock budget.
   out=_v249ReconcileUnitWindow_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
 
