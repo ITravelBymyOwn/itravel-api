@@ -8395,57 +8395,55 @@ function _v3FitDurationToInterval_(row={}){
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
-// V249 — Unit-window chronological reconciliation (global; no destination mappings).
-// Main and V248 share the same basic unit QA, but V248's legacy one-row microfix
-// can displace an overlap into the next activity and repeatedly invoke Luna.
-// Repair the COMPLETE flexible dependency chain inside its authoritative window
-// and commit only when the same local QA shows fewer hard overlaps, with no new
-// blocking finding. No generated tourism can displace a fixed transfer or a
-// reservation/calendar-hard row. Infeasible windows remain for scoped model QA.
+// V251 — Transactional unit-window reconciliation. Operates exclusively on
+// generated rows, after the existing chronology compiler; no Luna prompts,
+// unit contracts, checkpoints or generation decisions are changed.
+// One transaction covers a complete flexible dependency chain, rather than
+// shifting an individual row and leaving a new collision downstream.
 function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
   let accepted=rows;
   const master=_v3SyntheticMaster_(totalDays);
   const audit=candidate=>_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-  const hard=errors=>errors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||'')));
+  const blocking=errors=>errors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
+  const overlapCount=errors=>errors.filter(e=>e.code==='OVERLAP').length;
+  // Each successful pass must strictly reduce errors: no oscillations.
   for(let pass=0;pass<12;pass++){
     const before=audit(accepted);
-    if(!before.some(e=>e.code==='OVERLAP'))break;
-    let improved=false;
-    const dayNumbers=[...new Set(accepted.map(r=>Number(r.day)).filter(Boolean))];
-    for(const day of dayNumbers){
+    if(!overlapCount(before))break;
+    let committed=false;
+    for(const day of [...new Set(accepted.map(r=>Number(r.day)).filter(Boolean))]){
       const candidate=JSON.parse(JSON.stringify(accepted));
       const dayRows=candidate.filter(r=>Number(r.day)===day).sort(_v114LogicalRowCompare_);
-      let changed=0,valid=true;
+      let moved=0,valid=true;
       for(let i=1;i<dayRows.length;i++){
         const prev=dayRows[i-1],cur=dayRows[i];
-        const prevEnd=_v114LogicalEndMinutes_(prev),start=_v114LogicalStartMinutes_(cur),end=_v114LogicalEndMinutes_(cur);
-        if(prevEnd==null||start==null||end==null||start>=prevEnd)continue;
-        const prevId=String(prev.planning_window_id||prev.commerce_context?.planning_window_id||'');
-        const curId=String(cur.planning_window_id||cur.commerce_context?.planning_window_id||'');
-        if(!prevId||curId!==prevId||_v114IsNightOverlayRow_(cur)||_v114IsNightOverlayRow_(prev)){
-          valid=false;break;
-        }
-        const delta=prevEnd-start;
+        if(_v114IsNightOverlayRow_(prev)||_v114IsNightOverlayRow_(cur))continue;
+        const previousEnd=_v114LogicalEndMinutes_(prev);
+        const start=_v114LogicalStartMinutes_(cur),end=_v114LogicalEndMinutes_(cur);
+        if(previousEnd==null||start==null||end==null||start>=previousEnd)continue;
+        const prevWindow=String(prev.planning_window_id||prev.commerce_context?.planning_window_id||'');
+        const windowId=String(cur.planning_window_id||cur.commerce_context?.planning_window_id||'');
+        if(!prevWindow||prevWindow!==windowId){valid=false;break;}
+        const delta=previousEnd-start;
         const calendar=String(cur.calendar_sensitivity||cur.commerce_context?.calendar_sensitivity||'').toLowerCase();
-        const window=_v111WindowForRow_(cur,contract);
-        const windowEnd=window?.open_end?null:_hhmmToMinutes_(window?.end);
-        if(delta>180||_v115IsHardRow_(cur)||calendar==='high'||(windowEnd!=null&&end+delta>windowEnd)){
-          valid=false;break;
-        }
-        cur.start=_minutesToHHMM_(start+delta);
-        cur.end=_minutesToHHMM_(end+delta);
-        changed++;
+        const win=_v111WindowForRow_(cur,contract);
+        const endLimit=win?.open_end?null:_hhmmToMinutes_(win?.end);
+        if(delta>180||_v115IsHardRow_(cur)||calendar==='high'||
+           (endLimit!=null&&end+delta>endLimit)){valid=false;break;}
+        const rawStart=_hhmmToMinutes_(cur.start),rawEnd=_hhmmToMinutes_(cur.end);
+        if(rawStart==null||rawEnd==null){valid=false;break;}
+        cur.start=_minutesToHHMM_(rawStart+delta);
+        cur.end=_minutesToHHMM_(rawEnd+delta);
+        moved++;
       }
-      if(!valid||!changed)continue;
+      if(!valid||!moved)continue;
       const after=audit(candidate);
-      const oldOverlaps=before.filter(e=>e.code==='OVERLAP').length;
-      const newOverlaps=after.filter(e=>e.code==='OVERLAP').length;
-      if(newOverlaps>=oldOverlaps||hard(after).length>hard(before).length||after.length>before.length)continue;
-      accepted=candidate;improved=true;
-      console.info(`[ITBMO V249 UNIT WINDOW RECONCILE] ${city} · day ${day} · shifted ${changed} flexible row(s) · overlaps ${oldOverlaps}→${newOverlaps}`);
+      if(overlapCount(after)>=overlapCount(before)||blocking(after)>blocking(before)||after.length>before.length)continue;
+      accepted=candidate;committed=true;
+      console.info(`[ITBMO V251 WINDOW TRANSACTION] ${city} · day ${day} · ${moved} dependent row(s) · overlaps ${overlapCount(before)}→${overlapCount(after)}`);
       break;
     }
-    if(!improved)break;
+    if(!committed)break;
   }
   return accepted;
 }
@@ -12806,7 +12804,7 @@ async function exportItineraryToPDF(options={}){
       const date=String(st?.departureDate||st?.arrivalDate||st?.startDate||'');
       if(iso&&iso===date&&prev?.place&&st?.place&&!pdfSame(prev.place,st.place))return {origin:String(prev.place),destination:String(st.place)};
     }
-    const row=(day?.rows||[]).find(r=>r?.from&&r?.to&&!pdfSame(r.from,r.to)&&(/traslado de |transfer from |intercity|entre destinos/i.test(String(r.activity||''))||r._pdfLogistic));
+    const row=(day?.rows||[]).find(r=>r?.from&&r?.to&&!pdfSame(r.from,r.to)&&(/traslado de .* a |transfer from .* to |intercity transfer|traslado entre destinos/i.test(String(r.activity||''))||r._pdfLogistic&&/traslado entre destinos|intercity transfer/i.test(String(r.activity||''))));
     return row?{origin:String(row.from),destination:String(row.to)}:null;
   };
   const pdfBaseForDay=(day)=>{
@@ -12871,7 +12869,7 @@ async function exportItineraryToPDF(options={}){
     doc.setFillColor(239,246,255);doc.roundedRect(W-114,18,80,46,10,10,'F');doc.setTextColor(8,35,65);
     font('bold',10);doc.text(`${es?'Día':'Day'} ${day.globalDay}`,W-74,37,{align:'center'});
     font('normal',7.5);doc.text(_itbmoPdfSafeText_(day.date),W-74,52,{align:'center'});
-    if(dayTrip && !continued){
+    if(dayTrip){
       doc.setFillColor(246,250,255);doc.roundedRect(34,114,W-68,57,9,9,'F');
       const semantic=_v106PdfSemanticDayTitle_(day);
       if(semantic){font('bold',14);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(semantic),W/2,132,{align:'center',maxWidth:260});}
@@ -12884,7 +12882,9 @@ async function exportItineraryToPDF(options={}){
       const transfer=pdfTransferForDay(day);
       const semantic=transfer?`${transfer.origin} → ${transfer.destination}`:(_v106PdfSemanticDayTitle_(day)||route);
       const different=base&&semantic&&!_arePoiAliases_(base,semantic);
-      if(different){
+      if(transfer){
+        font('bold',14);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(semantic),34,135,{maxWidth:W-68});
+      }else if(different){
         font('bold',13);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(base),34,125,{maxWidth:W-68});
         font('normal',10);doc.setTextColor(73,94,115);doc.text(_itbmoPdfSafeText_(semantic),34,141,{maxWidth:W-68});
       }else{
@@ -12923,7 +12923,7 @@ async function exportItineraryToPDF(options={}){
       // one-card orphan whenever a clean two-card continuation is possible.
       const cards=layout(rows,8.1).cards;let offset=0,pageIndex=0;
       while(offset<cards.length){
-        const pageStart=pageIndex===0?start:165;
+        const pageStart=pageIndex===0?start:(dayTrip?178:165);
         const pageAvailable=footer-pageStart;
         let take=0,best=null;
         for(let n=1;n<=cards.length-offset;n++){
