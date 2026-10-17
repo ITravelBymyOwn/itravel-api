@@ -6625,6 +6625,24 @@ function _hasCriticalAuditErrors_(report={}){
   return (report?.errors||[]).some(error=>_auditSeverity_(error)>=10);
 }
 
+// V257: conservative identity guard for trip-wide duplicate warnings. A district,
+// promenade or square sharing a token with a museum/monument is not the same POI.
+// Do not change _arePoiAliases_: it also serves continuity and local matching.
+function _v257SameConcretePoi_(first={},second={}){
+  const a=String(first?.to||first?.activity||'');
+  const b=String(second?.to||second?.activity||'');
+  const raw=value=>String(value||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+  const x=raw(a),y=raw(b);
+  if(!x||!y)return false;
+  const broad=/\b(plaza|square|calle|street|avenida|avenue|passeig|paseo|promenade|barrio|district|neighborhood|quarter|zona|area|entorno|alrededores)\b/;
+  const specific=/\b(museo|museum|templo|temple|catedral|cathedral|palacio|palace|castillo|castle|basilica|iglesia|church|galeria|gallery)\b/;
+  if((broad.test(x)&&specific.test(y))||(broad.test(y)&&specific.test(x)))return false;
+  // A named neighborhood and its street are not interchangeable experiences.
+  if(broad.test(x)!==broad.test(y) && x!==y &&
+    (x.includes(y)||y.includes(x)))return false;
+  return _arePoiAliases_(_poiKeyFromRow_(first),_poiKeyFromRow_(second));
+}
+
 function _v40DistinctPoiExperience_(a={},b={}){
   const text=row=>_canonicalText_(`${row?.activity||''} ${row?.notes||''}`);
   const exterior=txt=>/\b(exterior|outside|facade|fachada|panoramic|panoramica|panoramica|viewpoint|mirador|photo|fotograf|paseo nocturno|night walk)\b/i.test(txt);
@@ -7131,7 +7149,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         const poi=_poiKeyFromRow_(r);
         const physicalKey=_canonicalText_(r?.physical_location||r?.commerce_context?.physical_destination||city);
         for(const prior of seenPois){
-          if(prior.day!==day && _v111ExperienceVisitRow_(prior.row) && prior.physicalKey===physicalKey && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
+          if(prior.day!==day && _v111ExperienceVisitRow_(prior.row) && prior.physicalKey===physicalKey && _v257SameConcretePoi_(prior.row,r) && !_v40DistinctPoiExperience_(prior.row,r)){
             errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],first:prior.label,second:r.to||r.activity,physical_location:physicalKey});
             break;
           }
@@ -8659,7 +8677,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     for(const error of errors.filter(e=>e.code==='GLOBAL_DUPLICATE_POI')){
       const laterDay=Math.max(...(error.days||[]).map(Number).filter(Boolean));
       const arr=byDay[laterDay]||[];
-      const victim=arr.find(r=>!_isUtilityRow_(r) && _arePoiAliases_(r.to||r.activity,error.second||''));
+      const victim=arr.find(r=>!_isUtilityRow_(r) && _v257SameConcretePoi_(r,{to:error.second||''}));
       if(victim && !_isPureTransportRow_(victim)){
         const idx=out.indexOf(victim);
         if(idx>=0){ removed.push({day:laterDay,poi:victim.to||victim.activity}); out.splice(idx,1); changed=true; }
