@@ -94,36 +94,7 @@ function visibleWorkspaceDuration(row={}){
 // attached to its generated activity; never paraphrase it through Context.
 function pdfActivityNote(row){return String(row?.notes??'').replace(/\r?\n/g,' ').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g,'').replace(/[\u2010-\u2015\u2212]/g,'-').replace(/\s+/g,' ').trim()}
 
-// V256: passive itinerary coherence audit. Never changes rows or calls Luna.
-// V257: non-destructive, once-per-day review of logistics. The itinerary is
-// authoritative: no inferred route, schedule, provider or Luna request is added.
-const v257ReviewedDays=new Set();
-function v256AuditVisibleItinerary(cityName,dayNo,rows){
-  const key=`${cityName}|${dayNo}|${rows.length}|${rows.map(r=>`${r.start||''}-${r.end||''}`).join(';')}`;
-  if(v257ReviewedDays.has(key))return;
-  v257ReviewedDays.add(key);
-  const issues=[];
-  const clock=v=>{const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):null;};
-  for(let i=0;i<rows.length;i++){
-    const r=rows[i]||{},start=clock(r.start),end=clock(r.end);
-    if(start===null||end===null)continue;
-    const elapsed=(end-start+1440)%1440;
-    const mode=String(r.transport||'');
-    if(/\b(tren|train|bus|autob[uú]s|taxi|a pie|walking|metro|ferry|traslado|transfer)\b/i.test(`${r.activity||''} ${mode}`)){
-      const note=String(r.notes||'');
-      const ranges=[...note.matchAll(/(?:aproximadamente|aprox\.?|duraci[oó]n:?|trayecto:?|a pie[;:]?|taxi[;:]?|tren[;:]?|bus[;:]?)?\s*(\d{1,3})\s*(?:-|–|a|to)\s*(\d{1,3})\s*min(?:utos|utes)?\b/gi)];
-      if(ranges.length&&ranges.every(m=>elapsed<Number(m[1])||elapsed>Number(m[2])))issues.push({day:dayNo,row:i+1,type:'TRANSPORT_DURATION_TEXT_MISMATCH',scheduled_minutes:elapsed,description:note.slice(0,160)});
-      // A single explicit travel-duration statement can also contradict the row.
-      // Avoid generic numbers or claims about queueing, admission and schedules.
-      const explicit=note.match(/(?:trayecto|traslado|recorrido|viaje|caminata|walking|walk|transfer|travel|drive|conducci[oó]n)\s*(?:de|of|:|aprox\.?|aproximadamente)?\s*(\d{1,3})\s*min(?:utos|utes)?\b/i);
-      if(explicit&&!ranges.length&&Math.abs(elapsed-Number(explicit[1]))>15)issues.push({day:dayNo,row:i+1,type:'EXPLICIT_TRAVEL_TIME_REVIEW',scheduled_minutes:elapsed,described_minutes:Number(explicit[1])});
-    }
-    const next=rows[i+1];
-    if(next&&r.to&&next.from&&normalizeWorkspaceEntity(r.to)!==normalizeWorkspaceEntity(next.from))issues.push({day:dayNo,row:i+1,type:'LOCATION_CONTINUITY_REVIEW',from:r.to,next_from:next.from});
-  }
-  if(issues.length)console.info('[ITBMO V257 NONBLOCKING ITINERARY REVIEW]',cityName,issues);
-}
-function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[];v256AuditVisibleItinerary(city,day,rows);const b=base(city),date=b?fmt(addDays(b,day-1)):'',ds=days(city),idx=ds.indexOf(day);let html=`<div class="tw-day-header"><div><span class="tw-kicker">${esc(city)}</span><h2>${lang==='es'?'Día':'Day'} ${day}${date?` · ${esc(date)}`:''}</h2></div><span class="tw-day-count">${idx+1} / ${ds.length}</span></div><div class="tw-timeline">`;rows.forEach((r,i)=>{const activity=String(r.activity||'').replace(/^rev:\s*/i,''),notes=pdfActivityNote(r),route=[r.from,r.to].filter(Boolean).join(' → '),transport=typeof r.workspace_pdf_transport==='string'?r.workspace_pdf_transport:String(r.transport||''),duration=typeof r.workspace_pdf_duration==='string'?r.workspace_pdf_duration:visibleWorkspaceDuration(r);html+=`<article class="tw-stop"><div class="tw-time">${esc(r.start||'')}<small>${esc(r.end||'')}</small></div><div class="tw-node"></div><div class="tw-stop-card"><h3>${esc(activity)}</h3><div class="tw-pills">${transport?`<span class="tw-pill">${esc(transport)}</span>`:''}${duration?`<span class="tw-pill">${esc(duration)}</span>`:''}</div>${(route||notes)?`<button class="tw-details-btn" type="button" data-detail="${i}">${esc(t.details)} ＋</button><div class="tw-details" id="tw-detail-${i}" hidden>${route?`<div class="tw-detail"><small>${esc(t.route)}</small><b>${esc(route)}</b></div>`:''}${transport?`<div class="tw-detail"><small>${esc(t.transport)}</small><b>${esc(transport)}</b></div>`:''}${duration?`<div class="tw-detail"><small>${esc(t.duration)}</small><b>${esc(duration)}</b></div>`:''}${notes?`<div class="tw-detail"><small>${esc(t.notes)}</small><b>${esc(notes)}</b></div>`:''}</div>`:''}</div></article>`});html+='</div>';$('#tw-content').innerHTML=html;document.querySelectorAll('[data-detail]').forEach(btn=>btn.onclick=()=>{const box=$(`#tw-detail-${btn.dataset.detail}`),open=!box.hidden;box.hidden=open;btn.textContent=(open?t.details:t.hide)+(open?' ＋':' −')})}
+function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[],b=base(city),date=b?fmt(addDays(b,day-1)):'',ds=days(city),idx=ds.indexOf(day);let html=`<div class="tw-day-header"><div><span class="tw-kicker">${esc(city)}</span><h2>${lang==='es'?'Día':'Day'} ${day}${date?` · ${esc(date)}`:''}</h2></div><span class="tw-day-count">${idx+1} / ${ds.length}</span></div><div class="tw-timeline">`;rows.forEach((r,i)=>{const activity=String(r.activity||'').replace(/^rev:\s*/i,''),notes=pdfActivityNote(r),route=[r.from,r.to].filter(Boolean).join(' → '),transport=typeof r.workspace_pdf_transport==='string'?r.workspace_pdf_transport:String(r.transport||''),duration=typeof r.workspace_pdf_duration==='string'?r.workspace_pdf_duration:visibleWorkspaceDuration(r);html+=`<article class="tw-stop"><div class="tw-time">${esc(r.start||'')}<small>${esc(r.end||'')}</small></div><div class="tw-node"></div><div class="tw-stop-card"><h3>${esc(activity)}</h3><div class="tw-pills">${transport?`<span class="tw-pill">${esc(transport)}</span>`:''}${duration?`<span class="tw-pill">${esc(duration)}</span>`:''}</div>${(route||notes)?`<button class="tw-details-btn" type="button" data-detail="${i}">${esc(t.details)} ＋</button><div class="tw-details" id="tw-detail-${i}" hidden>${route?`<div class="tw-detail"><small>${esc(t.route)}</small><b>${esc(route)}</b></div>`:''}${transport?`<div class="tw-detail"><small>${esc(t.transport)}</small><b>${esc(transport)}</b></div>`:''}${duration?`<div class="tw-detail"><small>${esc(t.duration)}</small><b>${esc(duration)}</b></div>`:''}${notes?`<div class="tw-detail"><small>${esc(t.notes)}</small><b>${esc(notes)}</b></div>`:''}</div>`:''}</div></article>`});html+='</div>';$('#tw-content').innerHTML=html;document.querySelectorAll('[data-detail]').forEach(btn=>btn.onclick=()=>{const box=$(`#tw-detail-${btn.dataset.detail}`),open=!box.hidden;box.hidden=open;btn.textContent=(open?t.details:t.hide)+(open?' ＋':' −')})}
 function _v67CommercialIntercityEndpoints_(origin='',destination=''){
   const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
   if(!a||!b||a===b)return false;
@@ -936,7 +907,7 @@ function v235CommercialMobilityNeed(item){
   const arrow=routeText.match(/^\s*([^→\n]+?)\s*→\s*([^→\n]+?)\s*$/);
   const origin=directOrigin||String(resolved?.parent?.origin||arrow?.[1]||'').trim();
   const destination=directDestination||String(resolved?.parent?.destination||arrow?.[2]||'').trim();
-  // V260: reject only confirmed local movements; all other providers and needs retain V254/V259 behavior.
+  // V261: exclude confirmed routine local movement before creating commercial cards.
   if(!rental&&v260RoutineLocalMobility(item,origin,destination))return false;
   // A rental decision has no endpoints; a rental station-access hop is local.
   if(rental)return !origin&&!destination || v236CommercialRoutePair(origin,destination);
