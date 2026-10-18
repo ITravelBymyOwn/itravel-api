@@ -1415,6 +1415,11 @@ function clearPlannerUIForLogout(){
 // This is UI/session lifecycle only and never deletes or mutates server-side trips.
 function enterFreshPlannerAfterAuth(){
   clearPlannerUIForLogout();
+  // V262: a fresh authenticated entry must not inherit TravelV2's in-memory
+  // Trip Story. Clearing only the local draft left the old flight and stays
+  // available to the guided editor, even after its UI had been reset.
+  try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
+  if(plannerState){ plannerState.travelModelV2=null; plannerState.preferencesV2=null; }
   renderAuthState();
   // Neutral authenticated landing: show only the primary planning CTA.
   // Keep saved trips, payment entitlements and route drafts untouched.
@@ -6625,24 +6630,6 @@ function _hasCriticalAuditErrors_(report={}){
   return (report?.errors||[]).some(error=>_auditSeverity_(error)>=10);
 }
 
-// V257: conservative identity guard for trip-wide duplicate warnings. A district,
-// promenade or square sharing a token with a museum/monument is not the same POI.
-// Do not change _arePoiAliases_: it also serves continuity and local matching.
-function _v257SameConcretePoi_(first={},second={}){
-  const a=String(first?.to||first?.activity||'');
-  const b=String(second?.to||second?.activity||'');
-  const raw=value=>String(value||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
-  const x=raw(a),y=raw(b);
-  if(!x||!y)return false;
-  const broad=/\b(plaza|square|calle|street|avenida|avenue|passeig|paseo|promenade|barrio|district|neighborhood|quarter|zona|area|entorno|alrededores)\b/;
-  const specific=/\b(museo|museum|templo|temple|catedral|cathedral|palacio|palace|castillo|castle|basilica|iglesia|church|galeria|gallery)\b/;
-  if((broad.test(x)&&specific.test(y))||(broad.test(y)&&specific.test(x)))return false;
-  // A named neighborhood and its street are not interchangeable experiences.
-  if(broad.test(x)!==broad.test(y) && x!==y &&
-    (x.includes(y)||y.includes(x)))return false;
-  return _arePoiAliases_(_poiKeyFromRow_(first),_poiKeyFromRow_(second));
-}
-
 function _v40DistinctPoiExperience_(a={},b={}){
   const text=row=>_canonicalText_(`${row?.activity||''} ${row?.notes||''}`);
   const exterior=txt=>/\b(exterior|outside|facade|fachada|panoramic|panoramica|panoramica|viewpoint|mirador|photo|fotograf|paseo nocturno|night walk)\b/i.test(txt);
@@ -7149,7 +7136,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         const poi=_poiKeyFromRow_(r);
         const physicalKey=_canonicalText_(r?.physical_location||r?.commerce_context?.physical_destination||city);
         for(const prior of seenPois){
-          if(prior.day!==day && _v111ExperienceVisitRow_(prior.row) && prior.physicalKey===physicalKey && _v257SameConcretePoi_(prior.row,r) && !_v40DistinctPoiExperience_(prior.row,r)){
+          if(prior.day!==day && _v111ExperienceVisitRow_(prior.row) && prior.physicalKey===physicalKey && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
             errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],first:prior.label,second:r.to||r.activity,physical_location:physicalKey});
             break;
           }
@@ -8677,7 +8664,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     for(const error of errors.filter(e=>e.code==='GLOBAL_DUPLICATE_POI')){
       const laterDay=Math.max(...(error.days||[]).map(Number).filter(Boolean));
       const arr=byDay[laterDay]||[];
-      const victim=arr.find(r=>!_isUtilityRow_(r) && _v257SameConcretePoi_(r,{to:error.second||''}));
+      const victim=arr.find(r=>!_isUtilityRow_(r) && _arePoiAliases_(r.to||r.activity,error.second||''));
       if(victim && !_isPureTransportRow_(victim)){
         const idx=out.indexOf(victim);
         if(idx>=0){ removed.push({day:laterDay,poi:victim.to||victim.activity}); out.splice(idx,1); changed=true; }
@@ -11351,6 +11338,15 @@ async function restorePaidGenerationIfNeeded(preferredTripId=""){
       storeActiveTripId(null);
       currentTripId=null;
       paymentGateSatisfiedTripId=null;
+      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
+      return;
+    }
+
+    // V262: a terminal publication marker wins over a stale server status.
+    // Do not hydrate a completed paid trip as an interrupted new journey.
+    if(_v71HasTripCompletionMarker_(trip.id)){
+      console.info('[ITBMO V262 RECOVERY] terminal trip excluded from automatic hydration');
+      storeActiveTripId(null);
       _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
       return;
     }
@@ -15522,7 +15518,23 @@ function _tripStoryEsc_(v=''){return String(v??'').replace(/[&<>"']/g,c=>({'&':'
 function _tripStoryId_(prefix='node'){try{return `${prefix}_${crypto.randomUUID()}`;}catch(_){return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2,9)}`;}}
 function _tripStoryAddDays_(iso,n){const d=new Date(`${iso}T12:00:00`);if(Number.isNaN(d.getTime()))return'';d.setDate(d.getDate()+Number(n||0));return d.toISOString().slice(0,10);}
 function _tripStoryDiffDays_(a,b){const x=new Date(`${a}T12:00:00`),y=new Date(`${b}T12:00:00`);if(Number.isNaN(x.getTime())||Number.isNaN(y.getTime()))return 0;return Math.round((y-x)/86400000);}
-function _tripStoryEffectiveDates_(story){const dates=new Set();for(const st of (story?.stays||[])){if(st?.transitOnly)continue;for(let i=0;i<Number(st?.days||0);i++){const window=st?.perDay?.[i];if(window && !window.start && !window.end)continue;const start=window?.start||DEFAULT_START,end=window?.end||DEFAULT_END;if(start&&end&&start>=end)continue;const date=_tripStoryAddDays_(st.startDate,i);if(date)dates.add(date);}}return dates;}
+function _tripStoryEffectiveDates_(story){
+  // V262: count distinct potentially tourable calendar dates, not configured
+  // time inputs. Empty hours mean "pending", not "transit". The required
+  // planning windows are validated independently before paid generation.
+  const dates=new Set();
+  for(const st of (story?.stays||[])){
+    if(st?.transitOnly)continue;
+    for(let i=0;i<Number(st?.days||0);i++){
+      const window=st?.perDay?.[i];
+      const start=window?.start||'',end=window?.end||'';
+      if(start&&end&&start>=end)continue;
+      const date=_tripStoryAddDays_(st.startDate,i);
+      if(date)dates.add(date);
+    }
+  }
+  return dates;
+}
 function _tripStoryDMY_(iso=''){const m=String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:'';}
 function _tripStoryTimeMinutes_(v=''){const m=String(v).match(/^(\d{2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):null;}
 function _tripStoryClampArrivalStart_(st){if(!st?.arrivalTime||!st?.perDay?.[0])return;const a=_tripStoryTimeMinutes_(st.arrivalTime),cur=_tripStoryTimeMinutes_(st.perDay[0].start);if(a!=null&&(cur==null||cur<a))st.perDay[0].start=st.arrivalTime;}
@@ -15545,7 +15557,8 @@ const ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY='itbmo_route_post_generation_clean_v
 function _tripStoryMarkGeneratedDraftComplete_(){
   try{localStorage.setItem(ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY,'1');}catch(_){}
   _tripStoryClearDraft_();
-  // The generated itinerary and the TravelV2 engine state are intentionally untouched.
+  // Keep the generated itinerary available in its workspace, but remove
+  // editable builder snapshots that could resurrect it as a new journey.
 }
 function _tripStoryUseEmptyAfterGeneration_(){
   try{return localStorage.getItem(ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY)==='1';}catch(_){return false;}
@@ -15796,7 +15809,7 @@ function openTripStoryBuilder(){
   const completedRouteMustStartEmpty=_tripStoryUseEmptyAfterGeneration_();
   let story=JSON.parse(JSON.stringify(completedRouteMustStartEmpty
     ? _tripStoryEmptyForNextJourney_()
-    : ((sessionMatches&&builderSession.story) || minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryCurrent_())));
+    : ((sessionMatches&&builderSession.story) || minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryEmptyForNextJourney_())));
   story.start=story.start||{date:'',transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:''};
   story.returnTrip=story.returnTrip||{enabled:false,transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:''};
   story.stays=(story.stays||[]).map(_tripStoryEnsureStay_);
