@@ -1010,7 +1010,7 @@ async function refreshPendingVerification(){
         stopPendingVerificationWatch();
         setAccountMessage(authCopy('confirmationComplete'),'success');
         renderAuthState();
-        enterFreshPlannerAndCheckPaidRecovery();
+        enterFreshPlannerAfterAuth();
       }
     }
   }catch(err){ console.warn('ITBMO confirmation watch unavailable:',err); }
@@ -1161,7 +1161,7 @@ async function loginITBMOUser(){
   try{
     const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAndCheckPaidRecovery(); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); return;
     }
     setAccountMessage(authCopy('loginFail'),'error');
   }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1178,7 +1178,7 @@ async function continueAsGuest(){
   try{
     const {response,data}=await postUserAction({action:'guest',name,email,...authTrackingPayload(),...legalPayload('guest')});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAndCheckPaidRecovery(); return;
+      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); return;
     }
     if(response.status===409 && data?.account_exists) setAccountMessage(authCopy('guestHasAccount'),'error');
     else if(response.status===403 && data?.guest_mismatch) setAccountMessage(authCopy('guestMismatch'),'error');
@@ -1215,7 +1215,7 @@ async function completeEmailConfirmation(accessToken){
   try{
     const {response,data}=await postUserAction({action:'complete_auth',access_token:accessToken});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); enterFreshPlannerAndCheckPaidRecovery(); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); enterFreshPlannerAfterAuth(); return;
     }
     setAccountMessage(authCopy('confirmationFail'),'error');
   }catch(err){ console.error('ITBMO confirmation error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1284,7 +1284,7 @@ async function restoreITBMOSession({broadcast=true}={}){
         storeSessionToken(token,Boolean(currentUser.is_registered),{broadcast});
         authReady=true;
         renderAuthState();
-        if(!openRequestedMyTripsView()) enterFreshPlannerAndCheckPaidRecovery();
+        if(!openRequestedMyTripsView()) enterFreshPlannerAfterAuth();
         return;
       }
 
@@ -1311,7 +1311,7 @@ async function restoreITBMOSession({broadcast=true}={}){
   authReady=true;
   renderAuthState();
   if(currentUser){
-    if(!openRequestedMyTripsView()) enterFreshPlannerAndCheckPaidRecovery();
+    if(!openRequestedMyTripsView()) enterFreshPlannerAfterAuth();
   }
 }
 
@@ -1426,14 +1426,7 @@ function enterFreshPlannerAfterAuth(){
   document.body.classList.add('itbmo-builder-closed-clean');
 }
 
-// V241: Restore the original post-auth paid-generation recovery hook.
-// A fresh UI never hydrates an ordinary draft; only the server-confirmed
-// generating/failed paid trip may override the clean landing.
-function enterFreshPlannerAndCheckPaidRecovery(){
-  const pendingTripId=currentTripId || getStoredActiveTripId();
-  enterFreshPlannerAfterAuth();
-  setTimeout(()=>restorePaidGenerationIfNeeded(pendingTripId),0);
-}
+// V264: Main contract: authentication opens a clean Planner; never auto-hydrate historical trips.
 
 async function logoutITBMOUser(){
   const token=getStoredSessionToken();
@@ -11291,21 +11284,25 @@ function bindJourneyHome(){
 }
 
 function _plannerOwnsAutomaticGenerationRecovery_(){
-  // V241: Planner is legitimately embedded by Home. Do not suppress paid
-  // recovery merely because the authenticated Planner runs in an iframe.
+  // Automatic paid-generation recovery belongs only to the standalone Planner.
+  // preview-home embeds planner.html as an iframe for interactive product preview;
+  // loading the public website must never resume a paid generation in that frame.
+  // A generation explicitly started by the traveler inside the embedded Planner is
+  // unaffected: this guard applies only to automatic restore on page/session load.
+  try{
+    if(window.self!==window.top) return false;
+  }catch(_){ return false; }
   return /(?:^|\/)planner\.html$/i.test(String(window.location.pathname||''));
 }
 
-let _v241RecoveryCheckRunning=false;
-async function restorePaidGenerationIfNeeded(preferredTripId=""){
+async function restorePaidGenerationIfNeeded(){
   if(!_plannerOwnsAutomaticGenerationRecovery_()) return;
-  if(generationResetInProgress || paidGenerationRunning || _v241RecoveryCheckRunning || !currentUser || !getStoredSessionToken()) return;
-  _v241RecoveryCheckRunning=true;
+  if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   const restoreEpoch=generationRunEpoch;
   try{
     const token=getStoredSessionToken();
     const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
-    let tripId=requestedTripId || preferredTripId || getStoredActiveTripId();
+    let tripId=requestedTripId || getStoredActiveTripId();
     let trip=null;
 
     if(requestedTripId) storeActiveTripId(requestedTripId);
@@ -11320,12 +11317,9 @@ async function restorePaidGenerationIfNeeded(preferredTripId=""){
       }
     }
 
-    if(!trip || !['generating','failed'].includes(trip.status)){
-      // V245: A stale active generated/saved ID cannot hide a different
-      // interrupted paid generation. Never hydrate historical exports.
+    if(!trip){
       const data=await tripApi({action:'recoverable',session_token:token});
-      const recoverable=data?.trip || null;
-      trip=(recoverable && ['generating','failed'].includes(recoverable.status)) ? recoverable : null;
+      trip=data?.trip || null;
     }
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
     if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
@@ -11341,15 +11335,6 @@ async function restorePaidGenerationIfNeeded(preferredTripId=""){
       storeActiveTripId(null);
       currentTripId=null;
       paymentGateSatisfiedTripId=null;
-      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
-      return;
-    }
-
-    // V262: a terminal publication marker wins over a stale server status.
-    // Do not hydrate a completed paid trip as an interrupted new journey.
-    if(_v71HasTripCompletionMarker_(trip.id)){
-      console.info('[ITBMO V262 RECOVERY] terminal trip excluded from automatic hydration');
-      storeActiveTripId(null);
       _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
       return;
     }
@@ -11390,17 +11375,12 @@ async function restorePaidGenerationIfNeeded(preferredTripId=""){
         : 'ITBMO detected an interrupted generation and will continue from the last saved city.','ai');
       setTimeout(()=>runPaidGeneration(),180);
     }else if(trip.status==='failed'){
-      chatMsg(getLang()==='es'
-        ? 'ITBMO recuperó la generación pendiente e iniciará un nuevo intento.'
-        : 'ITBMO recovered the pending generation and will start another attempt.','ai');
-      setTimeout(()=>runPaidGeneration(),180);
+      _showGenerationRetry_();
     }else{
       _applyGeneratedUIState({showModal:false});
     }
   }catch(err){
     console.warn('[GENERATION RESTORE]',err);
-  }finally{
-    _v241RecoveryCheckRunning=false;
   }
 }
 
