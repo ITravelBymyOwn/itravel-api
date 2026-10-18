@@ -4982,13 +4982,20 @@ function _v126TransportText_(value){
   return [...new Set([...direct,...estimate,...alternatives])].join(' · ');
 }
 
+// V266 — Canonical transport boundary. Never coerce an object with String(object).
+// Existing V126 serializer is authoritative; an already-corrupt literal is not recoverable.
+function _v266CanonicalTransport_(value){
+  const normalized=_v126TransportText_(value);
+  return /\[object Object\]/i.test(normalized) ? normalized.replace(/\[object Object\]/gi,'').replace(/\s*·\s*·\s*/g,' · ').trim() : normalized;
+}
+
 function normalizeRow(r = {}, fallbackDay = 1){
   const startRaw = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
   const endRaw   = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
   const act      = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
   const from     = r.from ?? r.origin ?? r.origen ?? '';
   const to       = r.to   ?? r.destination ?? r.destino ?? '';
-  const trans    = _v126TransportText_(r.transport ?? r.transportMode ?? r.modo_transporte ?? '');
+  const trans    = _v266CanonicalTransport_(r.transport ?? r.transportMode ?? r.modo_transporte ?? '');
   const durRaw   = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes    = r.notes ?? r.nota ?? r.comentarios ?? '';
   const kindRaw  = r.kind ?? r.type ?? r.tipo ?? '';
@@ -8361,6 +8368,52 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   return {errors};
 }
 
+// V266 — Cross-stay diagnostic audit (advisory, never blocks publishing).
+// Uses actual overnight return and following-day departure; does not infer weather
+// or invent coordinates. A location A→B→A loop is flagged only as a review candidate.
+function _v266CrossStayAdvisories_(rows=[]){
+  const issues=[];
+  const byDay=_rowsByDayObject_(rows);
+  const days=Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
+  for(const day of days){
+    const current=[...(byDay[day]||[])].sort(_v114LogicalRowCompare_);
+    for(let i=0;i<current.length;i++){
+      const row=current[i];
+      if(/\[object Object\]/i.test(String(row?.transport||''))){
+        issues.push({code:'TRANSPORT_SERIALIZATION',day,row:i+1});
+      }
+    }
+    const prev=byDay[day-1]||[];
+    let lastNightEnd=null;
+    for(const r of prev){
+      const s=_hhmmToMinutes_(r.start),e=_hhmmToMinutes_(r.end);
+      if(s==null||e==null)continue;
+      // Midnight continuation: row begins in the evening and ends the next day.
+      if(e<=s && s>=1080)lastNightEnd=Math.max(lastNightEnd??0,e);
+      // Explicit next-day clock suffix is a presentation concern; preserve the
+      // chronological meaning without reassigning the owner-day.
+    }
+    if(lastNightEnd!=null){
+      const starts=current.map(r=>_hhmmToMinutes_(r.start)).filter(x=>x!=null);
+      if(starts.length){
+        const first=Math.min(...starts);
+        const rest=first-lastNightEnd;
+        if(rest<480)issues.push({code:'SHORT_POST_NIGHT_REST',day,rest_minutes:rest,night_finish:lastNightEnd,first_departure:first});
+      }
+    }
+    // Detect literal A→B→A travel chains, but never reorder automatically:
+    // there may be reservations, meals, user-fixed movements or one-way roads.
+    const moves=current.filter(r=>_isPureTransportRow_(r)&&String(r.from||'').trim()&&String(r.to||'').trim());
+    for(let i=0;i+1<moves.length;i++){
+      const a=moves[i],b=moves[i+1];
+      if(_arePoiAliases_(a.from,b.to)&&_arePoiAliases_(a.to,b.from)&&!_arePoiAliases_(a.from,a.to)){
+        issues.push({code:'POSSIBLE_ROUTE_BACKTRACK',day,from:a.from,via:a.to,return_to:b.to});
+      }
+    }
+  }
+  return issues;
+}
+
 function _v3IssueFingerprint_(report={}){
   return JSON.stringify((report?.errors||[]).map(e=>({code:e?.code,day:e?.day,row:e?.row,days:e?.days,to:e?.to,transport:e?.transport})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))));
 }
@@ -8390,16 +8443,18 @@ function _v3FitDurationToInterval_(row={}){
   if(span<=0) return row;
   const [transportLabel,activityLabel]=_durationLabels_();
   if(_isPureTransportRow_(row)){
-    const existing=_transportBoundsFromField_(row.transport||'');
-    const transport=existing?String(row.transport||'').trim():[String(row.transport||'').trim(),`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
+    const normalizedTransport=_v266CanonicalTransport_(row.transport);
+    const existing=_transportBoundsFromField_(normalizedTransport);
+    const transport=existing?normalizedTransport:[normalizedTransport,`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
     return {...row,transport,duration:''};
   }
-  const transport=_transportBoundsFromField_(row.transport||'') || _durationBoundsMinutes_(_extractDurationPart_(row.duration,'transport'));
+  const normalizedTransport=_v266CanonicalTransport_(row.transport);
+  const transport=_transportBoundsFromField_(normalizedTransport) || _durationBoundsMinutes_(_extractDurationPart_(row.duration,'transport'));
   const transportMinutes=Math.max(0,Math.min(span-1,Number(transport?.max||0)));
   const activityMinutes=Math.max(1,span-transportMinutes);
-  const transportField=transportMinutes>0 && !_transportBoundsFromField_(row.transport||'')
-    ? [String(row.transport||'').trim(),`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
-    : String(row.transport||'').trim();
+  const transportField=transportMinutes>0 && !_transportBoundsFromField_(normalizedTransport)
+    ? [normalizedTransport,`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
+    : normalizedTransport;
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
@@ -10049,6 +10104,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     const finalReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
     const blockingErrors=[...(finalReport.errors||[]),..._v70ExactPhysicalUnitConservation_(rows,generated.stayResults||[])];
     console.info(`[ITBMO V3 MERGE HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:blockingErrors}),blockingErrors);
+    console.info('[ITBMO V266 CROSS-STAY ADVISORY] trip',_v266CrossStayAdvisories_(rows));
     _v3LogAuditDetails_('MERGED TRIP HARD AUDIT','trip','all-stays',blockingErrors);
     if(blockingErrors.length){
       const error=new Error(`V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE:trip`);
@@ -12494,7 +12550,7 @@ function _v39VisibleDuration_(row={}){
 }
 
 function _v3VisibleTransportLabel_(value){
-  const raw=_v126TransportText_(value);
+  const raw=_v266CanonicalTransport_(value);
   if(!raw)return '';
   if(/^recomi[eé]ndame$/i.test(raw)||/^recommend$/i.test(raw)||/^recommend me$/i.test(raw)) return getLang()==='es'?'Por definir · ITBMO te ayudará a elegir':'To be decided · ITBMO will help you choose';
   return raw.replace(/\/(recomendado|recommended)/ig,'').replace(/\s{2,}/g,' ').trim();
