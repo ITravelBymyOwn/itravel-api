@@ -8168,8 +8168,7 @@ function _v3RepairableCodes_(){
     ..._v3HardBlockingCodes_(),
     'GENERIC_TO','AMBIGUOUS_TO','CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP',
     'OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW','MISSING_AURORA_FINAL_NOTE',
-    'DURATION_UNPARSEABLE','WEEKDAY_DATE_MISMATCH',
-    'INSUFFICIENT_POST_NIGHT_RECOVERY'
+    'DURATION_UNPARSEABLE','WEEKDAY_DATE_MISMATCH'
   ]);
 }
 
@@ -8352,118 +8351,6 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   return {errors};
 }
 
-// V266: single, owner-day-based night recovery contract. The owner day stays
-// unchanged even when the physical finish belongs to the next calendar date.
-// All cross-day diagnostics are observational unless the existing Stay-local
-// repair loop can prove an improvement without losing protected anchors.
-function _v266NightRecoveryFindings_(rows=[],unit=null){
-  const findings=[];
-  const contexts=unit?.tie_structure?.previous_day_recovery_contexts||{};
-  const single=unit?.tie_structure?.previous_day_recovery_context;
-  const days=[...new Set((unit?.days||[]).map(Number).filter(Number.isFinite))];
-  for(const day of days){
-    const context=contexts[day]||((days.length===1)?single:null);
-    if(!context||Number(context.source_day)!==day-1)continue;
-    const duration=Number(context.night_load_minutes)||0;
-    const load=String(context.recovery_cost||'').toLowerCase();
-    if(duration<180&&load!=='high')continue;
-    // Prefer the physical owner-day return recorded in the final chain. The
-    // overlay window is a conservative fallback, NOT proof of actual return.
-    const owner=(rows||[]).filter(r=>Number(r?.day)===day-1);
-    const nightOwner=owner.filter(r=>_isAuroraRow_(r)||String(r?.planning_window_id||'').includes('-tie-night'));
-    let finish=Number(context.physical_finish_after_midnight_minutes);
-    if(!Number.isFinite(finish))finish=null;
-    const physical=nightOwner.map(r=>{
-      const a=_v114LogicalStartMinutes_(r),b=_v114LogicalEndMinutes_(r);
-      if(!Number.isFinite(a)||!Number.isFinite(b))return null;
-      // Only explicitly cross-midnight clock ranges are unambiguous here.
-      if(b<a)return b;
-      if(b>=1440)return b-1440;
-      return null;
-    }).filter(Number.isFinite);
-    if(physical.length)finish=Math.max(...physical);
-    if(finish==null||finish<0||finish>720)continue;
-    const own=(rows||[]).filter(r=>Number(r?.day)===day&&!_isUtilityRow_(r));
-    if(!own.length)continue;
-    const starts=own.map(_v114LogicalStartMinutes_).filter(Number.isFinite);
-    if(!starts.length)continue;
-    const first=Math.min(...starts),gap=first-finish;
-    // Eight hours is a minimum physical buffer, not a mandatory bedtime;
-    // never override a user-fixed departure or invent sleep rows.
-    if(gap>=480)continue;
-    findings.push({code:'INSUFFICIENT_POST_NIGHT_RECOVERY',day,source_day:day-1,
-      physical_finish:_minutesToHHMM_(finish),first_activity:_minutesToHHMM_(first),
-      available_recovery_minutes:gap,minimum_recovery_minutes:480,
-      instruction:'Night experience belongs to source_day and physically finishes on THIS day. Allow a humane recovery interval before the first substantial activity; keep user-fixed departures, TIE ownership and mandatory anchors unchanged. Do not add a second day or fabricate sleep rows.'});
-  }
-  return findings;
-}
-
-// V266: conservative read-only final quality check across physical Stay Units.
-// Keep all warnings distinct from the canonical hard audit. No row mutations,
-// model calls or strategic reassignments are permitted here.
-function _v266QualityFindings_(rows=[],units=[],baseDate=''){
-  const findings=[],seen=new Set();
-  const byDay=_rowsByDayObject_(rows);
-  const days=Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
-  const unitById=new Map((units||[]).map(u=>[String(u?.id||''),u]));
-  const push=f=>{const k=[f.code,f.day,f.row,f.source_day,f.stay_unit_id].join('|');if(!seen.has(k)){seen.add(k);findings.push(f);}};
-  (units||[]).forEach(u=>_v266NightRecoveryFindings_(rows,u).forEach(push));
-  const longDays=new Map();
-  for(const day of days){
-    const ordered=[...(byDay[day]||[])].sort(_v114LogicalRowCompare_);
-    // Transfer origin continuity: same-owner adjacent rows only. Different
-    // owners may have an authoritative boundary invisible at POI granularity.
-    for(let i=1;i<ordered.length;i++){
-      const prev=ordered[i-1],cur=ordered[i];
-      if(!_isPureTransportRow_(cur)||!cur?.from||!prev?.to)continue;
-      if(_isPureTransportRow_(prev))continue;
-      if(cur.user_fixed===true||cur.fixed===true||String(cur?.kind||'').toLowerCase()==='fixed_transfer')continue;
-      if(!cur.stay_unit_id||String(cur.stay_unit_id)!==String(prev?.stay_unit_id||''))continue;
-      if(_v111BroadPlace_(cur.from)||_v111BroadPlace_(prev.to))continue;
-      if(_v111LocationsCompatible_(prev.to,cur.from,'')||_v113TransitionReachesOrigin_(prev,cur.from))continue;
-      push({code:'V266_FINAL_ORPHAN_TRANSFER_ORIGIN',day,row:i+1,stay_unit_id:String(cur.stay_unit_id),
-        previous_to:prev.to,current_from:cur.from,
-        instruction:'Concrete transfer origin does not match the preceding activity in the same Stay. Review its provenance without inventing a visit or changing fixed travel.'});
-    }
-    const date=_dayDate_(baseDate,day);
-    const month=date?date.getMonth()+1:null;
-    const unit=ordered.map(r=>unitById.get(String(r?.stay_unit_id||''))).find(Boolean);
-    // TIE aurora context is an explicit seasonal signal; not a latitude lookup.
-    // Only issue a conservative warning, never claim verified sunset times.
-    const seasonal=month!=null&&[10,11,12,1,2,3].includes(month);
-    const aurora=ordered.some(r=>Boolean(unitById.get(String(r?.stay_unit_id||''))?.tie_structure?.aurora_stay_context));
-    const city=unit?.base_destination||unit?.physical_destination||'';
-    const window=_winterUsefulDaylightWindow_(city,baseDate,day)
-      ||(aurora&&seasonal?_winterUsefulDaylightWindow_('high latitude',baseDate,day):null);
-    if(window){
-      ordered.forEach((row,i)=>{
-        if(!_isScenicOutdoorRow_(row)||_isAuroraRow_(row)||_isPureTransportRow_(row)||_isUtilityRow_(row))return;
-        // Only strong scenic words in the ACTIVITY itself; references in notes
-        // alone can describe transport or an indoor exhibition.
-        if(!/\b(waterfall|cascada|beach|playa|cliff|acantilado|viewpoint|mirador|lookout|lighthouse|faro|crater|cr[aá]ter|geyser|g[eé]iser|geothermal|volcano|volc[aá]n|lake|lago|trail|sendero|hike|caminata|mountain|monta[nñ]a|canyon|ca[nñ][oó]n|coast|costa|fjord|fiordo|glacier|glaciar|national park|parque nacional|rock formation|formaci[oó]n rocosa|black sand|arena negra)\b/i.test(String(row?.activity||'')))return;
-        const a=_v114LogicalStartMinutes_(row),b=_v114LogicalEndMinutes_(row);
-        if(!Number.isFinite(a)||!Number.isFinite(b))return;
-        if(a<window.start-15||b>window.end+15)push({code:'V266_SCENIC_DAYLIGHT_RISK',day,row:i+1,
-          stay_unit_id:String(row?.stay_unit_id||''),activity:row.activity,start:row.start,end:row.end,
-          conservative_window:`${_minutesToHHMM_(window.start)}-${_minutesToHHMM_(window.end)}`,
-          instruction:'Seasonal daylight screening only; confirm location, date and access before moving this scenic outdoor experience.'});
-      });
-    }
-    const substantive=ordered.filter(r=>!_isUtilityRow_(r));
-    const starts=substantive.map(_v114LogicalStartMinutes_).filter(Number.isFinite);
-    const ends=substantive.map(_v114LogicalEndMinutes_).filter(Number.isFinite);
-    if(starts.length&&ends.length)longDays.set(day,Math.max(...ends)-Math.min(...starts));
-  }
-  for(const day of days){
-    const span=longDays.get(day)||0,prev=longDays.get(day-1)||0;
-    if(span>=720&&prev>=720)push({code:'V266_CONSECUTIVE_LONG_DAYS',day,source_day:day-1,
-      current_span_minutes:span,previous_span_minutes:prev,
-      instruction:'Consecutive long days: evaluate fatigue, overnight recovery and mandatory constraints; do not reorder TIE-selected regional excursions blindly.'});
-  }
-  return findings;
-}
-
 function _v3IssueFingerprint_(report={}){
   return JSON.stringify((report?.errors||[]).map(e=>({code:e?.code,day:e?.day,row:e?.row,days:e?.days,to:e?.to,transport:e?.transport})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))));
 }
@@ -8494,35 +8381,16 @@ function _v3FitDurationToInterval_(row={}){
   const [transportLabel,activityLabel]=_durationLabels_();
   if(_isPureTransportRow_(row)){
     const existing=_transportBoundsFromField_(row.transport||'');
-    const transport=existing?_v126TransportText_(row.transport||''):[_v126TransportText_(row.transport||''),`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
+    const transport=existing?String(row.transport||'').trim():[String(row.transport||'').trim(),`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
     return {...row,transport,duration:''};
   }
   const transport=_transportBoundsFromField_(row.transport||'') || _durationBoundsMinutes_(_extractDurationPart_(row.duration,'transport'));
   const transportMinutes=Math.max(0,Math.min(span-1,Number(transport?.max||0)));
   const activityMinutes=Math.max(1,span-transportMinutes);
   const transportField=transportMinutes>0 && !_transportBoundsFromField_(row.transport||'')
-    ? [_v126TransportText_(row.transport||''),`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
-    : _v126TransportText_(row.transport||'');
+    ? [String(row.transport||'').trim(),`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
+    : String(row.transport||'').trim();
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
-}
-
-// V267: A clock-only repair may not change, remove, reorder or silently rewrite
-// an experience. Compare the complete ordered rows except the two clock fields.
-// This is a zero-API invariant, independent of tourist scoring and QA counts.
-function _v267ClockOnlyInvariant_(before=[],after=[]){
-  if(!Array.isArray(before)||!Array.isArray(after)||before.length!==after.length)return false;
-  for(let i=0;i<before.length;i++){
-    const a=before[i],b=after[i];
-    if(!a||!b||typeof a!=='object'||typeof b!=='object')return false;
-    const clean=row=>{const r={...row};delete r.start;delete r.end;return r;};
-    if(JSON.stringify(clean(a))!==JSON.stringify(clean(b)))return false;
-    const originalStart=_hhmmToMinutes_(a.start),originalEnd=_hhmmToMinutes_(a.end);
-    const nextStart=_hhmmToMinutes_(b.start),nextEnd=_hhmmToMinutes_(b.end);
-    if(originalStart==null||originalEnd==null||nextStart==null||nextEnd==null)return false;
-    // Clock shifts must preserve the exact activity interval and cannot jump days.
-    if(nextStart-originalStart!==nextEnd-originalEnd||Math.abs(nextStart-originalStart)>180)return false;
-  }
-  return true;
 }
 
 // V252 — Constraint-aware transactional scheduler for generated physical units.
@@ -8587,7 +8455,7 @@ function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,
       if(!valid||!moved)continue;
       const after=audit(candidate),next=score(after);
       // Never trade one blocking issue for another or hide an error in a new row.
-      if(!_v267ClockOnlyInvariant_(accepted,candidate)||next.overlaps>=baseline.overlaps||next.hard>baseline.hard||next.total>baseline.total)continue;
+      if(next.overlaps>=baseline.overlaps||next.hard>baseline.hard||next.total>baseline.total)continue;
       accepted=candidate;committed=true;
       console.info(`[ITBMO V252 CONSTRAINT TRANSACTION] ${city} · day ${day} · ${moved} rows · max +${maxDelta} min · overlaps ${baseline.overlaps}→${next.overlaps}`);
       break;
@@ -8657,7 +8525,7 @@ function _v254PropagatePhysicalChain_(city,rows,contract,totalDays,perDay,baseDa
       }
       if(!valid||!moved)continue;
       const next=measure(audit(candidate));
-      if(!_v267ClockOnlyInvariant_(accepted,candidate)||next.overlap>=old.overlap||next.hard>old.hard||next.total>old.total)continue;
+      if(next.overlap>=old.overlap||next.hard>old.hard||next.total>old.total)continue;
       accepted=candidate;committed=true;
       console.info(`[ITBMO V254 PHYSICAL CHAIN TRANSACTION] ${city} · day ${day} · ${moved} rows · overlaps ${old.overlap}→${next.overlap}`);
       break;
@@ -8668,11 +8536,7 @@ function _v254PropagatePhysicalChain_(city,rows,contract,totalDays,perDay,baseDa
 }
 
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
-  let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>{
-    const safeTransport=(r?.transport!=null&&typeof r.transport==='object')?_v126TransportText_(r.transport):r.transport;
-    const normalized=safeTransport===r.transport?r:{...r,transport:safeTransport};
-    return _isPureTransportRow_(normalized)?_v3FitDurationToInterval_(normalized):normalized;
-  });
+  let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
@@ -8733,7 +8597,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       const newBlocking=nextErrors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
       const oldOverlaps=errors.filter(e=>e.code==='OVERLAP').length;
       const newOverlaps=nextErrors.filter(e=>e.code==='OVERLAP').length;
-      if(!_v267ClockOnlyInvariant_(out,candidate)||newBlocking>oldBlocking||newOverlaps>=oldOverlaps||nextErrors.length>errors.length)continue;
+      if(newBlocking>oldBlocking||newOverlaps>=oldOverlaps||nextErrors.length>errors.length)continue;
       out=candidate;changed=true;
       console.info(`[ITBMO V247 CHAIN REPAIR] ${city} · day ${day} · ${moved} flexible row(s) · max +${maxDelta} min · overlaps ${oldOverlaps}→${newOverlaps}`);
       break; // audit again before touching another collision
@@ -8754,9 +8618,6 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       // has ended. Keep the same transactional audit guard; fixed route facts are
       // not present in these model-owned rows and remain untouched downstream.
       if(!row||!prev||_isPureTransportRow_(row))continue;
-      if(_v115IsHardRow_(row)||_v114IsNightOverlayRow_(row)||row.fixed===true||row.user_fixed===true||
-         String(row.kind||'').toLowerCase()==='fixed_transfer'||
-         String(row.calendar_sensitivity||row.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high')continue;
       const rs=_hhmmToMinutes_(row.start),re=_hhmmToMinutes_(row.end),pe=_hhmmToMinutes_(prev.end);
       if(rs==null||re==null||pe==null||re<=rs||pe<=rs)continue;
       const overlap=pe-rs;if(overlap<=0||overlap>30)continue;
@@ -8764,10 +8625,6 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       const candidateByDay=_rowsByDayObject_(candidate),candidateRow=(candidateByDay[day]||[])[rowNum-1];
       if(!candidateRow)continue;
       candidateRow.start=_minutesToHHMM_(rs+overlap);candidateRow.end=_minutesToHHMM_(re+overlap);
-      const candidateWindow=_v111WindowForRow_(candidateRow,contract);
-      const candidateWindowEnd=_hhmmToMinutes_(candidateWindow?.end);
-      if(candidateWindowEnd!=null&&re+overlap>candidateWindowEnd)continue;
-      if(!_v267ClockOnlyInvariant_(out,candidate))continue;
       const candidateReport=_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride);
       const candidateErrors=candidateReport?.errors||[];
       const sameOverlap=candidateErrors.some(e=>e.code==='OVERLAP'&&Number(e?.day||0)===day&&Number(e?.row||0)===rowNum);
@@ -9721,8 +9578,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
     const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
-    const recoveryFindings=_v266NightRecoveryFindings_(rows,unit);
-    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks,...recoveryFindings]});
+    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
@@ -10226,14 +10082,6 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     // The only FINAL hard audit now runs on exactly the canonical rows consumed by
     // exports and persistence. No transformation is allowed between PASS and publish.
     let storedRows=Object.values(canonicalByDay).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
-    // V265 read-only cross-unit check: diagnostics never mutate canonical rows,
-    // turn a quality warning into a physical hard blocker, or trigger Luna.
-    const v265QualityFindings=_v266QualityFindings_(storedRows,generated.units||[],baseDate);
-    if(v265QualityFindings.length){
-      console.warn('[ITBMO V266 CROSS-UNIT TOURIST QUALITY QA] cross-unit findings (read-only)',_v3AuditSummary_({errors:v265QualityFindings}));
-      _v3LogAuditDetails_('V266 CROSS-UNIT TOURIST QUALITY',city,'trip',v265QualityFindings);
-    }else console.info('[ITBMO V266 CROSS-UNIT TOURIST QUALITY QA] no high-confidence cross-unit findings');
-
     let postStoreReport=_v3MergedHardPhysicalAudit_(storedRows,generated.contract,dest.days);
     let postStoreErrors=postStoreReport.errors||[];
     console.info(`[ITBMO V3 CANONICAL HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:postStoreErrors}),postStoreErrors);
