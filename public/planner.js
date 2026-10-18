@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V250';
-const ITBMO_RUNTIME_ASSET='planner.js?v=252';
+const ITBMO_RUNTIME_BUILD='V156';
+const ITBMO_RUNTIME_ASSET='planner.js?v=274';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -175,7 +175,7 @@ const DEFAULT_START = '';
 const DEFAULT_END   = '';
 const MAX_ITINERARY_CITIES = 1; // V2.7 compatibility shell: one continuous Trip Story
 const MAX_TRIP_STORY_DAYS = 30;
-const MAX_DAYS_PER_DESTINATION = 90; // Calendar envelope for Trip Story; effective-day commercial cap remains 30
+const MAX_DAYS_PER_DESTINATION = 30; // Trip Story compatibility shell may span the full continuous journey
 
 let plannerState = {
   destinations: [],
@@ -1243,7 +1243,6 @@ async function resetITBMOPassword(){
 function wantsMyTripsView(){
   return String(new URLSearchParams(window.location.search).get('view') || '').trim().toLowerCase()==='my-trips';
 }
-
 function openRequestedMyTripsView(){
   if(!wantsMyTripsView() || !currentUser || !getStoredSessionToken()) return false;
   try{
@@ -1284,7 +1283,13 @@ async function restoreITBMOSession({broadcast=true}={}){
         storeSessionToken(token,Boolean(currentUser.is_registered),{broadcast});
         authReady=true;
         renderAuthState();
-        if(!openRequestedMyTripsView()) enterFreshPlannerAfterAuth();
+        if(!openRequestedMyTripsView()){
+          // Preserve only the pointer to this browser's interrupted paid run
+          // across the deliberate fresh-UI reset; never hydrate completed trips.
+          const interruptedTripId=getStoredActiveTripId();
+          enterFreshPlannerAfterAuth();
+          if(interruptedTripId) void restorePaidGenerationIfNeeded(interruptedTripId);
+        }
         return;
       }
 
@@ -1311,7 +1316,11 @@ async function restoreITBMOSession({broadcast=true}={}){
   authReady=true;
   renderAuthState();
   if(currentUser){
-    if(!openRequestedMyTripsView()) enterFreshPlannerAfterAuth();
+    if(!openRequestedMyTripsView()){
+      const interruptedTripId=getStoredActiveTripId();
+      enterFreshPlannerAfterAuth();
+      if(interruptedTripId) void restorePaidGenerationIfNeeded(interruptedTripId);
+    }
   }
 }
 
@@ -1415,18 +1424,9 @@ function clearPlannerUIForLogout(){
 // This is UI/session lifecycle only and never deletes or mutates server-side trips.
 function enterFreshPlannerAfterAuth(){
   clearPlannerUIForLogout();
-  // V262: a fresh authenticated entry must not inherit TravelV2's in-memory
-  // Trip Story. Clearing only the local draft left the old flight and stays
-  // available to the guided editor, even after its UI had been reset.
-  try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
-  if(plannerState){ plannerState.travelModelV2=null; plannerState.preferencesV2=null; }
   renderAuthState();
-  // Neutral authenticated landing: show only the primary planning CTA.
-  // Keep saved trips, payment entitlements and route drafts untouched.
-  document.body.classList.add('itbmo-builder-closed-clean');
+  document.body.classList.remove('itbmo-builder-closed-clean');
 }
-
-// V264: Main contract: authentication opens a clean Planner; never auto-hydrate historical trips.
 
 async function logoutITBMOUser(){
   const token=getStoredSessionToken();
@@ -2207,35 +2207,44 @@ function addMinutes(hhmm, min){
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-// V226: one HH:MM control, 15-minute increments. Keep previously saved
-// non-quarter times intact instead of rounding confirmed user transport times.
-function timeSelectOptions(value=''){
-  const current=String(value||'');
-  const options=Array.from({length:96},(_,i)=>`${String(Math.floor(i/4)).padStart(2,'0')}:${String((i%4)*15).padStart(2,'0')}`);
-  if(/^([01]\d|2[0-3]):[0-5]\d$/.test(current)&&!options.includes(current))options.push(current);
-  options.sort();
-  return `<option value="">--:--</option>`+options.map(v=>`<option value="${v}" ${v===current?'selected':''}>${v}</option>`).join('');
+function timeSelectOptions(kind='hour'){
+  if(kind==='minute'){
+    return `<option value="">00</option>${['15','30','45'].map(v=>`<option value="${v}">${v}</option>`).join('')}`;
+  }
+  const values=Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
+  return `<option value="">--</option>${values.map(v=>`<option value="${v}">${v}</option>`).join('')}`;
 }
+
 function timeSelectorMarkup(type,ariaLabel){
   const visibleLabel=type==='start' ? t('uiStartTime') : t('uiEndTime');
   return `<div class="time-selector" data-time-type="${type}" role="group" aria-label="${ariaLabel}">
     <span class="time-selector-label">${visibleLabel}</span>
-    <div class="time-selector-inputs"><select class="time-hhmm" aria-label="${ariaLabel}">${timeSelectOptions()}</select></div>
+    <div class="time-selector-inputs">
+      <select class="time-hour" aria-label="${ariaLabel} · ${getLang()==='es'?'hora':'hour'}">${timeSelectOptions('hour')}</select>
+      <span class="time-selector-colon" aria-hidden="true">:</span>
+      <select class="time-minute" aria-label="${ariaLabel} · ${getLang()==='es'?'minutos':'minutes'}">${timeSelectOptions('minute')}</select>
+    </div>
     <input class="${type}" type="hidden" value="">
   </div>`;
 }
+
 function syncTimeSelector(group){
-  if(!group)return '';
-  const value=qs('.time-hhmm',group)?.value||'';
+  if(!group) return '';
+  const hour=qs('.time-hour',group)?.value || '';
+  const minute=qs('.time-minute',group)?.value || '00';
+  const value=hour!=='' ? `${hour}:${minute}` : '';
   const hidden=qs('input[type="hidden"]',group);
-  if(hidden)hidden.value=value;
+  if(hidden) hidden.value=value;
   return value;
 }
+
 function setTimeSelectorValue(group,value=''){
-  if(!group)return;
-  const select=qs('.time-hhmm',group);
-  const current=String(value||'');
-  if(select){select.innerHTML=timeSelectOptions(current);select.value=current;}
+  if(!group) return;
+  const normalized=/^(\d{2}):(\d{2})$/.exec(String(value||''));
+  const hour=qs('.time-hour',group);
+  const minute=qs('.time-minute',group);
+  if(hour) hour.value=normalized?.[1] || '';
+  if(minute) minute.value=['15','30','45'].includes(normalized?.[2]) ? normalized[2] : '';
   syncTimeSelector(group);
 }
 
@@ -2915,7 +2924,7 @@ function showPreferencesStage(){
 
   // Do not lock here: this screen can be reached before payment in non-commerce/test flows.
   // Locking is applied only after a positive server payment/admin-bypass entitlement.
-  const canonicalStory=_travelV2()?.state?.tripStory || plannerState?.travelModelV2?.trip_story || null;
+  const canonicalStory=plannerState?.travelModelV2?.trip_story || _travelV2()?.state?.tripStory || null;
   if(canonicalStory){
     _travelV2()?.setTripStory?.(canonicalStory);
     if(plannerState){plannerState.travelModelV2=_currentTravelModelV2_();plannerState.travelModelV2.trip_story=JSON.parse(JSON.stringify(canonicalStory));}
@@ -2988,15 +2997,7 @@ async function confirmPreferencesAndContinue(){
   if(preferencesStageTripId!==currentTripId) return;
 
   const engine=_travelV2();
-  // V201: resolve the canonical story from the live travel engine before
-  // validating. The compatibility city row may contain transit stops but must
-  // never turn them into mandatory lodging/local-transport preferences.
-  const model=_currentTravelModelV2_() || plannerState?.travelModelV2;
-  const liveStory=engine?.state?.tripStory;
-  if(model && Array.isArray(liveStory?.stays) && liveStory.stays.length){
-    model.trip_story=JSON.parse(JSON.stringify(liveStory));
-    if(plannerState)plannerState.travelModelV2=model;
-  }
+  const model=plannerState?.travelModelV2 || _currentTravelModelV2_();
   if(engine && !engine.allRequiredPreferencesComplete(savedDestinations,model)){
     alert(getLang()==='es'
       ? 'Completa hospedaje y transporte para cada destino o estancia antes de generar.'
@@ -3102,9 +3103,8 @@ function openGuidedPersonalizationJourney(){
   if(!currentTripId || document.querySelector('#guided-personalization-overlay')) return;
   const engine=_travelV2(); if(!engine) return;
   const es=getLang()==='es', model=plannerState?.travelModelV2 || _currentTravelModelV2_();
-  // Use the same canonical preference list as the final validation.
-  // Transit-only stops are excluded by placesForPreferences, not just hidden here.
-  const places=engine.placesForPreferences?.(savedDestinations,model)||[];
+  const transitKeys=new Set(((model?.trip_story?.stays)||[]).filter(st=>st?.transitOnly).map(st=>String(st.place||'').trim().toLowerCase()));
+  const places=(engine.placesForPreferences?.(savedDestinations,model)||[]).filter(p=>!transitKeys.has(String(p?.name||p?.key||'').trim().toLowerCase()));
   if(!engine.state.itineraryLanguage) engine.state.itineraryLanguage=es?'Español':'English';
   engine.state.preferences=engine.state.preferences||{global:{notes:''},places:{}};
   engine.state.preferences.global=engine.state.preferences.global||{notes:''};
@@ -3158,7 +3158,7 @@ function openGuidedPersonalizationJourney(){
     render();
     requestAnimationFrame(()=>active.scrollTo({top:0,behavior:'smooth'}));
   });
-  overlay.querySelector('[data-gp-close]').onclick=()=>{overlay.remove();document.body.classList.remove('guided-preferences-open');delete window._itbmoGuidedPreferencesReady;document.body.classList.add('itbmo-builder-closed-clean');};
+  overlay.querySelector('[data-gp-close]').onclick=()=>{overlay.remove();document.body.classList.remove('guided-preferences-open');delete window._itbmoGuidedPreferencesReady;};
   overlay.querySelector('[data-gp-mobile]').onclick=()=>overlay.querySelector('.guided-journey__story').classList.toggle('is-mobile-open');
   overlay.querySelector('#guided-info-chat-open').onclick=()=>document.querySelector('#info-chat-floating')?.click();
   render();
@@ -3353,8 +3353,8 @@ async function saveDestinations({showReadyModal=true,fromTripStory=false}={}){
 
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      const start = fromTripStory ? qs('.start',hd).value : (qs('.start',hd).value || DEFAULT_START);
-      const end   = fromTripStory ? qs('.end',hd).value : (qs('.end',hd).value || DEFAULT_END);
+      const start = qs('.start',hd).value || DEFAULT_START;
+      const end   = qs('.end',hd).value   || DEFAULT_END;
       perDay.push({ day: idx+1, start, end });
     });
     if(perDay.length===0){
@@ -3753,24 +3753,16 @@ function _immersiveViewerCopy_(){
 function _immersiveAvailableCities_(){
   const workspace=_workspaceSnapshotViews_();
   const physical=(workspace?.destinations||[]).map(x=>x?.city).filter(Boolean);
-  // V223: transit-only journey stops are transport context, not sightseeing cards.
-  // Keep day trips and cities that also have a non-transit stay.
-  const journey=(_travelV2()?.state?.tripStory?.stays||[]);
-  const norm=v=>String(v||'').trim().toLocaleLowerCase();
-  const transitOnlyCity=city=>{
-    const visits=journey.filter(st=>norm(st?.place)===norm(city));
-    return visits.length>0&&visits.every(st=>st?.transitOnly===true);
-  };
-  if(physical.length) return physical.filter(city=>!transitOnlyCity(city));
+  if(physical.length) return physical;
   const ordered=(savedDestinations||[]).map(x=>x.city).filter(Boolean);
   const extras=Object.keys(itineraries||{}).filter(c=>!ordered.includes(c));
-  return [...ordered,...extras].filter(city=>!transitOnlyCity(city)&&Object.values(itineraries?.[city]?.byDay||{}).some(rows=>Array.isArray(rows)&&rows.length));
+  return [...ordered,...extras].filter(city=>Object.values(itineraries?.[city]?.byDay||{}).some(rows=>Array.isArray(rows)&&rows.length));
 }
 function _immersiveDaysForCity_(city){ return Object.keys(itineraries?.[city]?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b); }
 function syncImmersiveItineraryLauncher(){
   const wrap=qs('#itinerary-focus-launch'),btn=qs('#open-itinerary-focus'); if(!wrap||!btn)return;
   const workspace=_workspaceSnapshotViews_();
-  const cities=_immersiveAvailableCities_();
+  const cities=(workspace?.destinations||[]).map(d=>d.city).filter(Boolean);
   const uniqueDates=new Set();
   (workspace?.destinations||[]).forEach(d=>{const base=parseDMY(String(d?.baseDate||''));for(let i=0;i<Number(d?.days||0);i++){if(base)uniqueDates.add(formatDMY(addDays(base,i)));}});
   const fallbackCities=_immersiveAvailableCities_(),effectiveCities=cities.length?cities:fallbackCities,totalDays=uniqueDates.size||fallbackCities.reduce((sum,c)=>sum+_immersiveDaysForCity_(c).length,0),hasRows=effectiveCities.length>0&&totalDays>0,copy=_immersiveViewerCopy_();
@@ -3953,7 +3945,6 @@ function openImmersiveItinerary(){
       ? ((_currentTravelModelV2_()?.trip_story?.stays)||[]).filter(st=>!st?.transitOnly).map(st=>({city:st?.place||'',country:st?.country||'',days:Number(st?.days||0)||0,baseDate:st?.startDate?_tripStoryDMY_(st.startDate):null}))
       : (savedDestinations||[]).map(d=>({city:d?.city||'',country:d?.country||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null})))
       .filter(d=>d.city),
-    journey_story:(()=>{const st=_currentTravelModelV2_()?.trip_story;return st?.stays?.length?JSON.parse(JSON.stringify({stays:st.stays,start:st.start,returnTrip:st.returnTrip})):null;})(),
     workspace_source_map:workspaceViews.source_map||{},
     city_meta:cityMeta||{},
     itineraries:workspaceViews.itineraries||{}
@@ -6503,12 +6494,7 @@ function _v110SemanticRole_(row={}){
   if(/\b(rest|descanso|recovery|recuperacion|pausa|break)\b/.test(t)) return 'recovery';
   if(/\b(return|regreso|retorno|back to|vuelta).*(hotel|alojamiento|base|lodging|accommodation)\b/.test(t)) return 'return';
   if(/^(transfer|traslado|transporte|transport|regreso|retorno|return|walk to|caminar hacia|paseo hacia|drive to|conducir hacia|train to|tren hacia|bus to|autobus hacia)\b/.test(t)) return 'transfer';
-  // V211: utility roles must be identified by the scheduled action, not by
-  // incidental guidance in Notes (e.g. an alpine viewpoint's ticket 'acceso').
-  // Otherwise the V115 shield mistakes a real experience for a flexible buffer
-  // and truncates its duration, leaving a large unexplained gap before lunch.
-  const action=_canonicalText_(`${row?.kind||''} ${row?.activity||''}`);
-  if(/\b(buffer|margen|access|acceso|check in|control|queue|fila|security)\b/.test(action)) return 'buffer';
+  if(/\b(buffer|margen|access|acceso|check in|control|queue|fila|security)\b/.test(t)) return 'buffer';
   if(/\b(free time|tiempo libre|flexible|flexibilidad)\b/.test(t)) return 'free_time';
   return 'experience';
 }
@@ -7911,39 +7897,6 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
         const exists=fixedTransfers.some(x=>String(x.origin||'').trim().toLowerCase()===String(t.origin||'').trim().toLowerCase()&&String(x.destination||'').trim().toLowerCase()===String(t.destination||'').trim().toLowerCase()&&String(x.departure||'')===String(t.departure||'')&&String(x.arrival||'')===String(t.arrival||''));
         if(!exists)fixedTransfers.push(t);
       });
-      // V242 · Transit-only connections: the traveler fixes DEPARTURES, not
-      // resolver-estimated arrivals. On a same-day transit chain, a resolver
-      // estimate must never extend the previous segment beyond the next
-      // traveler-fixed departure and manufacture a false itinerary overlap.
-      // Scope: main-route transfers INTO transit-only stays only. Tourist stays,
-      // excursions, and traveler-supplied arrival clocks remain unchanged.
-      const storyStays=_currentTravelModelV2_()?.trip_story?.stays||[];
-      const transitIds=new Set(storyStays.filter(st=>st?.transitOnly).map(st=>`story-main-${st.id}`));
-      const chronological=fixedTransfers.filter(t=>t.departure&&t.arrival)
-        .slice().sort((a,b)=>_hhmmToMinutes_(a.departure)-_hhmmToMinutes_(b.departure));
-      for(let j=0;j<chronological.length-1;j++){
-        const current=chronological[j],next=chronological[j+1];
-        if(!transitIds.has(String(current.transfer_id||'')) || current.direction!=='main')continue;
-        if(next.direction!=='main'||!_arePoiAliases_(current.destination,next.origin))continue;
-        const original=storyStays.find(st=>`story-main-${st.id}`===String(current.transfer_id));
-        if(original?._itbmo_user_arrival_time || original?.arrivalTimeStatus==='user_fixed')continue;
-        const dep=_hhmmToMinutes_(current.departure),arr=_hhmmToMinutes_(current.arrival),nextDep=_hhmmToMinutes_(next.departure);
-        if(dep==null||arr==null||nextDep==null||nextDep<=dep||arr<=nextDep)continue;
-        // This is a planning boundary, NOT a claim of physical arrival.
-        // Preserve the resolver's estimate for warnings and transparency.
-        current.resolver_estimated_arrival=current.arrival;
-        current.arrival=_minutesToHHMM_(nextDep);
-        current.arrival_user_fixed=false;
-        current.arrival_source='TRANSIT_CONNECTION_BOUNDARY';
-        current.route_estimated=true;
-        current.transit_connection_boundary=true;
-        const ledgerItem=canonicalLedger.find(t=>t.transfer_id===current.transfer_id);
-        if(ledgerItem){ledgerItem.resolver_estimated_arrival=current.resolver_estimated_arrival;ledgerItem.arrival=current.arrival;ledgerItem.arrival_source=current.arrival_source;ledgerItem.transit_connection_boundary=true;}
-        console.warn('[ITBMO V242 TRANSIT CONNECTION] Estimated arrival exceeds next user departure; planning segment bounded without changing departure or claiming feasibility',{
-          day:dayNum,origin:current.origin,via:current.destination,next:next.destination,
-          departure:current.departure,resolver_estimated_arrival:current.resolver_estimated_arrival,next_user_departure:next.departure
-        });
-      }
       const inferredTerminalTransfer=isFinalDay
         ? fixedTransfers.find(t=>t?.destination && !_arePoiAliases_(t.destination,city) && !fixedTransfers.some(later=>later!==t && later?.origin && later?.destination && _arePoiAliases_(later.origin,t.destination) && _arePoiAliases_(later.destination,city)))
         : null;
@@ -7995,8 +7948,6 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
           arrival_source:String(t.arrival_source||t.source||'USER_FIXED').toUpperCase(),
           transport_source:String(t.transport_source||t.source||'USER_FIXED').toUpperCase(),
           route_estimated:Boolean(t.route_estimated ?? (String(t.arrival_source||t.transport_source||t.source||'').toUpperCase()==='ROUTE_ESTIMATED')),
-          transit_connection_boundary:Boolean(t.transit_connection_boundary),
-          resolver_estimated_arrival:t.resolver_estimated_arrival||null,
           source:String(t.source||'USER_FIXED').toUpperCase(),
           route_resolution:t.route_resolution||null,
           mode:t.mode||null,
@@ -8071,14 +8022,7 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
         if(rs==null||re==null) return true;
         const exact=rs===dep&&re===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination);
         const overlaps=Math.max(rs,dep)<Math.min(re,arr);
-        // V240: never erase another authoritative movement in the same day.
-        // Conflicting fixed movements must remain visible to the hard audit,
-        // rather than silently disappearing and triggering futile Stay retries.
-        const otherFixed=(day.fixed_transfers||[]).some(x=>
-          _hhmmToMinutes_(r.start)===_hhmmToMinutes_(x.departure)
-          && _hhmmToMinutes_(r.end)===_hhmmToMinutes_(x.arrival)
-          && _arePoiAliases_(r.from,x.origin)&&_arePoiAliases_(r.to,x.destination));
-        return exact || otherFixed || !overlaps;
+        return exact || !overlaps;
       });
       let idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
       const fixedRow={
@@ -8087,9 +8031,7 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
         from:t.origin,to:t.destination,
         transport:[_v3TransportLabel_(t.mode),`~${_minutesToHuman_(duration)}`].filter(Boolean).join(' · '),
         duration:'',
-        notes:t.transit_connection_boundary
-          ? (es?`Conexión en tránsito: salida siguiente fijada a las ${t.arrival}. La llegada estimada por ITBMO (${t.resolver_estimated_arrival||'sin confirmar'}) supera esa salida; este bloque es un límite de planificación, NO una llegada confirmada. Verifica la viabilidad real antes de reservar.`:`Transit connection: next departure fixed at ${t.arrival}. ITBMO's estimated arrival (${t.resolver_estimated_arrival||'unconfirmed'}) exceeds that departure; this block is a planning boundary, NOT a confirmed arrival. Verify actual feasibility before booking.`)
-          : t.route_resolution?.summary
+        notes:t.route_resolution?.summary
           ? `${t.route_resolution.summary}${es?' · Horario estimado para planificación; confirma las opciones reales antes de reservar.':' · Planning estimate; confirm real options before booking.'}`
           : (t.terminal_arrival
             ? (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. Este traslado cierra esta etapa del viaje; para planificar ${t.destination}, agrégalo como un destino principal.`:`Expected arrival in ${t.destination} at ${t.arrival}. This transfer closes this trip stage; add ${t.destination} as a main destination to plan it.`)
@@ -8099,22 +8041,8 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
       };
       if(idx>=0) out[idx]={...out[idx],...fixedRow};
       else out.push(fixedRow);
-      // V240: A terminal arrival belongs to the END of the day's complete
-      // movement chain, not to each intermediate connection. In particular,
-      // Paris -> Barcelona -> Madrid must retain BOTH user-fixed transfers.
-      // Never discard a canonical fixed transfer while removing tourism after
-      // the terminal arrival. The final hard audit remains authoritative.
-      const fixedChain=(day.fixed_transfers||[]).filter(x=>x?.departure&&x?.arrival);
-      const lastArrival=Math.max(...fixedChain.map(x=>_hhmmToMinutes_(x.arrival)).filter(x=>x!=null));
-      if((t.terminal_arrival||day.terminal_arrival_only) && arr===lastArrival){
-        out=out.filter(r=>{
-          if(Number(r.day)!==dayNum)return true;
-          const rs=_hhmmToMinutes_(r.start);
-          if(rs==null||rs<arr)return true;
-          return fixedChain.some(x=>_hhmmToMinutes_(r.start)===_hhmmToMinutes_(x.departure)
-            && _hhmmToMinutes_(r.end)===_hhmmToMinutes_(x.arrival)
-            && _arePoiAliases_(r.from,x.origin)&&_arePoiAliases_(r.to,x.destination));
-        });
+      if(t.terminal_arrival||day.terminal_arrival_only){
+        out=out.filter(r=>Number(r.day)!==dayNum || _hhmmToMinutes_(r.start)==null || _hhmmToMinutes_(r.start)<arr || (_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr));
       }
     });
   });
@@ -8393,158 +8321,12 @@ function _v3FitDurationToInterval_(row={}){
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
-// V252 — Constraint-aware transactional scheduler for generated physical units.
-// No model calls, no changes to the TIE/physical-unit generator or its contracts.
-// Operates on an isolated copy, commits only on strictly improved authoritative QA.
-function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
-  let accepted=rows;
-  const master=_v3SyntheticMaster_(totalDays);
-  const audit=candidate=>_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-  const hardCodes=_v3HardBlockingCodes_();
-  const score=errors=>({overlaps:errors.filter(e=>e.code==='OVERLAP').length,
-    hard:errors.filter(e=>hardCodes.has(String(e?.code||''))).length,total:errors.length});
-  // Use the actual authoritative window, not merely its optional row identifier.
-  // Missing identifiers may be inferred ONLY from an unambiguous contract window.
-  const windowOf=row=>{
-    const day=Number(row?.day||0),id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
-    const windows=(contract?.route_days||[]).find(d=>Number(d?.day)===day)?.location_windows||[];
-    if(id){const exact=windows.find(w=>String(w?.window_id||'')===id);if(exact)return exact;return null;}
-    const start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
-    if(start==null||end==null)return null;
-    const matches=windows.filter(w=>{
-      const a=_hhmmToMinutes_(w?.start),b=_hhmmToMinutes_(w?.end);
-      return a!=null&&start>=a&&(b==null||start<b)&&(w?.open_end||b==null||end<=b);
-    });
-    return matches.length===1?matches[0]:null;
-  };
-  const rigid=row=>_v115IsHardRow_(row)||_v114IsNightOverlayRow_(row)||
-    String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high';
-  // A maximum of one accepted transaction per pass prevents oscillation.
-  for(let pass=0;pass<12;pass++){
-    const before=audit(accepted),baseline=score(before);
-    if(!baseline.overlaps)break;
-    let committed=false;
-    for(const issue of before.filter(e=>e.code==='OVERLAP')){
-      const day=Number(issue?.day||0),index=Number(issue?.row||0)-1;
-      if(!day||index<1)continue;
-      const candidate=JSON.parse(JSON.stringify(accepted));
-      const chain=_rowsByDayObject_(candidate)[day]||[];
-      if(index>=chain.length)continue;
-      const previous=chain[index-1],first=chain[index];
-      if(rigid(previous)&&rigid(first))continue;
-      const referenceWindow=windowOf(first),previousWindow=windowOf(previous);
-      if(!referenceWindow||!previousWindow||String(referenceWindow.window_id||'')!==String(previousWindow.window_id||'') || String(referenceWindow.start||'')!==String(previousWindow.start||'') || String(referenceWindow.end||'')!==String(previousWindow.end||''))continue;
-      const upper=referenceWindow.open_end?null:_hhmmToMinutes_(referenceWindow.end);
-      const lower=_hhmmToMinutes_(referenceWindow.start);
-      let cursor=_v114LogicalEndMinutes_(previous),moved=0,maxDelta=0,valid=true;
-      if(cursor==null)continue;
-      for(let j=index;j<chain.length;j++){
-        const row=chain[j],start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
-        if(start==null||end==null||end<=start){valid=false;break;}
-        if(start>=cursor)break; // natural slack absorbs all remaining displacement
-        const rowWindow=windowOf(row);
-        if(!rowWindow||String(rowWindow.window_id||'')!==String(referenceWindow.window_id||'')||String(rowWindow.start||'')!==String(referenceWindow.start||'')||String(rowWindow.end||'')!==String(referenceWindow.end||'')||rigid(row)){valid=false;break;}
-        const delta=cursor-start;
-        if(delta>180||lower!=null&&start<lower||upper!=null&&end+delta>upper){valid=false;break;}
-        const rawStart=_hhmmToMinutes_(row.start),rawEnd=_hhmmToMinutes_(row.end);
-        if(rawStart==null||rawEnd==null){valid=false;break;}
-        row.start=_minutesToHHMM_(rawStart+delta);
-        row.end=_minutesToHHMM_(rawEnd+delta);
-        cursor=end+delta;moved++;maxDelta=Math.max(maxDelta,delta);
-      }
-      if(!valid||!moved)continue;
-      const after=audit(candidate),next=score(after);
-      // Never trade one blocking issue for another or hide an error in a new row.
-      if(next.overlaps>=baseline.overlaps||next.hard>baseline.hard||next.total>baseline.total)continue;
-      accepted=candidate;committed=true;
-      console.info(`[ITBMO V252 CONSTRAINT TRANSACTION] ${city} · day ${day} · ${moved} rows · max +${maxDelta} min · overlaps ${baseline.overlaps}→${next.overlaps}`);
-      break;
-    }
-    if(!committed)break;
-  }
-  return accepted;
-}
-
-// V254: single transactional forward propagation over a complete physical-day chain.
-// Unlike V48, this never commits a one-row shift that merely relocates the collision.
-// Unlike V252, absent optional planning_window_id does not block a safe repair.
-// All rows, fixed anchors, contract boundaries and authoritative QA remain protected.
-function _v254PropagatePhysicalChain_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
-  let accepted=rows;
-  const master=_v3SyntheticMaster_(totalDays);
-  const audit=value=>_localGlobalAudit_(city,value,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-  const hard=_v3HardBlockingCodes_();
-  const measure=issues=>({overlap:issues.filter(e=>e.code==='OVERLAP').length,
-    hard:issues.filter(e=>hard.has(String(e?.code||''))).length,total:issues.length});
-  const rigid=row=>_v115IsHardRow_(row)||_v114IsNightOverlayRow_(row)||row?.fixed===true||row?.user_fixed===true||
-    String(row?.kind||'').toLowerCase()==='fixed_transfer'||
-    String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high';
-  const window=row=>{
-    const id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
-    const options=(contract?.route_days||[]).find(d=>Number(d?.day)===Number(row?.day))?.location_windows||[];
-    if(id)return options.find(w=>String(w?.window_id||'')===id)||null;
-    const start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
-    const matches=options.filter(w=>{const a=_hhmmToMinutes_(w.start),b=_hhmmToMinutes_(w.end);
-      return a!=null&&start>=a&&(w.open_end||b==null||end<=b);});
-    return matches.length===1?matches[0]:null;
-  };
-  const key=w=>w?`${String(w.window_id||'')}|${w.start||''}|${w.end||''}`:null;
-  for(let pass=0;pass<12;pass++){
-    const before=audit(accepted),old=measure(before);
-    if(!old.overlap)break;
-    let committed=false;
-    for(const issue of before.filter(e=>e.code==='OVERLAP')){
-      const day=Number(issue.day),rowNum=Number(issue.row);
-      if(!day||rowNum<2)continue;
-      const candidate=JSON.parse(JSON.stringify(accepted));
-      const chain=_rowsByDayObject_(candidate)[day]||[];
-      if(rowNum>chain.length)continue;
-      const previous=chain[rowNum-2],first=chain[rowNum-1];
-      if(rigid(first)||_v114IsNightOverlayRow_(previous))continue;
-      const anchorWindow=window(first),priorWindow=window(previous);
-      // Explicit windows must agree; when neither exists, respect fixed anchors
-      // and accept only a full authoritative audit improvement.
-      if((anchorWindow||priorWindow)&&(!anchorWindow||!priorWindow||key(anchorWindow)!==key(priorWindow)))continue;
-      const ceiling=anchorWindow&&!anchorWindow.open_end?_hhmmToMinutes_(anchorWindow.end):null;
-      let cursor=_v114LogicalEndMinutes_(previous),moved=0,valid=cursor!=null;
-      for(let j=rowNum-1;valid&&j<chain.length;j++){
-        const r=chain[j],start=_v114LogicalStartMinutes_(r),end=_v114LogicalEndMinutes_(r);
-        if(start==null||end==null||end<=start){valid=false;break;}
-        if(start>=cursor)break;
-        if(rigid(r)){valid=false;break;}
-        const rw=window(r);
-        if((anchorWindow||rw)&&(!anchorWindow||!rw||key(anchorWindow)!==key(rw))){valid=false;break;}
-        const delta=cursor-start;
-        const rawStart=_hhmmToMinutes_(r.start),rawEnd=_hhmmToMinutes_(r.end);
-        if(delta>180||rawStart==null||rawEnd==null||(ceiling!=null&&end+delta>ceiling)){
-          valid=false;break;
-        }
-        r.start=_minutesToHHMM_(rawStart+delta);
-        r.end=_minutesToHHMM_(rawEnd+delta);
-        cursor=end+delta;moved++;
-      }
-      if(!valid||!moved)continue;
-      const next=measure(audit(candidate));
-      if(next.overlap>=old.overlap||next.hard>old.hard||next.total>old.total)continue;
-      accepted=candidate;committed=true;
-      console.info(`[ITBMO V254 PHYSICAL CHAIN TRANSACTION] ${city} · day ${day} · ${moved} rows · overlaps ${old.overlap}→${next.overlap}`);
-      break;
-    }
-    if(!committed)break;
-  }
-  return accepted;
-}
-
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
   const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115: timeline first, then canonical row semantics.
-  // V252: QA-gated chronology for BASE_STAY and DAY_TRIP;
-  // only the unit's supplied windows determine the available clock budget.
-  out=_v254PropagatePhysicalChain_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
-  out=_v249ReconcileUnitWindow_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
@@ -8553,56 +8335,6 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     const errors=report?.errors||[];
     let changed=false;
     const byDay=_rowsByDayObject_(out);
-
-    // V247: transactional, slack-aware repair of short chronological collisions.
-    // The old single-row patch often moved a conflict to the NEXT row, so QA
-    // rejected it despite a valid schedule being possible (Toledo/Montserrat).
-    // Move the entire dependent flexible chain, preserving every experience,
-    // duration, ordering and fixed transport. Never cross planning windows or
-    // hard/calendar-sensitive rows. Commit ONLY after full local QA improves.
-    for(const finding of errors.filter(e=>e.code==='OVERLAP')){
-      const day=Number(finding?.day||0),rowNum=Number(finding?.row||0);
-      if(!day||rowNum<2)continue;
-      const original=_rowsByDayObject_(out)[day]||[];
-      if(rowNum>original.length)continue;
-      const candidate=JSON.parse(JSON.stringify(out));
-      const chain=_rowsByDayObject_(candidate)[day]||[];
-      const previous=chain[rowNum-2],current=chain[rowNum-1];
-      if(_v114IsNightOverlayRow_(previous)||_v114IsNightOverlayRow_(current))continue;
-      const previousEnd=_v114LogicalEndMinutes_(previous),currentStart=_v114LogicalStartMinutes_(current);
-      if(previousEnd==null||currentStart==null||previousEnd<=currentStart||previousEnd-currentStart>45)continue;
-      const windowId=String(current?.planning_window_id||current?.commerce_context?.planning_window_id||'');
-      const previousWindow=String(previous?.planning_window_id||previous?.commerce_context?.planning_window_id||'');
-      if(!windowId||windowId!==previousWindow)continue;
-      let end=previousEnd,ok=true,moved=0,maxDelta=0;
-      for(let j=rowNum-1;j<chain.length;j++){
-        const row=chain[j];
-        const rowWindow=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
-        if(rowWindow!==windowId||_v114IsNightOverlayRow_(row))break;
-        const start=_v114LogicalStartMinutes_(row),finish=_v114LogicalEndMinutes_(row);
-        if(start==null||finish==null||finish<=start){ok=false;break;}
-        if(start>=end)break; // existing slack absorbs the upstream delay
-        const delta=end-start;
-        const calendar=String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase();
-        if(delta>90||_v115IsHardRow_(row)||calendar==='high'||
-           String(row?.kind||'').toLowerCase()==='fixed_transfer'||row?.user_fixed===true||row?.fixed===true){ok=false;break;}
-        const win=_v111WindowForRow_(row,contract),winEnd=_hhmmToMinutes_(win?.end);
-        if(winEnd!=null&&finish+delta>winEnd){ok=false;break;}
-        row.start=_minutesToHHMM_(start+delta);row.end=_minutesToHHMM_(finish+delta);
-        end=finish+delta;moved++;maxDelta=Math.max(maxDelta,delta);
-      }
-      if(!ok||!moved)continue;
-      const nextErrors=_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-      const oldBlocking=errors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
-      const newBlocking=nextErrors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
-      const oldOverlaps=errors.filter(e=>e.code==='OVERLAP').length;
-      const newOverlaps=nextErrors.filter(e=>e.code==='OVERLAP').length;
-      if(newBlocking>oldBlocking||newOverlaps>=oldOverlaps||nextErrors.length>errors.length)continue;
-      out=candidate;changed=true;
-      console.info(`[ITBMO V247 CHAIN REPAIR] ${city} · day ${day} · ${moved} flexible row(s) · max +${maxDelta} min · overlaps ${oldOverlaps}→${newOverlaps}`);
-      break; // audit again before touching another collision
-    }
-    if(changed)continue;
 
     // V48 deterministic micro-overlap repair. Treat a <=30 minute activity
     // overlap as arithmetic, but accept the shift only transactionally: re-run
@@ -8628,10 +8360,9 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       const candidateReport=_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride);
       const candidateErrors=candidateReport?.errors||[];
       const sameOverlap=candidateErrors.some(e=>e.code==='OVERLAP'&&Number(e?.day||0)===day&&Number(e?.row||0)===rowNum);
-      if(sameOverlap||candidateErrors.length>errors.length||candidateErrors.filter(e=>e.code==='OVERLAP').length>=errors.filter(e=>e.code==='OVERLAP').length)continue;
+      if(sameOverlap||candidateErrors.length>errors.length)continue;
       out=candidate;changed=true;
       console.info(`[ITBMO V3 DETERMINISTIC OVERLAP] ${city} · day ${day} · row ${rowNum} · +${overlap} min`,{from:error.start,to:candidateRow.start,end:candidateRow.end});
-      break; // V253: refresh QA before repairing another collision
     }
 
     // Timeline/duration defects are arithmetic, not creative-writing problems.
@@ -9082,11 +8813,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         ...dt,
         expected_date:startISO?_tripStoryAddDays_(startISO,Math.max(0,Number(dt.day||1)-1)):null
       }));
-      const fullStory=(contract.trip_story_stays||[]);
-      const originalIndex=fullStory.findIndex(x=>x.id===st.id);
-      const previous=originalIndex>0?fullStory[originalIndex-1]:null;
-      const next=originalIndex>=0?fullStory[originalIndex+1]||null:null;
-      // Boundaries must follow the complete route, including transit stops.
+      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
       // Prefer the shared transition date. This prevents an earlier Day Trip to
       // the next city from being mistaken for the actual inter-stay boundary.
       const inbound=previous?findBoundaryTransfer(previous.place,st.place,startISO):null;
@@ -9177,10 +8904,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     descriptors.forEach(d=>{
       const {st,index,dayTrips}=d;
       const allWindows=(ownedWindows.get(index)||[]).sort((a,b)=>_v114LogicalRowCompare_(a,b));
-      const fullStory=(contract.trip_story_stays||[]);
-      const originalIndex=fullStory.findIndex(x=>x.id===st.id);
-      const previous=originalIndex>0?fullStory[originalIndex-1]:null;
-      const next=originalIndex>=0?fullStory[originalIndex+1]||null:null;
+      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
       const parentId=st.id||`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(index+1).padStart(2,'0')}`;
 
       // Resolve whether the traveler fixed the excursion clock. Route-estimated
@@ -9988,21 +9712,6 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       rows=generated.rows||[];
       if(!rows.length) throw new Error(`V3_EMPTY:${city}`);
       const mergeCoverage=_v3Coverage_(rows,dest.days);
-      // V240: normalize immutable movement facts before the merged hard gate.
-      // Accepted Stay rows are not regenerated. If the movement facts overlap
-      // accepted tourism, the audit still reports it as a blocking defect.
-      const preflight=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
-      const preflightCodes=new Set((preflight.errors||[]).map(e=>String(e.code||'')));
-      if(preflightCodes.has('MISSING_USER_FIXED_TRANSFER')){
-        const restored=_v3EnforceHardRouteFacts_(rows,generated.contract);
-        const restoredReport=_v3MergedHardPhysicalAudit_(restored,generated.contract,dest.days);
-        const restoredCodes=new Set((restoredReport.errors||[]).map(e=>String(e.code||'')));
-        if(!restoredCodes.has('MISSING_USER_FIXED_TRANSFER') &&
-           !_v70ExactPhysicalUnitConservation_(restored,generated.stayResults||[]).length){
-          rows=restored;
-          console.info('[ITBMO V240 FIXED CHAIN] restored missing canonical movement(s) before merge QA');
-        }
-      }
       const mergeReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
       const mergeErrors=[...(mergeReport.errors||[]),...(generated.conservationErrors||[])];
       console.info(`[ITBMO V3 INTERNAL MERGE QA] trip · ${mergeAttempt}/${ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS}`,_v3AuditSummary_({errors:mergeErrors}),mergeErrors);
@@ -10475,7 +10184,6 @@ function _generationCheckpointSnapshot_(extra={}){
       preferencesV2:plannerState?.preferencesV2 || null
     },
     last_error:generationRecoveryState?.last_error || null,
-    run_token:generationRecoveryState?.run_token || null,
     ...extra
   };
 }
@@ -10485,27 +10193,23 @@ async function _persistGenerationCheckpoint_(status='generating',extra={}){
   const token=getStoredSessionToken();
   if(!token || !currentTripId) throw new Error('GENERATION_SESSION_REQUIRED');
   const checkpoint=_generationCheckpointSnapshot_(extra);
-  const writeTripId=String(currentTripId);
-  const writeEpoch=generationRunEpoch;
   generationRecoveryState=checkpoint;
 
   let lastError=null;
   for(let attempt=0;attempt<3;attempt++){
-    if(generationResetInProgress || writeEpoch!==generationRunEpoch || String(currentTripId)!==writeTripId) throw _generationCancelledError_();
+    if(generationResetInProgress) throw _generationCancelledError_();
     if(!navigator.onLine) await _waitForGenerationConnection_();
-    if(generationResetInProgress || writeEpoch!==generationRunEpoch || String(currentTripId)!==writeTripId) throw _generationCancelledError_();
+    if(generationResetInProgress) throw _generationCancelledError_();
     try{
       return await tripApi({
         action:'generation_checkpoint',
         session_token:token,
-        trip_id:writeTripId,
-        run_token:checkpoint.run_token,
+        trip_id:currentTripId,
         status,
         checkpoint
       });
     }catch(err){
       lastError=err;
-      if(err?.status===409 || err?.status===400 || err?.status===402 || err?.status===404 || err?.code==='GENERATION_CANCELLED_BY_RESET') throw err;
       if(attempt<2) await new Promise(resolve=>setTimeout(resolve,1500*(attempt+1)));
     }
   }
@@ -10869,11 +10573,11 @@ async function runPaidGeneration({manualRetry=false}={}){
 
     if(begin?.new_run) _v71ClearTripCompletionMarker_(currentTripId);
     if(begin?.already_completed){
-      // V243: A completed server record is NOT evidence that the current run
-      // produced it. Never hydrate or publish historical exports here.
-      const conflict=new Error('Este viaje ya figura como generado en el servidor. No se mostrarán documentos anteriores como resultado de esta generación.');
-      conflict.code='GENERATION_ALREADY_COMPLETED';
-      throw conflict;
+      _v71SetTripCompletionMarker_(currentTripId);
+      _hydrateGenerationTrip_(begin.trip);
+      _applyGeneratedUIState({showModal:true});
+      completionPublished=true;
+      return;
     }
 
     const serverCheckpoint=begin?.trip?.itinerary_data || generationRecoveryState || {};
@@ -10885,8 +10589,7 @@ async function runPaidGeneration({manualRetry=false}={}){
         : {},
       accepted_stays:(serverCheckpoint.accepted_stays && typeof serverCheckpoint.accepted_stays==='object')
         ? serverCheckpoint.accepted_stays : (generationRecoveryState?.accepted_stays || {}),
-      generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1),
-      run_token:String(serverCheckpoint.run_token || '')
+      generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
     };
 
     if(begin?.new_run && manualRetry){
@@ -10984,10 +10687,6 @@ async function runPaidGeneration({manualRetry=false}={}){
       return;
     }
 
-    // V243: drain every accepted-Stay checkpoint before the terminal commit.
-    // Otherwise an older queued 'generating' write may race the final 'generated'.
-    await _generationCheckpointQueue_;
-    _assertGenerationRunActive_(runEpoch);
     // V72 terminal commit: generated must be persisted synchronously before publication.
     // This prevents a queued/stale failed checkpoint from winning after downloads/workspace navigation.
     await _persistGenerationCheckpoint_('generated',{active_city:null,last_error:null,pending_cities:[]});
@@ -10998,10 +10697,6 @@ async function runPaidGeneration({manualRetry=false}={}){
     // Publication is the critical transaction boundary. Show downloads first;
     // analytics/context warming must never be able to suppress the completion UI.
     _applyGeneratedUIState({showModal:true});
-    _tripStoryMarkGeneratedDraftComplete_();
-    // V263: terminal completion must invalidate a minimized builder even when
-    // the downloads acknowledgement is never clicked.
-    try{_tripStorySetWorkspaceResume_(false);_tripStoryClearBuilderSession_();}catch(_){}
     completionPublished=true;
     _prewarmGeneratedTripContext_().catch(error=>console.warn('[CONTEXT PREWARM]',error));
     trackITBMOEvent('itinerary_generated',{
@@ -11021,7 +10716,7 @@ async function runPaidGeneration({manualRetry=false}={}){
       generationRecoveryState={...(generationRecoveryState || {}),generation_count:2};
     }
     try{
-      if(!['GENERATION_PAYMENT_REQUIRED','GENERATION_ALREADY_COMPLETED','GENERATION_RUN_MISMATCH','GENERATION_ARCHIVED'].includes(err?.code)){
+      if(err?.code!=='GENERATION_PAYMENT_REQUIRED'){
         await _persistGenerationCheckpoint_('failed',{
           active_city:null,
           last_error:{code:err?.code || 'GENERATION_ORCHESTRATOR_FAILED',at:new Date().toISOString()}
@@ -11039,13 +10734,7 @@ async function runPaidGeneration({manualRetry=false}={}){
       $preferencesGenerateV2.classList.remove('is-generated');
     }
     _pauseAstraGenerationMetrics_();
-    if(['GENERATION_ALREADY_COMPLETED','GENERATION_RUN_MISMATCH','GENERATION_ARCHIVED'].includes(err?.code)){
-      showWOW(false);
-      console.error('[ITBMO V243 GENERATION IDENTITY] Historical/completed trip rejected; no previous exports published', {trip_id:currentTripId,code:err.code});
-      _showGenerationRetry_(recoveryReason);
-    }else{
-      _showGenerationRetry_(recoveryReason);
-    }
+    _showGenerationRetry_(recoveryReason);
     recoveryPublished=true;
   }finally{
     if(Number(runEpoch)===Number(generationRunEpoch)) paidGenerationRunning=false;
@@ -11170,22 +10859,13 @@ function _journeyApplyCopy_(){
 }
 async function _journeyLoadHistory_(){
   const token=getStoredSessionToken();
-  if(!token)return [];
-  // V218: user-selected cap of 30 recent trips; no unbounded pagination.
-  const collected=[];
+  if(!token) return [];
   try{
-    const data=await tripApi({action:'list',session_token:token,limit:30,offset:0});
-    const page=Array.isArray(data?.trips)?data.trips:[];
-    const seen=new Set();
-    for(const trip of page){
-      if(trip?.status==='generated'&&trip?.id&&!seen.has(trip.id)){
-        seen.add(trip.id);collected.push(trip);
-      }
-    }
-    journeyHistoryTrips=collected;
+    const data=await tripApi({action:'list',session_token:token,limit:12});
+    journeyHistoryTrips=Array.isArray(data?.trips)?data.trips.filter(t=>t?.status==='generated'):[];
   }catch(err){
     console.warn('[JOURNEY HISTORY]',err);
-    journeyHistoryTrips=collected.length?collected:(journeyHomeLatestTrip?[journeyHomeLatestTrip]:[]);
+    journeyHistoryTrips=journeyHomeLatestTrip?[journeyHomeLatestTrip]:[];
   }
   return journeyHistoryTrips;
 }
@@ -11196,7 +10876,7 @@ function _journeyRenderHistory_(){
   section.hidden=trips.length===0;
   if(count)count.textContent=c.tripCount(trips.length);
   grid.innerHTML='';
-  trips.forEach((trip,index)=>{
+  trips.slice(0,9).forEach((trip,index)=>{
     const card=document.createElement('button');
     card.type='button';card.className='journey-trip-card';card.dataset.tripId=trip.id;
     card.innerHTML=`<span class="journey-trip-card__number">${String(index+1).padStart(2,'0')}</span><strong>${_journeyEsc_(_journeyTripLabel_(trip))}</strong><small>${_journeyEsc_(_journeyTripMeta_(trip))}</small><span class="journey-trip-card__open">${_journeyEsc_(c.open)} →</span>`;
@@ -11295,17 +10975,19 @@ function _plannerOwnsAutomaticGenerationRecovery_(){
   return /(?:^|\/)planner\.html$/i.test(String(window.location.pathname||''));
 }
 
-async function restorePaidGenerationIfNeeded(){
+async function restorePaidGenerationIfNeeded(interruptedTripId){
   if(!_plannerOwnsAutomaticGenerationRecovery_()) return;
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   const restoreEpoch=generationRunEpoch;
   try{
     const token=getStoredSessionToken();
-    const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
-    let tripId=requestedTripId || getStoredActiveTripId();
+    const params=new URLSearchParams(window.location.search);
+    // An explicit new trip is never eligible for implicit restoration.
+    if(params.get('mode')==='new') return;
+    const requestedTripId=String(params.get('trip_id') || '').trim();
+    const tripId=String(interruptedTripId || requestedTripId || '').trim();
+    if(!tripId) return;
     let trip=null;
-
-    if(requestedTripId) storeActiveTripId(requestedTripId);
 
     if(tripId){
       try{
@@ -11317,12 +10999,11 @@ async function restorePaidGenerationIfNeeded(){
       }
     }
 
-    if(!trip){
-      const data=await tripApi({action:'recoverable',session_token:token});
-      trip=data?.trip || null;
-    }
+    // Never fall back to an unrelated historical trip: ownership is scoped to
+    // the exact locally active trip ID and verified by the authenticated API.
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
-    if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
+    if(!trip || String(trip.id)!==tripId) return;
+    if(!['generating','failed'].includes(trip.status)) return;
 
     // V86 RECOVERY CONTRACT:
     // Login/new Planner = blank. Completed/saved route creation is never restored.
@@ -12490,14 +12171,14 @@ function _v39VisibleDuration_(row={}){
 }
 
 function _v3VisibleTransportLabel_(value){
-  const raw=_v126TransportText_(value);
+  const raw=String(value||'').trim();
   if(!raw)return '';
   if(/^recomi[eé]ndame$/i.test(raw)||/^recommend$/i.test(raw)||/^recommend me$/i.test(raw)) return getLang()==='es'?'Por definir · ITBMO te ayudará a elegir':'To be decided · ITBMO will help you choose';
   return raw.replace(/\/(recomendado|recommended)/ig,'').replace(/\s{2,}/g,' ').trim();
 }
 
 function _v40VisibleTransportForRow_(row={}){
-  const raw=_v3VisibleTransportLabel_(_v126TransportText_(row?.transport||''));
+  const raw=_v3VisibleTransportLabel_(row?.transport||'');
   if(!/^por definir\b|^to be decided\b/i.test(raw)) return raw;
   const text=`${row?.notes||''} ${row?.activity||''}`;
   if(/\bRER\b/i.test(text)) return raw.replace(/^Por definir|^To be decided/i,'RER');
@@ -12848,77 +12529,9 @@ async function exportItineraryToPDF(options={}){
     let item=byDate.get(key);
     if(!item){item={globalDay:day.globalDay,date:day.date||'',destinations:[],rows:[]};byDate.set(key,item);days.push(item);}
     if(!item.destinations.some(x=>_arePoiAliases_(x,block.destination)))item.destinations.push(block.destination);
-    (day.rows||[]).forEach(row=>item.rows.push({...row,_pdfDestination:block.destination,_pdfSourceUnit:(block.source_units||[])[0]||''}));
+    (day.rows||[]).forEach(row=>item.rows.push({...row,_pdfDestination:block.destination}));
   }));
-  // V202 · PDF-only journey boundaries. No generated rows, units or checkpoints change.
-  const pdfStory=_currentTravelModelV2_()?.trip_story;
-  if(pdfStory?.stays?.length){
-    const itineraryFirst=pdfStory.stays[0].startDate;
-    const events=[];
-    const addEvent=(date,activity,from,to,time,mode,id)=>{
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(String(date||'')))return;
-      events.push({date,activity,from:from||'',to:to||'',time:time||'',mode:mode||'',id});
-    };
-    const start=pdfStory.start||{};
-    if(start.enabled===true && start.date && start.origin?.label && start.arrival?.label)addEvent(start.date,es?'Salida internacional':'International departure',start.origin?.label,start.arrival?.label,start.departureTime,start.transportMode,'arrival-departure');
-    if(start.enabled===true && start.arrivalDate && start.arrival?.label)addEvent(start.arrivalDate,es?'Llegada internacional':'International arrival',start.arrival?.label,'',start.arrivalTime,start.transportMode,'arrival-landing');
-    (pdfStory.stays||[]).forEach((st,i)=>{
-      if(i>0){const prev=pdfStory.stays[i-1];addEvent(st.departureDate||st.arrivalDate||st.startDate,es?'Traslado entre destinos':'Intercity transfer',prev.place,st.place,st.departureTime,st.transportMode,`move-${st.id||i}`);}
-      if(st.transitOnly)addEvent(st.arrivalDate||st.startDate,es?'Parada exclusivamente de tránsito':'Transit-only stop',st.place,'',st.arrivalTime,'',`transit-${st.id||i}`);
-    });
-    const ret=pdfStory.returnTrip||{};
-    if(ret.enabled && (ret.origin?.label||pdfStory.stays.at(-1)?.place) && ret.arrival?.label){addEvent(ret.departureDate,es?'Regreso internacional':'International return journey',ret.origin?.label||pdfStory.stays.at(-1)?.place,ret.arrival?.label,ret.departureTime,ret.transportMode,'return-departure');if(ret.arrivalDate&&ret.arrival?.label)addEvent(ret.arrivalDate,es?'Llegada del regreso':'Return arrival',ret.arrival?.label,'',ret.arrivalTime,ret.transportMode,'return-arrival');}
-    const byISO=new Map();
-    events.forEach(e=>{const key=e.date;const group=byISO.get(key)||[];if(!group.some(x=>x.id===e.id))group.push(e);byISO.set(key,group);});
-    byISO.forEach((group,iso)=>{
-      const key=_tripStoryDMY_(iso);let day=byDate.get(key);
-      if(!day){day={globalDay:Math.max(1,Math.round((Date.parse(iso+'T12:00:00Z')-Date.parse(itineraryFirst+'T12:00:00Z'))/86400000)+1),date:key,destinations:[],rows:[]};byDate.set(key,day);days.push(day);}
-      group.forEach(e=>{
-        const modeNames={plane:es?'Avión':'Plane',train:es?'Tren':'Train',bus:es?'Autobús':'Bus',car:es?'Automóvil':'Car',ferry:'Ferry',transfer:es?'Traslado':'Transfer'};
-        const modeText=_v126TransportText_(e.mode);
-        const visibleMode=modeNames[modeText.toLowerCase()]||modeText;
-        day.rows.push({activity:e.activity,from:e.from,to:e.to,start:e.time||'',end:'',transport:visibleMode,notes:es?'Logística de viaje basada en los datos indicados. Confirma horarios y disponibilidad con el proveedor antes de reservar.':'Journey logistics based on the supplied details. Confirm schedules and availability with the provider before booking.',_pdfLogistic:true});
-      });
-    });
-  }
   days.sort((a,b)=>(parseDMY(a.date)?.getTime?.()||0)-(parseDMY(b.date)?.getTime?.()||0)||Number(a.globalDay)-Number(b.globalDay));
-  // V250: PDF headings must use physical geography, never the storage root.
-  const pdfISO=(date)=>{const d=parseDMY(String(date||''));return d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`:'';};
-  const pdfSame=(a,b)=>Boolean(a&&b&&_arePoiAliases_(String(a),String(b)));
-  const pdfTransferForDay=(day)=>{
-    const iso=pdfISO(day?.date),stays=pdfStory?.stays||[];
-    for(let i=1;i<stays.length;i++){
-      const st=stays[i],prev=stays[i-1];
-      const date=String(st?.departureDate||st?.arrivalDate||st?.startDate||'');
-      if(iso&&iso===date&&prev?.place&&st?.place&&!pdfSame(prev.place,st.place))return {origin:String(prev.place),destination:String(st.place)};
-    }
-    const row=(day?.rows||[]).find(r=>r?.from&&r?.to&&!pdfSame(r.from,r.to)&&(/traslado de .* a |transfer from .* to |intercity transfer|traslado entre destinos/i.test(String(r.activity||''))||r._pdfLogistic&&/traslado entre destinos|intercity transfer/i.test(String(r.activity||''))));
-    return row?{origin:String(row.from),destination:String(row.to)}:null;
-  };
-  const pdfBaseForDay=(day)=>{
-    const trip=_v69PdfDayTripMeta_(day);if(trip?.base)return trip.base;
-    const transfer=pdfTransferForDay(day);if(transfer?.origin)return transfer.origin;
-    const counts=new Map();
-    (day?.rows||[]).forEach(r=>{
-      if(r?._pdfLogistic)return;
-      const loc=String(r?.physical_location||r?.commerce_context?.physical_destination||r?._pdfDestination||'').trim();
-      if(loc)counts.set(loc,(counts.get(loc)||0)+1);
-    });
-    if(counts.size)return [...counts].sort((a,b)=>b[1]-a[1])[0][0];
-    const iso=pdfISO(day?.date),stays=pdfStory?.stays||[];
-    const stay=stays.filter(st=>{const first=String(st?.startDate||st?.arrivalDate||'');return first&&iso>=first&&iso<=_tripStoryAddDays_(first,Math.max(0,Number(st.days||1)-1));}).at(-1);
-    return String(stay?.place||day?.destinations?.[0]||'').trim();
-  };
-  const pdfDayTripForDay=(day)=>{
-    const story=_v69PdfDayTripMeta_(day);if(story)return story;
-    const base=pdfBaseForDay(day),counts=new Map();
-    (day?.rows||[]).filter(r=>/daytrip[-_]/i.test(String(r?.stay_unit_id||''))).forEach(r=>{
-      const loc=String(r?.physical_location||r?._pdfDestination||'').trim();
-      if(loc&&!pdfSame(loc,base))counts.set(loc,(counts.get(loc)||0)+1);
-    });
-    const destination=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0]||'';
-    return destination?{base,destination}:null;
-  };
   // V121 PDF-only aurora restoration. TIE remains the sole semantic authority.
   // Propagate its already-stamped aurora context across sibling physical units of
   // the same stay for presentation only; never alter planner rows or generation.
@@ -12957,7 +12570,7 @@ async function exportItineraryToPDF(options={}){
     doc.setFillColor(239,246,255);doc.roundedRect(W-114,18,80,46,10,10,'F');doc.setTextColor(8,35,65);
     font('bold',10);doc.text(`${es?'Día':'Day'} ${day.globalDay}`,W-74,37,{align:'center'});
     font('normal',7.5);doc.text(_itbmoPdfSafeText_(day.date),W-74,52,{align:'center'});
-    if(dayTrip){
+    if(dayTrip && !continued){
       doc.setFillColor(246,250,255);doc.roundedRect(34,114,W-68,57,9,9,'F');
       const semantic=_v106PdfSemanticDayTitle_(day);
       if(semantic){font('bold',14);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(semantic),W/2,132,{align:'center',maxWidth:260});}
@@ -12966,18 +12579,7 @@ async function exportItineraryToPDF(options={}){
       doc.setDrawColor(8,123,250);doc.setLineWidth(1.4);doc.line(W/2-36,146,W/2+36,146);
       font('bold',6.6);doc.setTextColor(32,122,145);doc.text(es?'IDA Y VUELTA · EXCURSIÓN':'ROUND TRIP · DAY TRIP',W/2,162,{align:'center'});
     }else{
-      const base=pdfBaseForDay(day);
-      const transfer=pdfTransferForDay(day);
-      const semantic=transfer?`${transfer.origin} → ${transfer.destination}`:(_v106PdfSemanticDayTitle_(day)||route);
-      const different=base&&semantic&&!_arePoiAliases_(base,semantic);
-      if(transfer){
-        font('bold',14);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(semantic),34,135,{maxWidth:W-68});
-      }else if(different){
-        font('bold',13);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(base),34,125,{maxWidth:W-68});
-        font('normal',10);doc.setTextColor(73,94,115);doc.text(_itbmoPdfSafeText_(semantic),34,141,{maxWidth:W-68});
-      }else{
-        font('bold',15);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(base||semantic),34,135,{maxWidth:W-68});
-      }
+      font('bold',15);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(_v106PdfSemanticDayTitle_(day)||route),34,135,{maxWidth:W-68});
     }
     if(_v106PdfAuroraContext_(day,pdfAuroraRoots)){doc.setFillColor(249,252,255);doc.rect(W-225,76,191,20,'F');font('bold',7.2);doc.setTextColor(32,122,145);doc.text(es?'ZONA Y ÉPOCA DE AURORAS BOREALES':'NORTHERN LIGHTS AREA & SEASON',W-34,88,{align:'right',maxWidth:185});}
     if(continued){font('normal',7);doc.text(es?'Continuación':'Continued',W-34,154,{align:'right'});}
@@ -12997,7 +12599,7 @@ async function exportItineraryToPDF(options={}){
   for(let i=0;i<days.length;i++){
     if(i)doc.addPage('a4','portrait');
     const day=days[i],rows=day.rows.slice().sort(_v114LogicalRowCompare_);
-    const dayTrip=pdfDayTripForDay(day),route=dayTrip?`${dayTrip.base}  <->  ${dayTrip.destination}`:day.destinations.join('  →  ');
+    const dayTrip=_v69PdfDayTripMeta_(day),route=_v67PdfDayTripLabel_(day,day.destinations.join('  →  '));
     let start=dayTrip?178:150,available=footer-start;
     let choice=null;
     for(const size of [9.0,8.7,8.4,8.1]){const candidate=layout(rows,size);if(candidate.max<=available){choice=candidate;break;}}
@@ -13011,7 +12613,7 @@ async function exportItineraryToPDF(options={}){
       // one-card orphan whenever a clean two-card continuation is possible.
       const cards=layout(rows,8.1).cards;let offset=0,pageIndex=0;
       while(offset<cards.length){
-        const pageStart=pageIndex===0?start:(dayTrip?178:165);
+        const pageStart=pageIndex===0?start:165;
         const pageAvailable=footer-pageStart;
         let take=0,best=null;
         for(let n=1;n<=cards.length-offset;n++){
@@ -13036,7 +12638,7 @@ async function exportItineraryToPDF(options={}){
             const max=Math.max(a,b);if(!best||max<best.max)best={split,max};
           }
         }
-        if(pageIndex>0){doc.addPage('a4','portrait');header(day,dayTrip,route,true);}
+        if(pageIndex>0){doc.addPage('a4','portrait');header(day,null,route,true);}
         const subset=cards.slice(offset,offset+take);
         let y=pageStart;subset.slice(0,best.split).forEach(c=>{paint(c,left,y);y+=c.height+4;});
         y=pageStart;subset.slice(best.split).forEach(c=>{paint(c,left+width+gap,y);y+=c.height+4;});
@@ -13789,7 +13391,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     _clearPostPaymentProgressLocal_(tripIdToArchive);
     try{ localStorage.removeItem(ASTRA_COACH_STORAGE_KEY); }catch(_){ }
     try{ localStorage.removeItem('itbmo_trip_workspace_snapshot_v1'); }catch(_){ }
-    try{ _tripStoryClearDraft_(); localStorage.setItem(ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY,'1'); }catch(_){ }
+    try{ _tripStoryClearDraft_(); }catch(_){ }
     try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
     // Clear accepted-stay caches/drafts from the just-archived planning run while
     // preserving account/session identity and unrelated generated-trip history.
@@ -15501,28 +15103,11 @@ function _tripStoryEsc_(v=''){return String(v??'').replace(/[&<>"']/g,c=>({'&':'
 function _tripStoryId_(prefix='node'){try{return `${prefix}_${crypto.randomUUID()}`;}catch(_){return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2,9)}`;}}
 function _tripStoryAddDays_(iso,n){const d=new Date(`${iso}T12:00:00`);if(Number.isNaN(d.getTime()))return'';d.setDate(d.getDate()+Number(n||0));return d.toISOString().slice(0,10);}
 function _tripStoryDiffDays_(a,b){const x=new Date(`${a}T12:00:00`),y=new Date(`${b}T12:00:00`);if(Number.isNaN(x.getTime())||Number.isNaN(y.getTime()))return 0;return Math.round((y-x)/86400000);}
-function _tripStoryEffectiveDates_(story){
-  // V262: count distinct potentially tourable calendar dates, not configured
-  // time inputs. Empty hours mean "pending", not "transit". The required
-  // planning windows are validated independently before paid generation.
-  const dates=new Set();
-  for(const st of (story?.stays||[])){
-    if(st?.transitOnly)continue;
-    for(let i=0;i<Number(st?.days||0);i++){
-      const window=st?.perDay?.[i];
-      const start=window?.start||'',end=window?.end||'';
-      if(start&&end&&start>=end)continue;
-      const date=_tripStoryAddDays_(st.startDate,i);
-      if(date)dates.add(date);
-    }
-  }
-  return dates;
-}
 function _tripStoryDMY_(iso=''){const m=String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:'';}
 function _tripStoryTimeMinutes_(v=''){const m=String(v).match(/^(\d{2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):null;}
 function _tripStoryClampArrivalStart_(st){if(!st?.arrivalTime||!st?.perDay?.[0])return;const a=_tripStoryTimeMinutes_(st.arrivalTime),cur=_tripStoryTimeMinutes_(st.perDay[0].start);if(a!=null&&(cur==null||cur<a))st.perDay[0].start=st.arrivalTime;}
 function _tripStoryTransportOptions_(selected=''){const es=getLang()==='es';return [['',es?'Que ITBMO lo resuelva':'Let ITBMO resolve it'],['plane',es?'Avión':'Plane'],['train',es?'Tren':'Train'],['bus','Bus'],['car',es?'Automóvil':'Car'],['ferry','Ferry'],['transfer','Transfer'],['other',es?'Otro':'Other']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
-function _tripStoryTimeOptions_(selected='',allowBlank=true){const es=getLang()==='es';let out=allowBlank?`<option value="">${es?'Aún no lo sé':'Not sure yet'}</option>`:'';for(let h=0;h<24;h++)for(const m of [0,15,30,45]){const v=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;out+=`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`;}return out;}
+function _tripStoryTimeOptions_(selected='',allowBlank=true){const es=getLang()==='es';let out=allowBlank?`<option value="">${es?'Aún no lo sé':'Not sure yet'}</option>`:'';for(let h=0;h<24;h++)for(const m of [0,30]){const v=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;out+=`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`;}return out;}
 function _tripStoryRequiredTimeOptions_(selected=''){const es=getLang()==='es';return _tripStoryTimeOptions_(selected,true).replace(es?'Aún no lo sé':'Not sure yet',es?'Selecciona una hora':'Select a time');}
 function _tripStoryTimeStatusOptions_(selected='estimated'){const es=getLang()==='es';return [['confirmed',es?'Confirmado · ya tengo el horario':'Confirmed · I have the schedule'],['estimated',es?'Estimado · podré ajustarlo después':'Estimated · I can update it later']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
 function _tripStoryDaysOptions_(selected=1,transitOnly=false){
@@ -15533,22 +15118,7 @@ function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_ve
 function _tripStoryDraftKey_(){const who=String(currentUser?.id||currentUser?.email||'guest').replace(/[^a-z0-9_.@-]/gi,'_');return `itbmo_trip_story_draft_v1_${who}`;}
 function _tripStoryLoadDraftByKey_(key){try{if(!key)return null;const raw=localStorage.getItem(key)||sessionStorage.getItem(key)||'';if(!raw)return null;const parsed=JSON.parse(raw);try{localStorage.setItem(key,raw);sessionStorage.removeItem(key);}catch(_){}return parsed;}catch(_){return null;}}
 function _tripStoryLoadDraft_(){return _tripStoryLoadDraftByKey_(_tripStoryDraftKey_());}
-function _tripStorySaveDraft_(story){try{localStorage.setItem(_tripStoryDraftKey_(),JSON.stringify(story));localStorage.removeItem(ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY);}catch(_){}}
-// V216: A successful generation ends the editable route draft, not the generated trip.
-// Never clear this draft on close/minimize or while generation is recoverable.
-const ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY='itbmo_route_post_generation_clean_v216';
-function _tripStoryMarkGeneratedDraftComplete_(){
-  try{localStorage.setItem(ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY,'1');}catch(_){}
-  _tripStoryClearDraft_();
-  // Keep the generated itinerary available in its workspace, but remove
-  // editable builder snapshots that could resurrect it as a new journey.
-}
-function _tripStoryUseEmptyAfterGeneration_(){
-  try{return localStorage.getItem(ITBMO_ROUTE_POST_GENERATION_CLEAN_KEY)==='1';}catch(_){return false;}
-}
-function _tripStoryEmptyForNextJourney_(){
-  return {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};
-}
+function _tripStorySaveDraft_(story){try{localStorage.setItem(_tripStoryDraftKey_(),JSON.stringify(story));}catch(_){}}
 function _tripStoryClearDraft_(){try{localStorage.removeItem(_tripStoryDraftKey_());sessionStorage.removeItem(_tripStoryDraftKey_());}catch(_){}
   _tripStorySetMinimizedState_(false);
   _tripStorySetWorkspaceResume_(false);
@@ -15627,10 +15197,10 @@ function _tripStoryRestoreMinimizedFabAfterNavigation_(){
   _tripStoryCreateResumeFab_(()=>{openTripStoryBuilder();});
 }
 function _tripStoryClampDepartureEnd_(prev,departureTime){if(!prev?.perDay?.length||!departureTime)return;const last=prev.perDay[prev.perDay.length-1],dep=_tripStoryTimeMinutes_(departureTime),cur=_tripStoryTimeMinutes_(last.end);if(dep!=null&&(cur==null||cur>dep))last.end=departureTime;}
-function _tripStoryApplyBoundaryHours_(story){const stays=story?.stays||[];if(!stays.length)return story;const first=stays[0],last=stays.at(-1);if(!first.transitOnly&&first.firstDayReadyTime){const ready=_tripStoryTimeMinutes_(first.firstDayReadyTime);if(ready!=null&&first.perDay?.[0]){const current=_tripStoryTimeMinutes_(first.perDay[0].start);if(current==null||current<ready)first.perDay[0].start=first.firstDayReadyTime;const end=_tripStoryTimeMinutes_(first.perDay[0].end);if(end!=null&&ready>=end){first.perDay[0].start='';first.perDay[0].end='';}}}for(let i=1;i<stays.length;i++){const st=stays[i],prev=stays[i-1],prevEnd=_tripStoryStayEnd_(prev);if(st.arrivalTime&&(!st.arrivalDate||st.arrivalDate===st.startDate))_tripStoryClampArrivalStart_(st);if(st.departureTime&&st.departureDate===prevEnd)_tripStoryClampDepartureEnd_(prev,st.departureTime);}if(story.returnTrip?.enabled&&story.returnTrip?.departureTime&&(!story.returnTrip.departureDate||story.returnTrip.departureDate===_tripStoryStayEnd_(last)))_tripStoryClampDepartureEnd_(last,story.returnTrip.departureTime);return story;}
+function _tripStoryApplyBoundaryHours_(story){const stays=story?.stays||[];if(!stays.length)return story;const first=stays[0],last=stays.at(-1);if(story.start?.arrivalTime&&(!story.start.arrivalDate||story.start.arrivalDate===first.startDate)){_tripStoryClampArrivalStart_(Object.assign(first,{arrivalTime:story.start.arrivalTime}));}for(let i=1;i<stays.length;i++){const st=stays[i],prev=stays[i-1],prevEnd=_tripStoryStayEnd_(prev);if(st.arrivalTime&&(!st.arrivalDate||st.arrivalDate===st.startDate))_tripStoryClampArrivalStart_(st);if(st.departureTime&&st.departureDate===prevEnd)_tripStoryClampDepartureEnd_(prev,st.departureTime);}if(story.returnTrip?.enabled&&story.returnTrip?.departureTime&&(!story.returnTrip.departureDate||story.returnTrip.departureDate===_tripStoryStayEnd_(last)))_tripStoryClampDepartureEnd_(last,story.returnTrip.departureTime);return story;}
 function _tripStoryDefaultHours_(dayIndex,st){return {day:dayIndex+1,start:(st?.perDay?.[dayIndex]?.start||DEFAULT_START||''),end:(st?.perDay?.[dayIndex]?.end||DEFAULT_END||'')};}
 function _tripStoryEnsureDayTrip_(dt={}){dt.id=dt.id||_tripStoryId_('daytrip');dt.day=Math.max(1,Number(dt.day||1));dt.countryCode=dt.countryCode||'';dt.country=dt.country||'';dt.place=dt.place||'';dt.outbound=dt.outbound||{};dt.return=dt.return||{};dt.outbound.transportMode=dt.outbound.transportMode||dt.transportMode||'';dt.outbound.routeResolution=dt.outbound.routeResolution||null;dt.outbound.departureTime=dt.outbound.departureTime||dt.departureTime||'';dt.outbound.arrivalTime=dt.outbound.arrivalTime||dt.arrivalTime||'';dt.outbound.timeStatus=dt.outbound.timeStatus||dt.timeStatus||'estimated';dt.return.transportMode=dt.return.transportMode||dt.returnTransportMode||dt.outbound.transportMode||'';dt.return.routeResolution=dt.return.routeResolution||null;dt.return.departureTime=dt.return.departureTime||dt.returnDepartureTime||'';dt.return.arrivalTime=dt.return.arrivalTime||dt.returnArrivalTime||'';dt.return.timeStatus=dt.return.timeStatus||dt.timeStatus||'estimated';return dt;}
-function _tripStoryEnsureStay_(st={}){st.id=st.id||_tripStoryId_('stay');st.countryCode=st.countryCode||'';st.country=st.country||'';st.place=st.place||'';st.transitOnly=Boolean(st.transitOnly);st.firstDayReadyTime=typeof st.firstDayReadyTime==='string'?st.firstDayReadyTime:'';st.firstDaysSelected=st.firstDaysSelected===true||Boolean(st.firstDayReadyTime)||st.transitOnly;st.days=Math.max(1,Number(st.days||1));st.startDate=st.startDate||'';st.transportMode=st.transportMode||'';st.transportStatus=st.transportStatus||((st.transportMode||st.arrivalTime)?'user_defined':'route_to_resolve');st.routeResolution=st.routeResolution||null;st.departureDate=st.departureDate||'';st.departureTime=st.departureTime||'';st.arrivalDate=st.arrivalDate||st.startDate||'';st.arrivalTime=st.arrivalTime||'';st.timeStatus=st.timeStatus||'estimated';st.dayTrips=(Array.isArray(st.dayTrips)?st.dayTrips:[]).map(_tripStoryEnsureDayTrip_);const old=Array.isArray(st.perDay)?st.perDay:[];st.perDay=Array.from({length:st.days},(_,i)=>({day:i+1,start:old[i]&&Object.prototype.hasOwnProperty.call(old[i],'start')?old[i].start:(DEFAULT_START||''),end:old[i]&&Object.prototype.hasOwnProperty.call(old[i],'end')?old[i].end:(DEFAULT_END||'')}));return st;}
+function _tripStoryEnsureStay_(st={}){st.id=st.id||_tripStoryId_('stay');st.countryCode=st.countryCode||'';st.country=st.country||'';st.place=st.place||'';st.transitOnly=Boolean(st.transitOnly);st.days=Math.max(1,Number(st.days||1));st.startDate=st.startDate||'';st.transportMode=st.transportMode||'';st.transportStatus=st.transportStatus||((st.transportMode||st.arrivalTime)?'user_defined':'route_to_resolve');st.routeResolution=st.routeResolution||null;st.departureDate=st.departureDate||'';st.departureTime=st.departureTime||'';st.arrivalDate=st.arrivalDate||st.startDate||'';st.arrivalTime=st.arrivalTime||'';st.timeStatus=st.timeStatus||'estimated';st.dayTrips=(Array.isArray(st.dayTrips)?st.dayTrips:[]).map(_tripStoryEnsureDayTrip_);const old=Array.isArray(st.perDay)?st.perDay:[];st.perDay=Array.from({length:st.days},(_,i)=>({day:i+1,start:old[i]?.start||DEFAULT_START||'',end:old[i]?.end||DEFAULT_END||''}));return st;}
 function _tripStoryCountryFromCode_(code=''){return _countryOptions_().find(x=>x.code===code)||null;}
 function _tripStoryCountryMatchLabel_(label=''){const n=_normalizeSearch_(label);return _countryOptions_().find(x=>_normalizeSearch_(x.label)===n||_normalizeSearch_(x.apiName||'')===n)||null;}
 function _tripStoryDayDate_(st,index){return st?.startDate?_tripStoryAddDays_(st.startDate,index):'';}
@@ -15640,15 +15210,7 @@ function _tripStoryRecalculateFrom_(story,index=0,{preserveAnchor=true}={}){stor
 function _tripStoryCopyText_(story){const es=getLang()==='es',lines=[es?'Mi recorrido ITBMO':'My ITBMO journey'];if(story.start?.origin?.label||story.start?.arrival?.label){lines.push('',`${story.start.origin?.label||'—'} → ${story.start.arrival?.label||'—'}${story.start.date?` · ${_tripStoryDMY_(story.start.date)}`:''}`);}story.stays.forEach((st,i)=>{if(i>0)lines.push(`${story.stays[i-1].place} → ${st.place}${st.departureDate?` · ${_tripStoryDMY_(st.departureDate)}`:''}${st.departureTime?` · ${st.departureTime}`:''}${st.arrivalTime?`–${st.arrivalTime}`:''}`);lines.push(`${st.place} · ${_tripStoryDMY_(st.startDate)}${_tripStoryStayEnd_(st)!==st.startDate?`–${_tripStoryDMY_(_tripStoryStayEnd_(st))}`:''} · ${st.transitOnly?(es?'sólo tránsito':'transit only'):`${st.days} ${st.days===1?(es?'día':'day'):(es?'días':'days')}`}`);st.dayTrips.forEach(dt=>lines.push(`  ↳ ${dt.place} · ${es?'excursión Día':'day trip Day'} ${dt.day}${dt.outbound.departureTime?` · ${dt.outbound.departureTime}`:''}${dt.return.arrivalTime?`–${dt.return.arrivalTime}`:''}`));});if(story.returnTrip?.enabled)lines.push('',`${es?'Regreso':'Return'}: ${story.returnTrip.origin?.label||story.stays.at(-1)?.place||'—'} → ${story.returnTrip.arrival?.label||'—'}${story.returnTrip.departureDate?` · ${_tripStoryDMY_(story.returnTrip.departureDate)}`:''}`);return lines.join('\n');}
 function renderTripStorySummary(){const host=qs('#trip-story-summary');if(!host)return;const story=_tripStoryCurrent_(),stays=story.stays||[];if(!stays.length){host.hidden=true;return;}host.hidden=false;const es=getLang()==='es',nodes=stays.map((x,i)=>`<div class="trip-story-summary-stop"><span>${String(i+1).padStart(2,'0')}</span><div><b>${_tripStoryEsc_(x.place)}</b><small>${_tripStoryDMY_(x.startDate)}${_tripStoryStayEnd_(x)!==x.startDate?` → ${_tripStoryDMY_(_tripStoryStayEnd_(x))}`:''} · ${x.transitOnly?(es?'Sólo tránsito':'Transit only'):`${x.days} ${x.days===1?(es?'día':'day'):(es?'días':'days')}`}</small>${x.dayTrips?.length?`<em>✦ ${x.dayTrips.map(d=>_tripStoryEsc_(d.place)).join(' · ')}</em>`:''}</div></div>`).join('<div class="trip-story-summary-arrow">→</div>');host.innerHTML=`<div class="trip-story-summary__head"><div><small>✦ ${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><strong>${es?'Tu historia está guardada y puedes cambiarla cuando quieras':'Your story is saved and can be changed anytime'}</strong></div><div class="trip-story-summary-actions"><button type="button" id="copy-trip-story">${es?'Copiar recorrido':'Copy journey'}</button><button type="button" id="edit-trip-story" class="is-primary">${es?'Editar mi viaje':'Edit my trip'}</button></div></div><div class="trip-story-summary-flow">${nodes}</div>`;const postPaymentLocked=Boolean(currentTripId&&paymentGateSatisfiedTripId===currentTripId);const editBtn=qs('#edit-trip-story');if(editBtn){editBtn.disabled=postPaymentLocked;editBtn.setAttribute('aria-disabled',String(postPaymentLocked));if(!postPaymentLocked)editBtn.addEventListener('click',openTripStoryBuilder);}host.classList.toggle('is-payment-locked',postPaymentLocked);qs('#copy-trip-story')?.addEventListener('click',async()=>{const txt=_tripStoryCopyText_(story);try{await navigator.clipboard.writeText(txt);const b=qs('#copy-trip-story');if(b){const old=b.textContent;b.textContent=es?'✓ Copiado':'✓ Copied';setTimeout(()=>b.textContent=old,1600);}}catch(_){prompt(es?'Copia tu recorrido:':'Copy your journey:',txt);}});}
 async function _tripStorySuggestions_(countryCode,query,{global=false}={}){const match=_tripStoryCountryFromCode_(countryCode),q=String(query||'').trim();if(q.length<3||(!global&&!match))return[];const key=global?`story|global|${getLang()}|${_normalizeSearch_(q)}`:`story|${match.code}|${_normalizeSearch_(q)}`;if(destinationSuggestionCache.has(key))return destinationSuggestionCache.get(key);try{const url=global?`${ITBMO_DESTINATION_SUGGESTIONS_URL}?global=1&lang=${encodeURIComponent(getLang())}&q=${encodeURIComponent(q)}`:`${ITBMO_DESTINATION_SUGGESTIONS_URL}?country=${encodeURIComponent(match.apiName)}&countryCode=${encodeURIComponent(match.code)}&lang=${encodeURIComponent(getLang())}&q=${encodeURIComponent(q)}`;const r=await fetch(url,{headers:{Accept:'application/json'}}),d=await r.json().catch(()=>({}));const raw=global?(Array.isArray(d?.results)?d.results:[]):(Array.isArray(d?.suggestions)?d.suggestions:[]);const a=global?raw.map(x=>({label:x?.city||'',countryCode:x?.countryCode||'',country:x?.country||''})).filter(x=>x.label):raw;destinationSuggestionCache.set(key,a);return a;}catch(_){return[];}}
-function _tripStoryValidate_(story){const es=getLang()==='es',issues=[],add=(code,title,message,stayIndex=null)=>issues.push({code,title,message,stayIndex});if(!story.stays.length){add('NO_STAYS',es?'Falta tu primer destino':'Your first destination is missing',es?'Agrega al menos una estancia para construir el recorrido.':'Add at least one stay.');return issues;}story.stays.forEach((st,i)=>{if(!st.countryCode)add('COUNTRY',st.place||`${es?'Destino':'Destination'} ${i+1}`,es?'Selecciona un país válido de la lista.':'Select a valid country from the list.',i);if(!String(st.place||'').trim())add('PLACE',`${es?'Destino':'Destination'} ${i+1}`,es?'Escribe el destino de esta estancia.':'Enter this stay destination.',i);if(!st.startDate)add('DATE',st.place||`${es?'Destino':'Destination'} ${i+1}`,es?'Selecciona el primer día que quieres planificar.':'Select the first day to plan.',i);st.perDay.forEach((d,j)=>{if(d.start&&d.end&&d.start>=d.end)add('DAY_HOURS',`${st.place} · ${es?'Día':'Day'} ${j+1}`,es?`La hora de inicio (${d.start}) debe ser anterior a la hora final (${d.end}).`:`Start time (${d.start}) must be before end time (${d.end}).`,i);});st.dayTrips.forEach(dt=>{if(!String(dt.place||'').trim())add('DAYTRIP_PLACE',`${st.place} · ${es?'Día':'Day'} ${dt.day}`,es?'Completa el destino de la excursión.':'Complete the day-trip destination.',i);const o=dt.outbound,r=dt.return;if(o.departureTime&&o.arrivalTime&&o.departureTime>=o.arrivalTime)add('DAYTRIP_OUT',dt.place,es?'En la ida, la llegada debe ser posterior a la salida.':'Outbound arrival must be after departure.',i);if(r.departureTime&&r.arrivalTime&&r.departureTime>=r.arrivalTime)add('DAYTRIP_RETURN',dt.place,es?'En el regreso, la llegada debe ser posterior a la salida.':'Return arrival must be after departure.',i);if(o.arrivalTime&&r.departureTime&&o.arrivalTime>=r.departureTime)add('DAYTRIP_WINDOW',dt.place,es?'La hora de regreso debe ser posterior a la llegada de ida.':'Return departure must be after outbound arrival.',i);});if(i>0){const prev=story.stays[i-1],prevEnd=_tripStoryStayEnd_(prev),dep=st.departureDate||st.startDate,arr=st.arrivalDate||st.startDate;if(st.startDate&&prevEnd&&st.startDate<prevEnd)add('STAY_CHRONOLOGY',`${prev.place} → ${st.place}`,es?`${st.place} no puede comenzar el ${_tripStoryDMY_(st.startDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}.`:`${st.place} cannot start on ${_tripStoryDMY_(st.startDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}.`,i);if(!st.departureDate)add('MOVE_DATE_REQUIRED',`${prev.place} → ${st.place}`,es?'Indica la fecha de salida hacia el siguiente destino.':'Enter the departure date for the next destination.',i);if(!st.departureTime)add('MOVE_TIME_REQUIRED',`${prev.place} → ${st.place}`,es?'Indica la hora de salida hacia el siguiente destino.':'Enter the departure time for the next destination.',i);if(dep&&prevEnd&&dep<prevEnd)add('MOVE_CUTS_STAY',`${prev.place} → ${st.place}`,es?`El traslado sale el ${_tripStoryDMY_(dep)}, pero ${prev.place} todavía tiene días declarados hasta ${_tripStoryDMY_(prevEnd)}. Reduce la estancia o mueve el traslado al último día.`:`The transfer leaves on ${_tripStoryDMY_(dep)}, but ${prev.place} is declared through ${_tripStoryDMY_(prevEnd)}. Shorten the stay or move the transfer to its last day.`,i);const sameDayTrips=(prev.dayTrips||[]).filter(dt=>_tripStoryAddDays_(prev.startDate,dt.day-1)===dep);sameDayTrips.forEach(dt=>{if(st.departureTime&&dt.return?.arrivalTime&&dt.return.arrivalTime>st.departureTime)add('DAYTRIP_TRANSFER_OVERLAP',`${dt.place} / ${prev.place} → ${st.place}`,es?`La excursión regresa a las ${dt.return.arrivalTime}, pero el traslado al siguiente destino sale a las ${st.departureTime}.`:`The day trip returns at ${dt.return.arrivalTime}, but the next transfer leaves at ${st.departureTime}.`,i-1);});if(dep&&prev.startDate&&dep<prev.startDate)add('MOVE_BEFORE',`${prev.place} → ${st.place}`,es?'El traslado sale antes de que comience la estancia anterior.':'The transfer leaves before the previous stay begins.',i);if(arr&&dep&&arr<dep)add('MOVE_DATE',`${prev.place} → ${st.place}`,es?'La fecha de llegada es anterior a la fecha de salida.':'Arrival date is before departure date.',i);if(dep===arr&&st.departureTime&&st.arrivalTime&&st.departureTime>=st.arrivalTime)add('MOVE_TIME',`${prev.place} → ${st.place}`,es?'La hora de llegada debe ser posterior a la hora de salida.':'Arrival time must be after departure time.',i);if(st.startDate&&arr&&st.startDate<arr)add('STAY_BEFORE_ARRIVAL',st.place,es?'La estancia comienza antes de que llegues físicamente al destino.':'The stay starts before you physically arrive.',i);if(prevEnd&&dep&&dep>_tripStoryAddDays_(prevEnd,1))add('GAP',`${prev.place} → ${st.place}`,es?'Hay días sin ubicación definida entre ambas estancias. Ajusta las fechas o agrega el destino intermedio.':'There are undefined days between these stays. Adjust dates or add the intermediate destination.',i);}});if(story.returnTrip?.enabled&&!String(story.returnTrip.arrival?.label||'').trim())add('RETURN_DESTINATION',es?'Falta el destino de regreso':'Return destination missing',es?'Indica a dónde regresarás al finalizar el recorrido.':'Enter your return destination.');if(!story.ended)add('NOT_ENDED',es?'Confirma el final de tu recorrido':'Confirm where your journey ends',es?'Marca “Sí, aquí termina mi recorrido” o agrega el siguiente destino.':'Choose “Yes, my journey ends here” or add the next destination.');return issues;}
-const _v218TripStoryValidateCore_=_tripStoryValidate_;
-_tripStoryValidate_=function(story){
-  const dates=_tripStoryEffectiveDates_(story);
-  const es=getLang()==='es';
-  const issues=_v218TripStoryValidateCore_(story);
-  if(dates.size>MAX_TRIP_STORY_DAYS)issues.push({code:'EFFECTIVE_DAY_LIMIT',title:es?'Límite de días efectivos':'Effective day limit',message:es?`El recorrido tiene ${dates.size} días efectivos; el máximo es ${MAX_TRIP_STORY_DAYS}.`:`This route has ${dates.size} effective days; the maximum is ${MAX_TRIP_STORY_DAYS}.`});
-  return issues;
-};
+function _tripStoryValidate_(story){const es=getLang()==='es',issues=[],add=(code,title,message,stayIndex=null)=>issues.push({code,title,message,stayIndex});if(!story.stays.length){add('NO_STAYS',es?'Falta tu primer destino':'Your first destination is missing',es?'Agrega al menos una estancia para construir el recorrido.':'Add at least one stay.');return issues;}story.stays.forEach((st,i)=>{if(!st.countryCode)add('COUNTRY',st.place||`${es?'Destino':'Destination'} ${i+1}`,es?'Selecciona un país válido de la lista.':'Select a valid country from the list.',i);if(!String(st.place||'').trim())add('PLACE',`${es?'Destino':'Destination'} ${i+1}`,es?'Escribe el destino de esta estancia.':'Enter this stay destination.',i);if(!st.startDate)add('DATE',st.place||`${es?'Destino':'Destination'} ${i+1}`,es?'Selecciona el primer día que quieres planificar.':'Select the first day to plan.',i);st.perDay.forEach((d,j)=>{if(d.start&&d.end&&d.start>=d.end)add('DAY_HOURS',`${st.place} · ${es?'Día':'Day'} ${j+1}`,es?`La hora de inicio (${d.start}) debe ser anterior a la hora final (${d.end}).`:`Start time (${d.start}) must be before end time (${d.end}).`,i);});st.dayTrips.forEach(dt=>{if(!String(dt.place||'').trim())add('DAYTRIP_PLACE',`${st.place} · ${es?'Día':'Day'} ${dt.day}`,es?'Completa el destino de la excursión.':'Complete the day-trip destination.',i);const o=dt.outbound,r=dt.return;if(o.departureTime&&o.arrivalTime&&o.departureTime>=o.arrivalTime)add('DAYTRIP_OUT',dt.place,es?'En la ida, la llegada debe ser posterior a la salida.':'Outbound arrival must be after departure.',i);if(r.departureTime&&r.arrivalTime&&r.departureTime>=r.arrivalTime)add('DAYTRIP_RETURN',dt.place,es?'En el regreso, la llegada debe ser posterior a la salida.':'Return arrival must be after departure.',i);if(o.arrivalTime&&r.departureTime&&o.arrivalTime>=r.departureTime)add('DAYTRIP_WINDOW',dt.place,es?'La hora de regreso debe ser posterior a la llegada de ida.':'Return departure must be after outbound arrival.',i);});if(i>0){const prev=story.stays[i-1],prevEnd=_tripStoryStayEnd_(prev),dep=st.departureDate||st.startDate,arr=st.arrivalDate||st.startDate;if(st.startDate&&prevEnd&&st.startDate<prevEnd)add('STAY_CHRONOLOGY',`${prev.place} → ${st.place}`,es?`${st.place} no puede comenzar el ${_tripStoryDMY_(st.startDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}.`:`${st.place} cannot start on ${_tripStoryDMY_(st.startDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}.`,i);if(!st.departureDate)add('MOVE_DATE_REQUIRED',`${prev.place} → ${st.place}`,es?'Indica la fecha de salida hacia el siguiente destino.':'Enter the departure date for the next destination.',i);if(!st.departureTime)add('MOVE_TIME_REQUIRED',`${prev.place} → ${st.place}`,es?'Indica la hora de salida hacia el siguiente destino.':'Enter the departure time for the next destination.',i);if(dep&&prevEnd&&dep<prevEnd)add('MOVE_CUTS_STAY',`${prev.place} → ${st.place}`,es?`El traslado sale el ${_tripStoryDMY_(dep)}, pero ${prev.place} todavía tiene días declarados hasta ${_tripStoryDMY_(prevEnd)}. Reduce la estancia o mueve el traslado al último día.`:`The transfer leaves on ${_tripStoryDMY_(dep)}, but ${prev.place} is declared through ${_tripStoryDMY_(prevEnd)}. Shorten the stay or move the transfer to its last day.`,i);const sameDayTrips=(prev.dayTrips||[]).filter(dt=>_tripStoryAddDays_(prev.startDate,dt.day-1)===dep);sameDayTrips.forEach(dt=>{if(st.departureTime&&dt.return?.arrivalTime&&dt.return.arrivalTime>st.departureTime)add('DAYTRIP_TRANSFER_OVERLAP',`${dt.place} / ${prev.place} → ${st.place}`,es?`La excursión regresa a las ${dt.return.arrivalTime}, pero el traslado al siguiente destino sale a las ${st.departureTime}.`:`The day trip returns at ${dt.return.arrivalTime}, but the next transfer leaves at ${st.departureTime}.`,i-1);});if(dep&&prev.startDate&&dep<prev.startDate)add('MOVE_BEFORE',`${prev.place} → ${st.place}`,es?'El traslado sale antes de que comience la estancia anterior.':'The transfer leaves before the previous stay begins.',i);if(arr&&dep&&arr<dep)add('MOVE_DATE',`${prev.place} → ${st.place}`,es?'La fecha de llegada es anterior a la fecha de salida.':'Arrival date is before departure date.',i);if(dep===arr&&st.departureTime&&st.arrivalTime&&st.departureTime>=st.arrivalTime)add('MOVE_TIME',`${prev.place} → ${st.place}`,es?'La hora de llegada debe ser posterior a la hora de salida.':'Arrival time must be after departure time.',i);if(st.startDate&&arr&&st.startDate<arr)add('STAY_BEFORE_ARRIVAL',st.place,es?'La estancia comienza antes de que llegues físicamente al destino.':'The stay starts before you physically arrive.',i);if(prevEnd&&dep&&dep>_tripStoryAddDays_(prevEnd,1))add('GAP',`${prev.place} → ${st.place}`,es?'Hay días sin ubicación definida entre ambas estancias. Ajusta las fechas o agrega el destino intermedio.':'There are undefined days between these stays. Adjust dates or add the intermediate destination.',i);}});if(!story.ended)add('NOT_ENDED',es?'Confirma el final de tu recorrido':'Confirm where your journey ends',es?'Marca “Sí, aquí termina mi recorrido” o agrega el siguiente destino.':'Choose “Yes, my journey ends here” or add the next destination.');return issues;}
 function _tripStoryRequiredTimeIssues_(story){
   const es=getLang()==='es',issues=[];
   const add=(title,message,stayIndex=null)=>issues.push({code:'REQUIRED_MOVEMENT_CORE',title,message,stayIndex});
@@ -15721,7 +15283,6 @@ function _tripStoryMovementEdgeKey_(fromStay,toStay){return `${fromStay?.id||''}
 function _tripStoryResetReturnMovement_(story){
   if(!story?.returnTrip)return;
   story.returnTrip.origin={label:story.stays?.at(-1)?.place||'',type:'city'};
-  // Preserve the chosen home destination when only the departure boundary changes.
   story.returnTrip.transportMode='';story.returnTrip.departureDate='';story.returnTrip.departureTime='';
   story.returnTrip.arrivalDate='';story.returnTrip.arrivalTime='';story.returnTrip.timeStatus='estimated';story.returnTrip.routeResolution=null;
 }
@@ -15752,40 +15313,26 @@ function _tripStoryMoveStay_(story,from,to){
   if(story.returnTrip?.enabled){if(oldLast!==newLast)_tripStoryResetReturnMovement_(story);else{story.returnTrip.origin={label:story.stays.at(-1)?.place||'',type:'city'};story.returnTrip.routeResolution=null;}}
   return true;
 }
-// V239: reset must never derive defaults from the current TravelV2 engine,
-// which may still contain inbound and homebound movements from the prior trip.
 function _tripStoryResetRoute_(story){
-  const clean=_tripStoryEmptyForNextJourney_();
-  story.schema_version=clean.schema_version;
-  story.start=JSON.parse(JSON.stringify(clean.start));
+  const clean=_tripStoryCurrent_();
+  story.start={...clean.start,enabled:false,origin:{label:'',type:'city'},arrival:{label:'',type:'city'}};
   story.stays=[_tripStoryEnsureStay_({days:1})];
-  story.returnTrip=JSON.parse(JSON.stringify(clean.returnTrip));
+  story.returnTrip={...clean.returnTrip,enabled:false,origin:{label:'',type:'city'},arrival:{label:'',type:'city'}};
   story.ended=false;
   return story;
 }
-
 let _tripStoryBuilderSession_=null;
 function openTripStoryBuilder(){
   document.body.classList.remove('itbmo-builder-closed-clean');
   // V95: opening/restoring the full builder always owns the route UI. Remove any
   // orphan launcher restored by planner boot before creating or restoring it.
   document.querySelectorAll('.trip-story-minimized-fab').forEach(x=>x.remove());
-  if(currentTripId && paymentGateSatisfiedTripId===currentTripId && !_v71HasTripCompletionMarker_(currentTripId)) return;
+  if(currentTripId && paymentGateSatisfiedTripId===currentTripId) return;
   // V91: if the guided route builder is only minimized, restore the exact live
   // instance instead of creating a second builder or re-hydrating a new screen.
   if(_tripStoryBuilderSession_?.overlay?.isConnected){
     _tripStoryBuilderSession_.restore?.();
     return;
-  }
-  // V263: a completed generation belongs to My Trips, never to a new builder.
-  // This is a local identity separation only: server exports remain untouched.
-  if(currentTripId && _v71HasTripCompletionMarker_(currentTripId)){
-    storeActiveTripId(null);
-    currentTripId=null;
-    paymentGateSatisfiedTripId=null;
-    generationRecoveryState=null;
-    _tripStoryMarkGeneratedDraftComplete_();
-    try{_travelV2()?.setTripStory?.(null);}catch(_){}
   }
   const es=getLang()==='es';
   const engine=_travelV2();
@@ -15795,14 +15342,9 @@ function openTripStoryBuilder(){
   const builderSession=_tripStoryLoadBuilderSession_();
   // V97: recovery no longer depends on currentUser/draft-key equality. The account
   // can hydrate after DOMContentLoaded, which made V94-V96 reject a valid snapshot.
-  const sessionMatches=_tripStoryRecoveryIsUsable_(builderSession) && !_tripStoryUseEmptyAfterGeneration_();
-  const minimizedResumeDraft=!_tripStoryUseEmptyAfterGeneration_()&&minimizedResumeState&&_tripStoryDraftIsRecoverableByKey_(minimizedResumeState.draftKey)?_tripStoryLoadDraftByKey_(minimizedResumeState.draftKey):null;
-  // V238: terminal-success is authoritative over stale account-scoped drafts and
-  // engine state. Failed/interrupted runs never set this marker and still resume.
-  const completedRouteMustStartEmpty=_tripStoryUseEmptyAfterGeneration_();
-  let story=JSON.parse(JSON.stringify(completedRouteMustStartEmpty
-    ? _tripStoryEmptyForNextJourney_()
-    : ((sessionMatches&&builderSession.story) || minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryEmptyForNextJourney_())));
+  const sessionMatches=_tripStoryRecoveryIsUsable_(builderSession);
+  const minimizedResumeDraft=minimizedResumeState&&_tripStoryDraftIsRecoverableByKey_(minimizedResumeState.draftKey)?_tripStoryLoadDraftByKey_(minimizedResumeState.draftKey):null;
+  let story=JSON.parse(JSON.stringify((sessionMatches&&builderSession.story) || minimizedResumeDraft || _tripStoryLoadDraft_() || _tripStoryCurrent_()));
   story.start=story.start||{date:'',transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:''};
   story.returnTrip=story.returnTrip||{enabled:false,transportMode:'',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:''};
   story.stays=(story.stays||[]).map(_tripStoryEnsureStay_);
@@ -15810,8 +15352,8 @@ function openTripStoryBuilder(){
   let phase='travelers', activeStay=0, pendingNextStay=null, editReturnPhase=null, editReturnStay=null, dayTripDraft=null, dayTripEditIndex=null, resumeTravelerDraft=null;
   // Restore only validated UI/navigation context. The journey itself was already
   // loaded from the canonical session draft above.
-  const resumeUI=completedRouteMustStartEmpty?null:((sessionMatches&&builderSession.ui&&typeof builderSession.ui==='object')?builderSession.ui:(minimizedResumeState?.ui&&typeof minimizedResumeState.ui==='object'?minimizedResumeState.ui:null));
-  const resumeFields=completedRouteMustStartEmpty?null:((sessionMatches&&Array.isArray(builderSession.fields))?builderSession.fields:null);
+  const resumeUI=(sessionMatches&&builderSession.ui&&typeof builderSession.ui==='object')?builderSession.ui:(minimizedResumeState?.ui&&typeof minimizedResumeState.ui==='object'?minimizedResumeState.ui:null);
+  const resumeFields=(sessionMatches&&Array.isArray(builderSession.fields))?builderSession.fields:null;
   if(resumeUI){
     const allowedPhases=new Set(['travelers','start','stay','decision','daytrip','movement','return','review']);
     if(allowedPhases.has(resumeUI.phase))phase=resumeUI.phase;
@@ -15893,12 +15435,12 @@ function openTripStoryBuilder(){
   overlay.querySelector('[data-gj-close]').onclick=close;
   const countryField=(value,code,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" data-country-code="${_tripStoryEsc_(code||'')}" placeholder="${es?'Escribe el país…':'Type country…'}"><div class="trip-story-suggestions" hidden></div></div>`;
   const destinationField=(value,attr)=>`<div class="trip-story-location-field"><input autocomplete="off" ${attr} value="${_tripStoryEsc_(value||'')}" placeholder="${es?'Escribe el destino…':'Type destination…'}"><div class="trip-story-suggestions" hidden></div></div>`;
-  const bindLocation=(input,onPick,kind='country',countryCode=()=>'',options={} )=>{if(!input)return;let timer;input.oninput=()=>{onPick({label:input.value,code:'',typing:true});clearTimeout(timer);const menu=input.parentElement.querySelector('.trip-story-suggestions'),q=input.value.trim();if(q.length<(kind==='country'?2:3)){menu.hidden=true;return;}if(kind==='country'){const items=_tripStoryCountrySuggestions_(q);menu.innerHTML=items.length?items.map(x=>`<button type="button">${_tripStoryEsc_(x.label)}</button>`).join(''):`<div>${es?'Puedes conservar lo escrito.':'You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:items[n].label,code:items[n].code});render();});}else{timer=setTimeout(async()=>{const items=await _tripStorySuggestions_(countryCode(),q,{global:Boolean(options.global)});if(input.value.trim()!==q)return;menu.innerHTML=(items.length?items.slice(0,10).map(x=>`<button type="button">${_tripStoryEsc_(typeof x==='string'?x:x.label)}</button>`).join(''):'')+`<div class="trip-story-manual-hint">${es?'¿No aparece tu destino? Puedes conservar lo escrito.':'Destination not listed? You can keep what you typed.'}</div>`;menu.hidden=document.activeElement!==input;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:typeof items[n]==='string'?items[n]:items[n].label});render();});},180);}};input.onblur=()=>{clearTimeout(timer);setTimeout(()=>{const menu=input.parentElement?.querySelector('.trip-story-suggestions');if(menu)menu.hidden=true;},120);};};
+  const bindLocation=(input,onPick,kind='country',countryCode=()=>'',options={} )=>{if(!input)return;let timer;input.oninput=()=>{onPick({label:input.value,code:'',typing:true});clearTimeout(timer);const menu=input.parentElement.querySelector('.trip-story-suggestions'),q=input.value.trim();if(q.length<(kind==='country'?2:3)){menu.hidden=true;return;}if(kind==='country'){const items=_tripStoryCountrySuggestions_(q);menu.innerHTML=items.length?items.map(x=>`<button type="button">${_tripStoryEsc_(x.label)}</button>`).join(''):`<div>${es?'Puedes conservar lo escrito.':'You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:items[n].label,code:items[n].code});render();});}else{timer=setTimeout(async()=>{const items=await _tripStorySuggestions_(countryCode(),q,{global:Boolean(options.global)});if(input.value.trim()!==q)return;menu.innerHTML=items.length?items.slice(0,10).map(x=>`<button type="button">${_tripStoryEsc_(typeof x==='string'?x:x.label)}</button>`).join(''):`<div>${es?'No aparece en la lista. Puedes conservar lo escrito.':'Not listed. You can keep what you typed.'}</div>`;menu.hidden=false;menu.querySelectorAll('button').forEach((b,n)=>b.onclick=()=>{onPick({label:typeof items[n]==='string'?items[n]:items[n].label});render();});},180);}};input.onblur=()=>{clearTimeout(timer);setTimeout(()=>{const menu=input.parentElement?.querySelector('.trip-story-suggestions');if(menu)menu.hidden=true;},120);};};
   const travelerSnapshot=()=>{const cur=collectTravelerStateFromUI();return cur.ok?cur:{mode:String($travelerMode?.value||''),companions:[]};};
   let travelerDraft=resumeTravelerDraft||travelerSnapshot();
   const syncTravelers=()=>{if(!$travelerMode)return false;$travelerMode.value=travelerDraft.mode||'';$travelerMode.dispatchEvent(new Event('change',{bubbles:true}));if(travelerDraft.mode==='group'){$travelerProfiles.innerHTML='';(travelerDraft.companions||[]).forEach((x,i)=>{const card=createTravelerProfileCard(i+1);$travelerProfiles.appendChild(card);qs('.traveler-gender',card).value=x.gender||'';qs('.traveler-age-range',card).value=x.age_range||'';});renumberTravelerProfiles();setTravelerButtonsState();}writeLegacyTravelerCounts(collectTravelerStateFromUI().counts||{adults:1,young:0,children:0,infants:0,seniors:0});return collectTravelerStateFromUI().ok;};
   const travelerSummary=()=>{const t=collectTravelerStateFromUI();if(!t.ok)return es?'Pendiente':'Pending';if(t.mode==='solo')return es?'1 viajero':'1 traveler';return es?`${t.total} viajeros`:`${t.total} travelers`;};
-  const renderStory=()=>{syncTravelers();const pieces=[];const t=collectTravelerStateFromUI();if(t.ok)pieces.push(`<div class="gj-story-node gj-story-node--meta"><span>✓</span><div><b>${es?'Viajeros':'Travelers'}</b><small>${travelerSummary()}</small></div></div>`);if(story.start?.enabled)pieces.push(`<div class="gj-story-node gj-story-node--meta"><span>✓</span><div><b>${es?'Inicio del viaje':'Trip start'}</b><small>${_tripStoryEsc_(story.start.origin?.label||'')} ${story.start.arrival?.label?`→ ${_tripStoryEsc_(story.start.arrival.label)}`:''}</small></div></div>`);story.stays.forEach((st,i)=>{if(!st.place)return;pieces.push(`${i?'<div class="gj-story-line">↓</div>':''}<div class="gj-story-node gj-story-node--editable gj-story-node--managed"><button type="button" class="gj-story-main" data-story-edit="${i}"><span>${String(i+1).padStart(2,'0')}</span><div><b>${_tripStoryEsc_(st.place)}</b><small>${_tripStoryDMY_(st.startDate)}${!st.transitOnly&&_tripStoryStayEnd_(st)!==st.startDate?` → ${_tripStoryDMY_(_tripStoryStayEnd_(st))}`:''} · ${st.transitOnly?(es?'Sólo tránsito':'Transit only'):`${st.days} ${st.days===1?(es?'día':'day'):(es?'días':'days')}`}</small>${(st.dayTrips||[]).map(dt=>dt.place?`<em>↗ ${_tripStoryEsc_(dt.place)} · ${es?'Día':'Day'} ${dt.day}</em>`:'').join('')}</div></button><div class="gj-story-node-actions">${i?`<button type="button" data-story-move="${i}:-1" title="${es?'Mover arriba':'Move up'}">↑</button>`:''}${i<story.stays.length-1?`<button type="button" data-story-move="${i}:1" title="${es?'Mover abajo':'Move down'}">↓</button>`:''}<button type="button" data-story-edit="${i}">${es?'Editar':'Edit'}</button><button type="button" class="gj-danger-inline" data-story-delete="${i}">${es?'Eliminar':'Delete'}</button></div></div>`);if(i<story.stays.length-1){const nx=story.stays[i+1];pieces.push(`<div class="gj-story-move"><span>↓</span><div><b>${_tripStoryEsc_(st.place)} → ${_tripStoryEsc_(nx.place||'…')}</b><small>${nx.departureDate?_tripStoryDMY_(nx.departureDate):''}${nx.departureTime?` · ${es?'desde':'from'} ${nx.departureTime}`:''}</small><em>${nx.transportStatus==='user_defined'?(es?'✓ Transporte definido':'✓ Transport defined'):(es?'✦ ITBMO resolverá cómo llegar':'✦ ITBMO will resolve how to get there')}</em></div></div>`);}});if(story.returnTrip?.enabled)pieces.push(`<div class="gj-story-line">↓</div><div class="gj-story-node gj-story-node--meta"><span>✓</span><div><b>${es?'Regreso':'Return'}</b><small>${_tripStoryEsc_(story.returnTrip.origin?.label||story.stays.at(-1)?.place||'')} → ${_tripStoryEsc_(story.returnTrip.arrival?.label||'')}</small></div></div>`);storyHost.innerHTML=pieces.join('')||`<div class="gj-story-empty">${es?'Tu recorrido aparecerá aquí mientras lo construyes.':'Your journey will appear here as you build it.'}</div>`;
+  const renderStory=()=>{syncTravelers();const pieces=[];const t=collectTravelerStateFromUI();if(t.ok)pieces.push(`<div class="gj-story-node gj-story-node--meta"><span>✓</span><div><b>${es?'Viajeros':'Travelers'}</b><small>${travelerSummary()}</small></div></div>`);if(story.start?.enabled)pieces.push(`<div class="gj-story-node gj-story-node--meta"><span>✓</span><div><b>${es?'Inicio del viaje':'Trip start'}</b><small>${_tripStoryEsc_(story.start.origin?.label||'')} ${story.start.arrival?.label?`→ ${_tripStoryEsc_(story.start.arrival.label)}`:''}</small></div></div>`);story.stays.forEach((st,i)=>{if(!st.place)return;pieces.push(`${i?'<div class="gj-story-line">↓</div>':''}<div class="gj-story-node gj-story-node--editable gj-story-node--managed"><button type="button" class="gj-story-main" data-story-edit="${i}"><span>${String(i+1).padStart(2,'0')}</span><div><b>${_tripStoryEsc_(st.place)}</b><small>${_tripStoryDMY_(st.startDate)}${_tripStoryStayEnd_(st)!==st.startDate?` → ${_tripStoryDMY_(_tripStoryStayEnd_(st))}`:''} · ${st.days} ${st.days===1?(es?'día':'day'):(es?'días':'days')}</small>${(st.dayTrips||[]).map(dt=>dt.place?`<em>↗ ${_tripStoryEsc_(dt.place)} · ${es?'Día':'Day'} ${dt.day}</em>`:'').join('')}</div></button><div class="gj-story-node-actions">${i?`<button type="button" data-story-move="${i}:-1" title="${es?'Mover arriba':'Move up'}">↑</button>`:''}${i<story.stays.length-1?`<button type="button" data-story-move="${i}:1" title="${es?'Mover abajo':'Move down'}">↓</button>`:''}<button type="button" data-story-edit="${i}">${es?'Editar':'Edit'}</button><button type="button" class="gj-danger-inline" data-story-delete="${i}">${es?'Eliminar':'Delete'}</button></div></div>`);if(i<story.stays.length-1){const nx=story.stays[i+1];pieces.push(`<div class="gj-story-move"><span>↓</span><div><b>${_tripStoryEsc_(st.place)} → ${_tripStoryEsc_(nx.place||'…')}</b><small>${nx.departureDate?_tripStoryDMY_(nx.departureDate):''}${nx.departureTime?` · ${es?'desde':'from'} ${nx.departureTime}`:''}</small><em>${nx.transportStatus==='user_defined'?(es?'✓ Transporte definido':'✓ Transport defined'):(es?'✦ ITBMO resolverá cómo llegar':'✦ ITBMO will resolve how to get there')}</em></div></div>`);}});if(story.returnTrip?.enabled)pieces.push(`<div class="gj-story-line">↓</div><div class="gj-story-node gj-story-node--meta"><span>✓</span><div><b>${es?'Regreso':'Return'}</b><small>${_tripStoryEsc_(story.returnTrip.origin?.label||story.stays.at(-1)?.place||'')} → ${_tripStoryEsc_(story.returnTrip.arrival?.label||'')}</small></div></div>`);storyHost.innerHTML=pieces.join('')||`<div class="gj-story-empty">${es?'Tu recorrido aparecerá aquí mientras lo construyes.':'Your journey will appear here as you build it.'}</div>`;
     storyHost.querySelectorAll('[data-story-edit]').forEach(btn=>btn.onclick=()=>{editReturnPhase=phase;editReturnStay=activeStay;activeStay=Number(btn.dataset.storyEdit);phase='stay';render();});
     storyHost.querySelectorAll('[data-story-delete]').forEach(btn=>btn.onclick=()=>{const i=Number(btn.dataset.storyDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} por completo? Se eliminarán también sus excursiones y se recalcularán las conexiones afectadas.`:`Delete ${name||'this destination'} completely? Its day trips will also be deleted and affected connections recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;activeStay=Math.min(i,story.stays.length-1);phase=story.stays[activeStay]?.place?'decision':'stay';persist();render();});
     storyHost.querySelectorAll('[data-story-move]').forEach(btn=>btn.onclick=()=>{const [from,dir]=btn.dataset.storyMove.split(':').map(Number),to=from+dir;if(!_tripStoryMoveStay_(story,from,to))return;activeStay=to;editReturnPhase=null;editReturnStay=null;pendingNextStay=null;persist();render();});
@@ -15933,11 +15475,9 @@ function openTripStoryBuilder(){
     }
     if(phase==='stay'){
       const st=story.stays[activeStay];
-      active.innerHTML=shell(activeStay===0?(es?'PRIMER DESTINO':'FIRST DESTINATION'):(es?'SIGUIENTE DESTINO':'NEXT DESTINATION'),activeStay===0?(es?'¿Dónde comienza tu recorrido?':'Where does your journey begin?'):(es?'¿Cuál es tu siguiente destino?':'What is your next destination?'),es?'Agrega todos los lugares en el orden real de tu viaje, incluidos los que sean sólo de tránsito, hasta llegar al punto desde el cual iniciarás el regreso a tu lugar de origen. Si llegas a una ciudad y continúas hacia otra, agrégala también; después indicarás el traslado y los horarios.':'Add every place in the real order of your trip, including transit-only stops, until you reach the point from which you will begin your return home. If you arrive in one city and continue to another, add it too; you will enter the transfer and times afterward.',`<div class="gj-form"><label>${es?'País':'Country'}${countryField(st.country,st.countryCode,'data-stay-country')}</label><label>${es?'Destino':'Destination'}${destinationField(st.place,'data-stay-place')}</label><label>${es?'Fecha de llegada':'Arrival date'}<input type="date" data-stay-start value="${st.startDate||''}"></label><label>${es?'¿Cuánto tiempo estarás aquí?':'How long will you be here?'} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-transit-help aria-expanded="false" aria-label="${es?'Información sobre tránsito':'Transit information'}">ⓘ ${es?'Opción de tránsito':'Transit option'}</button><span class="gj-help-bubble" data-transit-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-transit-help-close aria-label="${es?'Cerrar':'Close'}">×</button><span>${es?'Selecciona «Sólo estaré de tránsito» cuando pases por una ciudad sin dedicarle días a visitas turísticas.':'Select «Transit only» when passing through a city without sightseeing days.'}</span></span></span><select data-stay-days>${activeStay===0&&!st.firstDaysSelected?`<option value="" selected>${es?'Selecciona una opción':'Select an option'}</option>`:''}${_tripStoryDaysOptions_(activeStay===0&&!st.firstDaysSelected?0:st.days,st.transitOnly)}</select></label>${activeStay===0&&st.firstDaysSelected&&!st.transitOnly?`<label>${es?`Hora de inicio de recorridos en ${_tripStoryEsc_(st.place||'primer destino')}`:`Time to start exploring ${_tripStoryEsc_(st.place||'first destination')}`} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-first-ready-help aria-expanded="false">ⓘ ${es?'Ver instrucciones':'View instructions'}</button><span class="gj-help-bubble" data-first-ready-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-first-ready-help-close aria-label="${es?'Cerrar':'Close'}">×</button><b>${es?'¿Qué hora debes indicar?':'Which time should you enter?'}</b><span>${es?`Indica la hora a la que ya estarás listo para comenzar a conocer ${_tripStoryEsc_(st.place||'el primer destino')}, después de llegar, trasladarte y dejar tu equipaje si fuera necesario.`:`Enter the time when you will actually be ready to start exploring ${_tripStoryEsc_(st.place||'the first destination')}, after arriving, transferring and leaving your luggage if needed.`}</span></span></span><select data-stay-ready required>${_tripStoryRequiredTimeOptions_(st.firstDayReadyTime)}</select></label>`:''}</div>`,nextButton(es?'Agregar esta parada':'Add this stop'));
-      bindLocation(active.querySelector('[data-stay-country]'),x=>{const changed=st.country!==x.label||Boolean(x.code&&st.countryCode!==x.code);st.country=x.label;if(x.code)st.countryCode=x.code;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});if(activeStay===0)st.firstDayReadyTime='';}persist();},'country');bindLocation(active.querySelector('[data-stay-place]'),x=>{const changed=st.place!==x.label;st.place=x.label;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});if(activeStay===0)st.firstDayReadyTime='';}persist();},'city',()=>st.countryCode);active.querySelector('[data-stay-start]').onchange=e=>{const changed=st.startDate!==e.target.value;st.startDate=e.target.value;if(changed){st.arrivalDate=st.startDate;if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStoryInvalidateStayDerived_(st);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{dateChanged:true});if(activeStay===0)st.firstDayReadyTime='';}else st.arrivalDate=st.arrivalDate||st.startDate;_tripStoryEnsureStay_(st);persist();renderStory();};const readyInput=active.querySelector('[data-stay-ready]');if(readyInput)readyInput.onchange=e=>{st.firstDayReadyTime=e.target.value;persist();};const firstReadyHelp=active.querySelector('[data-first-ready-help]'),firstReadyBubble=active.querySelector('[data-first-ready-help-bubble]');if(firstReadyHelp&&firstReadyBubble){const closeFirstReadyHelp=()=>{firstReadyBubble.hidden=true;firstReadyHelp.setAttribute('aria-expanded','false');};firstReadyHelp.onclick=e=>{e.preventDefault();e.stopPropagation();const willOpen=firstReadyBubble.hidden;active.querySelectorAll('.gj-help-bubble').forEach(x=>x.hidden=true);firstReadyBubble.hidden=!willOpen;firstReadyHelp.setAttribute('aria-expanded',willOpen?'true':'false');if(willOpen)setTimeout(()=>document.addEventListener('click',closeFirstReadyHelp,{once:true}),0);};active.querySelector('[data-first-ready-help-close]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeFirstReadyHelp();});firstReadyBubble.addEventListener('click',e=>e.stopPropagation());}const transitHelp=active.querySelector('[data-transit-help]'),transitBubble=active.querySelector('[data-transit-help-bubble]');if(transitHelp&&transitBubble){const close=()=>{transitBubble.hidden=true;transitHelp.setAttribute('aria-expanded','false');};transitHelp.onclick=e=>{e.preventDefault();e.stopPropagation();const show=transitBubble.hidden;active.querySelectorAll('.gj-help-bubble').forEach(x=>x.hidden=true);transitBubble.hidden=!show;transitHelp.setAttribute('aria-expanded',show?'true':'false');if(show)setTimeout(()=>document.addEventListener('click',close,{once:true}),0);};active.querySelector('[data-transit-help-close]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();close();});transitBubble.addEventListener('click',e=>e.stopPropagation());}active.querySelector('[data-stay-days]').onchange=e=>{const transit=e.target.value==='transit';if(activeStay===0)st.firstDaysSelected=true;const nextDays=transit?1:Number(e.target.value);const changed=Boolean(st.transitOnly)!==transit||Number(st.days)!==nextDays;st.transitOnly=transit;st.days=nextDays;if(transit){st.dayTrips=[];if(activeStay===0)st.firstDayReadyTime='';}_tripStoryEnsureStay_(st);if(changed){_tripStoryInvalidateStayDerived_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);}persist();render();};active.querySelector('[data-gj-next]').onclick=()=>{
+      active.innerHTML=shell(activeStay===0?(es?'PRIMER DESTINO':'FIRST DESTINATION'):(es?'SIGUIENTE DESTINO':'NEXT DESTINATION'),activeStay===0?(es?'¿Dónde comienza tu recorrido?':'Where does your journey begin?'):(es?'¿Cuál es tu siguiente destino?':'What is your next destination?'),es?'Agrega todos los lugares en el orden real de tu viaje, incluidos los que sean sólo de tránsito, hasta llegar al punto desde el cual iniciarás el regreso a tu lugar de origen. Si llegas a una ciudad y continúas hacia otra, agrégala también; después indicarás el traslado y los horarios.':'Add every place in the real order of your trip, including transit-only stops, until you reach the point from which you will begin your return home. If you arrive in one city and continue to another, add it too; you will enter the transfer and times afterward.',`<div class="gj-form"><label>${es?'País':'Country'}${countryField(st.country,st.countryCode,'data-stay-country')}</label><label>${es?'Destino':'Destination'}${destinationField(st.place,'data-stay-place')}</label><label>${es?'Fecha de llegada':'Arrival date'}<input type="date" data-stay-start value="${st.startDate||''}"></label><label>${es?'¿Cuánto tiempo estarás aquí?':'How long will you be here?'}<select data-stay-days>${_tripStoryDaysOptions_(st.days,st.transitOnly)}</select></label></div>`,nextButton(es?'Agregar esta parada':'Add this stop'));
+      bindLocation(active.querySelector('[data-stay-country]'),x=>{const changed=st.country!==x.label||Boolean(x.code&&st.countryCode!==x.code);st.country=x.label;if(x.code)st.countryCode=x.code;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});}persist();},'country');bindLocation(active.querySelector('[data-stay-place]'),x=>{const changed=st.place!==x.label;st.place=x.label;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});}persist();},'city',()=>st.countryCode);active.querySelector('[data-stay-start]').onchange=e=>{const changed=st.startDate!==e.target.value;st.startDate=e.target.value;if(changed){st.arrivalDate=st.startDate;if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStoryInvalidateStayDerived_(st);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{dateChanged:true});}else st.arrivalDate=st.arrivalDate||st.startDate;_tripStoryEnsureStay_(st);persist();renderStory();};active.querySelector('[data-stay-days]').onchange=e=>{const transit=e.target.value==='transit';const nextDays=transit?1:Number(e.target.value);const changed=Boolean(st.transitOnly)!==transit||Number(st.days)!==nextDays;st.transitOnly=transit;st.days=nextDays;if(transit)st.dayTrips=[];_tripStoryEnsureStay_(st);if(changed){_tripStoryInvalidateStayDerived_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);}persist();renderStory();};active.querySelector('[data-gj-next]').onclick=()=>{
         if(!st.place||!st.startDate)return;
-        if(activeStay===0&&!st.firstDaysSelected){alert(es?'Selecciona cuántos días estarás aquí o si sólo estarás de tránsito.':'Select the number of days or transit only.');active.querySelector('[data-stay-days]')?.focus();return;}
-        if(activeStay===0&&!st.transitOnly&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(st.firstDayReadyTime||'')){alert(es?'Indica la hora en que estarás disponible para comenzar el itinerario.':'Enter the time when you will be ready to start your itinerary.');active.querySelector('[data-stay-ready]')?.classList.add('is-invalid');active.querySelector('[data-stay-ready]')?.focus();return;}
         if(activeStay>0){
           const prev=story.stays[activeStay-1],prevEnd=_tripStoryStayEnd_(prev);
           if(prevEnd&&st.startDate<prevEnd){
@@ -15970,22 +15510,22 @@ function openTripStoryBuilder(){
     }
     if(phase==='movement'){
       const st=story.stays[activeStay],prev=story.stays[activeStay-1];
-      active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?'Sólo dinos cuándo puedes comenzar. Si ya tienes el transporte, agrégalo; si no, ITBMO resolverá la logística.':'Just tell us when you can start. Add transport if you already have it; otherwise ITBMO will resolve the logistics.',`<div class="gj-form"><label>${es?`Fecha de traslado desde ${_tripStoryEsc_(prev?.place||'el destino anterior')}`:`Transfer date from ${_tripStoryEsc_(prev?.place||'the previous destination')}`}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(st.place||'el destino siguiente')}`:`Transport departure time to ${_tripStoryEsc_(st.place||'the next destination')}`}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya tienes este traslado definido?':'Do you already have this transfer defined?'}</b><div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full gj-resolvable-details" data-move-details><label>${es?'Medio de transporte':'Transport'}<select data-move="transportMode">${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?`Fecha de llegada a ${_tripStoryEsc_(st.place||'nuevo destino')} (opcional)`:`Arrival date in ${_tripStoryEsc_(st.place||'new destination')} (optional)`}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label>${st.transitOnly?'':`<label>${es?`Hora de inicio de recorridos en ${_tripStoryEsc_(st.place||'nuevo destino')}`:`Time to start exploring ${_tripStoryEsc_(st.place||'new destination')}`} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-ready-help aria-expanded="false">ⓘ ${es?'Ver instrucciones':'View instructions'}</button><span class="gj-help-bubble" data-ready-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-ready-help-close aria-label="${es?'Cerrar':'Close'}">×</button><b>${es?'¿Qué hora debes indicar?':'Which time should you enter?'}</b><span>${es?`Indica la hora a la que ya estarás listo para comenzar a conocer ${_tripStoryEsc_(st.place||'el nuevo destino')}, después de llegar, trasladarte y dejar tu equipaje si fuera necesario.`:`Enter the time when you will actually be ready to start exploring ${_tripStoryEsc_(st.place||'the new destination')}, after arriving, transferring and leaving your luggage if needed.`}</span></span></span><select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label>`}</div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
+      active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?'Sólo dinos cuándo puedes comenzar. Si ya tienes el transporte, agrégalo; si no, ITBMO resolverá la logística.':'Just tell us when you can start. Add transport if you already have it; otherwise ITBMO will resolve the logistics.',`<div class="gj-form"><label>${es?`Fecha de traslado desde ${_tripStoryEsc_(prev?.place||'el destino anterior')}`:`Transfer date from ${_tripStoryEsc_(prev?.place||'the previous destination')}`}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?`Hora de salida del transporte hacia ${_tripStoryEsc_(st.place||'el destino siguiente')}`:`Transport departure time to ${_tripStoryEsc_(st.place||'the next destination')}`}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya tienes este traslado definido?':'Do you already have this transfer defined?'}</b><div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full gj-resolvable-details" data-move-details><label>${es?'Medio de transporte':'Transport'}<select data-move="transportMode">${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?`Fecha de llegada a ${_tripStoryEsc_(st.place||'nuevo destino')} (opcional)`:`Arrival date in ${_tripStoryEsc_(st.place||'new destination')} (optional)`}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label><label>${es?`Hora de inicio de recorridos en ${_tripStoryEsc_(st.place||'nuevo destino')}`:`Time to start exploring ${_tripStoryEsc_(st.place||'new destination')}`} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-ready-help aria-expanded="false">ⓘ ${es?'Ver instrucciones':'View instructions'}</button><span class="gj-help-bubble" data-ready-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-ready-help-close aria-label="${es?'Cerrar':'Close'}">×</button><b>${es?'¿Qué hora debes indicar?':'Which time should you enter?'}</b><span>${es?`Indica la hora a la que ya estarás listo para comenzar a conocer ${_tripStoryEsc_(st.place||'el nuevo destino')}, después de llegar, trasladarte y dejar tu equipaje si fuera necesario.`:`Enter the time when you will actually be ready to start exploring ${_tripStoryEsc_(st.place||'the new destination')}, after arriving, transferring and leaving your luggage if needed.`}</span></span></span><select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label></div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
       const departureTimeControl=active.querySelector('[data-move="departureTime"]');if(departureTimeControl){departureTimeControl.disabled=false;departureTimeControl.removeAttribute('disabled');departureTimeControl.setAttribute('aria-required','true');}const moveKnown=st.transportStatus==='user_defined';active.querySelectorAll('[data-move-details] select,[data-move-details] input').forEach(x=>{x.disabled=!moveKnown;x.setAttribute('aria-disabled',String(!moveKnown));});active.querySelector('[data-move-details]')?.classList.toggle('is-itbmo-resolved',!moveKnown);const readyHelp=active.querySelector('[data-ready-help]'),readyBubble=active.querySelector('[data-ready-help-bubble]');if(readyHelp&&readyBubble){const closeReadyHelp=()=>{readyBubble.hidden=true;readyHelp.setAttribute('aria-expanded','false');};readyHelp.onclick=e=>{e.preventDefault();e.stopPropagation();const willOpen=readyBubble.hidden;active.querySelectorAll('.gj-help-bubble').forEach(x=>x.hidden=true);readyBubble.hidden=!willOpen;readyHelp.setAttribute('aria-expanded',willOpen?'true':'false');if(willOpen)setTimeout(()=>document.addEventListener('click',closeReadyHelp,{once:true}),0);};active.querySelector('[data-ready-help-close]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeReadyHelp();});readyBubble.addEventListener('click',e=>e.stopPropagation());}
       active.querySelectorAll('[data-move-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.moveKnowledge==='known';st.transportStatus=known?'user_defined':'route_to_resolve';active.querySelectorAll('[data-move-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelectorAll('[data-move-details] select,[data-move-details] input').forEach(x=>{x.disabled=!known;x.setAttribute('aria-disabled',String(!known));});active.querySelector('[data-move-details]')?.classList.toggle('is-itbmo-resolved',!known);if(!known){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}if(departureTimeControl){departureTimeControl.disabled=false;departureTimeControl.removeAttribute('disabled');}persist();});active.querySelectorAll('[data-move]').forEach(x=>x.onchange=()=>{st[x.dataset.move]=x.value;persist();});active.querySelector('[data-save-movement]').onclick=()=>{const depDate=active.querySelector('[data-move="departureDate"]')?.value||'';const depTime=active.querySelector('[data-move="departureTime"]')?.value||'';st.departureDate=depDate;st.departureTime=depTime;if(!depDate||!depTime){active.querySelector('[data-move="departureDate"]')?.classList.toggle('is-invalid',!depDate);active.querySelector('[data-move="departureTime"]')?.classList.toggle('is-invalid',!depTime);return;}const prevEnd=_tripStoryStayEnd_(prev);if(prevEnd&&depDate<prevEnd){alert(es?`La salida de ${prev.place} hacia ${st.place} no puede ser el ${_tripStoryDMY_(depDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}. Usa ${_tripStoryDMY_(prevEnd)} o una fecha posterior.`:`The departure from ${prev.place} to ${st.place} cannot be ${_tripStoryDMY_(depDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}. Use ${_tripStoryDMY_(prevEnd)} or a later date.`);active.querySelector('[data-move="departureDate"]')?.classList.add('is-invalid');return;}if(st.transportStatus!=='user_defined'){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}else{active.querySelectorAll('[data-move]').forEach(x=>st[x.dataset.move]=x.value);}persist();phase='decision';render();};return;
     }
     if(phase==='return'){
       const last=story.stays.at(-1);
       active.innerHTML=shell(es?'REGRESO · OPCIONAL':'RETURN · OPTIONAL',es?'¿Quieres agregar cómo finalizarás tu viaje?':'Would you like to add how your trip ends?',es?`Aquí sólo necesitamos el último trayecto: desde ${_tripStoryEsc_(last?.place||'el último punto de tu recorrido')} —el lugar desde el que ya emprendes el regreso— hasta tu lugar de origen o residencia. Cualquier destino, escala o tránsito anterior debe haberse agregado previamente al recorrido. Si todavía no conoces este último trayecto, omítelo.`:`Here we only need the final leg: from ${_tripStoryEsc_(last?.place||'the last point in your route')} —the place from which you begin your journey home— to your place of origin or residence. Any destination, connection or transit stop before that must already have been added to the route. If you do not know this final leg yet, skip it.`,`<div class="gj-choice-grid"><button type="button" data-return-add class="gj-choice"><b>${es?'Agregar regreso':'Add return'}</b></button><button type="button" data-return-skip class="gj-choice"><b>${es?'Omitir':'Skip'}</b></button></div>${story.returnTrip.enabled?`<div class="gj-form"><label>${es?'Desde':'From'}<input data-ret="origin" value="${_tripStoryEsc_(story.returnTrip.origin?.label||last?.place||'')}"></label><label>${es?'Regreso a':'Return to'}<input data-ret="arrival" value="${_tripStoryEsc_(story.returnTrip.arrival?.label||story.start?.origin?.label||'')}"></label><label>${es?'Fecha':'Date'}<input type="date" data-ret="departureDate" value="${story.returnTrip.departureDate||''}"></label><label>${es?'Puedo salir desde':'I can leave from'}<select data-ret="departureTime">${_tripStoryTimeOptions_(story.returnTrip.departureTime)}</select></label><label>${es?'Transporte (opcional)':'Transport (optional)'}<select data-ret="transportMode">${_tripStoryTransportOptions_(story.returnTrip.transportMode||'')}</select></label></div>`:''}`,story.returnTrip.enabled?nextButton(es?'Continuar a revisión':'Continue to review'):``);
-      active.querySelector('[data-return-add]').onclick=()=>{story.returnTrip.enabled=true;story.returnTrip.origin={label:last?.place||'',type:'city'};if(!String(story.returnTrip.arrival?.label||'').trim()&&String(story.start?.origin?.label||'').trim())story.returnTrip.arrival={...story.start.origin};persist();render();};active.querySelector('[data-return-skip]').onclick=()=>{story.returnTrip.enabled=false;phase='review';render();};const commitReturnFields=()=>{active.querySelectorAll('[data-ret]').forEach(el=>{const k=el.dataset.ret;if(k==='origin'||k==='arrival')story.returnTrip[k]={...(story.returnTrip[k]||{}),label:el.value,type:'city'};else story.returnTrip[k]=el.value;});persist();};active.querySelectorAll('[data-ret]').forEach(el=>{el.addEventListener('change',commitReturnFields);if(el.tagName==='INPUT'&&el.type==='text')el.addEventListener('input',commitReturnFields);});active.querySelector('[data-gj-next]')?.addEventListener('click',()=>{commitReturnFields();phase='review';render();});return;
+      active.querySelector('[data-return-add]').onclick=()=>{story.returnTrip.enabled=true;story.returnTrip.origin={label:last?.place||'',type:'city'};render();};active.querySelector('[data-return-skip]').onclick=()=>{story.returnTrip.enabled=false;phase='review';render();};active.querySelectorAll('[data-ret]').forEach(el=>el.onchange=()=>{const k=el.dataset.ret;if(k==='origin'||k==='arrival')story.returnTrip[k]={label:el.value,type:'city'};else story.returnTrip[k]=el.value;persist();});active.querySelector('[data-gj-next]')?.addEventListener('click',()=>{phase='review';render();});return;
     }
     if(phase==='review'){
-      const effectiveDates=_tripStoryEffectiveDates_(story);const tooLong=effectiveDates.size>MAX_TRIP_STORY_DAYS;
+      const effectiveDates=new Set();story.stays.filter(st=>!st.transitOnly).forEach(st=>{for(let d=0;d<Number(st.days||1);d++){const date=_tripStoryAddDays_(st.startDate,d);if(date)effectiveDates.add(date);}});const tooLong=effectiveDates.size>MAX_TRIP_STORY_DAYS;
       active.innerHTML=shell(es?'REVISA TU RECORRIDO':'REVIEW YOUR JOURNEY',es?'Tu viaje está tomando forma':'Your trip is taking shape',es?'Revisa la historia completa. Puedes volver a editar cualquier estancia antes de continuar al pago.':'Review the complete story. You can edit any stay before continuing to payment.',`<div class="gj-review-stats"><div><b>${story.stays.length}</b><span>${es?'destinos':'destinations'}</span></div><div><b>${effectiveDates.size}</b><span>${es?'días efectivos':'effective days'}</span></div><div><b>${story.stays.reduce((n,s)=>n+(s.dayTrips||[]).length,0)}</b><span>${es?'excursiones':'day trips'}</span></div></div>${tooLong?`<div class="gj-warning">${es?`El recorrido supera el máximo de ${MAX_TRIP_STORY_DAYS} días efectivos.`:`The route exceeds the ${MAX_TRIP_STORY_DAYS}-effective-day maximum.`}</div>`:''}<div class="gj-review-list">${story.stays.map((st,i)=>`<div class="gj-review-row"><div><b>${i+1}. ${_tripStoryEsc_(st.place||'—')}</b><small>${_tripStoryDMY_(st.startDate)} · ${st.transitOnly?(es?'Sólo tránsito':'Transit only'):`${st.days} ${st.days===1?(es?'día':'day'):(es?'días':'days')}`}</small></div><div>${i?`<button type="button" data-review-move="${i}:-1">↑</button>`:''}${i<story.stays.length-1?`<button type="button" data-review-move="${i}:1">↓</button>`:''}<button type="button" data-review-edit="${i}">${es?'Editar':'Edit'}</button><button type="button" class="gj-review-delete" data-review-delete="${i}">${es?'Eliminar':'Delete'}</button></div></div>`).join('')}</div><div class="gj-review-actions"><button type="button" data-edit-route>${es?'Volver a la última parada':'Back to last stop'}</button></div>`,tooLong?'':nextButton(es?'Guardar recorrido y continuar':'Save journey and continue','data-gj-save'));
-      active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();_tripStorySetMinimizedState_(false);_tripStorySetWorkspaceResume_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true){_tripStoryClearBuilderSession_();}});return;
+      active.querySelector('[data-edit-route]').onclick=()=>{activeStay=Math.max(0,story.stays.length-1);phase='decision';render();};active.querySelectorAll('[data-review-edit]').forEach(b=>b.onclick=()=>{editReturnPhase='review';editReturnStay=activeStay;activeStay=Number(b.dataset.reviewEdit);phase='stay';render();});active.querySelectorAll('[data-review-delete]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.reviewDelete),name=story.stays[i]?.place||'';if(!confirm(es?`¿Eliminar ${name||'este destino'} del recorrido? Se recalculará la conexión entre los destinos restantes.`:`Delete ${name||'this destination'} from the route? The connection between the remaining destinations will be recalculated.`))return;_tripStoryRemoveStay_(story,i);editReturnPhase=null;editReturnStay=null;activeStay=Math.min(i,story.stays.length-1);persist();render();});active.querySelectorAll('[data-review-move]').forEach(b=>b.onclick=()=>{const [from,dir]=b.dataset.reviewMove.split(':').map(Number),to=from+dir;if(to<0||to>=story.stays.length)return;_tripStoryMoveStay_(story,from,to);activeStay=to;persist();render();});active.querySelector('[data-gj-save]')?.addEventListener('click',async()=>{syncTravelers();_tripStoryApplyBoundaryHours_(story);const issues=_tripStoryValidate_(story);if(issues.length){_tripStoryShowIssues_(issues,()=>{});return;}engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();persist();_tripStorySetMinimizedState_(false);_tripStorySetWorkspaceResume_(false);removeMinimizedFab();overlay.remove();document.body.classList.remove('trip-story-open');_tripStoryBuilderSession_=null;const saved=await saveDestinations({showReadyModal:true,fromTripStory:true});if(saved===true){_tripStoryClearDraft_();_tripStoryClearBuilderSession_();}});return;
     }
   };
-  overlay.querySelector('[data-gj-reset]').onclick=()=>{_tripStorySetMinimizedState_(false);if(!confirm(es?'¿Quieres reiniciar el recorrido? Se eliminarán los destinos, excursiones y traslados que has configurado. Los viajeros se conservarán.':'Reset the route? Destinations, day trips and transfers will be deleted. Travelers will be kept.'))return;_tripStorySetWorkspaceResume_(false);_tripStoryClearBuilderSession_();_tripStoryResetRoute_(story);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;dayTripDraft=null;dayTripEditIndex=null;activeStay=0;phase='start';persist();try{engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));}catch(_){};render();};
+  overlay.querySelector('[data-gj-reset]').onclick=()=>{_tripStorySetMinimizedState_(false);if(!confirm(es?'¿Quieres reiniciar el recorrido? Se eliminarán los destinos, excursiones y traslados que has configurado. Los viajeros se conservarán.':'Reset the route? Destinations, day trips and transfers will be deleted. Travelers will be kept.'))return;_tripStorySetWorkspaceResume_(false);_tripStoryResetRoute_(story);editReturnPhase=null;editReturnStay=null;pendingNextStay=null;dayTripDraft=null;dayTripEditIndex=null;activeStay=0;phase='start';persist();try{engine?.setTripStory?.(JSON.parse(JSON.stringify(story)));}catch(_){};render();};
   overlay.querySelector('[data-gj-copy]').onclick=async()=>{syncTravelers();const txt=_tripStoryCopyText_(story);try{await navigator.clipboard.writeText(txt);const b=overlay.querySelector('[data-gj-copy]'),old=b.textContent;b.textContent=es?'✓ Copiado':'✓ Copied';setTimeout(()=>b.textContent=old,1400);}catch(_){prompt(es?'Copia tu recorrido:':'Copy your journey:',txt);}};
   overlay.querySelector('[data-gj-mobile-story]').onclick=()=>overlay.querySelector('.guided-journey__story').classList.toggle('is-mobile-open');
   overlay.querySelector('[data-stage="travelers"]').onclick=()=>{travelerDraft=travelerSnapshot();phase='travelers';render();};
@@ -16247,7 +15787,7 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
   return {ok:true,resolved};
 }
 
-function applyTripStoryToCompatibility(story){const stays=(story?.stays||[]).map(_tripStoryEnsureStay_);if(!stays.length)return;const first=stays[0],last=stays.at(-1),firstCountry=_tripStoryCountryFromCode_(first.countryCode),totalDays=Math.max(1,_tripStoryDiffDays_(first.startDate,_tripStoryStayEnd_(last))+1);$cityList.innerHTML='';addCityRow({city:first.place,country:firstCountry?.label||first.country||'',days:totalDays,baseDate:_tripStoryDMY_(first.startDate)});const row=qs('.city-row',$cityList);if(!row)return;const segments=[];for(let i=1;i<stays.length;i++){const prev=stays[i-1],st=stays[i];segments.push({id:`story_move_${st.id}`,origin:prev.place,destination:st.place,departureDate:st.departureDate||st.startDate,arrivalDate:st.arrivalDate||st.startDate,departureTime:st.departureTime||'',arrivalTime:st.arrivalTime||'',transportMode:st.transportMode||'recommend',timePrecision:(st.departureTime&&st.arrivalTime)?'exact':'unknown',disposition:'continue',transitOnly:Boolean(st.transitOnly),nights:st.transitOnly?0:Number(st.days||1),source:'TRIP_STORY'});}stays.forEach(st=>(st.dayTrips||[]).forEach(dt=>{if(!dt.place)return;const date=_tripStoryAddDays_(st.startDate,dt.day-1);segments.push({id:`story_daytrip_${dt.id}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound.departureTime||'',arrivalTime:dt.outbound.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return.departureTime||'',returnArrivalDate:date,returnArrivalTime:dt.return.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound.transportMode||'recommend',returnTransportMode:dt.return.transportMode||dt.outbound.transportMode||'recommend',timePrecision:(dt.outbound.departureTime&&dt.outbound.arrivalTime&&dt.return.departureTime&&dt.return.arrivalTime)?'exact':'unknown',disposition:'roundtrip',source:'TRIP_STORY_DAYTRIP'});}));_travelV2()?.setRouteSegments?.(row,segments);const days=qs('.days',row);if(days){days.innerHTML=Array.from({length:Math.max(MAX_TRIP_STORY_DAYS,totalDays)},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');days.value=String(totalDays);days.dispatchEvent(new Event('change',{bubbles:true}));}const base=qs('.baseDate',row);if(base)base.value=_tripStoryDMY_(first.startDate);const dates=Array.from({length:totalDays},(_,i)=>_tripStoryAddDays_(first.startDate,i));const perDay=dates.map((date,idx)=>{const st=stays.find(x=>!x.transitOnly&&date>=x.startDate&&date<=_tripStoryStayEnd_(x))||stays.find(x=>date>=x.startDate&&date<=_tripStoryStayEnd_(x))||stays[Math.max(0,stays.findIndex(x=>x.startDate>date)-1)]||first;const di=Math.max(0,_tripStoryDiffDays_(st.startDate,date));return {day:idx+1,date,start:st.transitOnly?'':(st.perDay?.[di]?.start??''),end:st.transitOnly?'':(st.perDay?.[di]?.end??''),physicalDestination:st.place};});qsa('.hours-day',row).forEach((hd,idx)=>{if(!perDay[idx])return;const a=qs('.start',hd),b=qs('.end',hd);if(a)a.value=perDay[idx].start;if(b)b.value=perDay[idx].end;});_travelV2()?.renderRowSummary?.(row);updateAddCityButtonState();updateTravelBuilderProgress();}
+function applyTripStoryToCompatibility(story){const stays=(story?.stays||[]).map(_tripStoryEnsureStay_);if(!stays.length)return;const first=stays[0],last=stays.at(-1),firstCountry=_tripStoryCountryFromCode_(first.countryCode),totalDays=Math.max(1,_tripStoryDiffDays_(first.startDate,_tripStoryStayEnd_(last))+1);$cityList.innerHTML='';addCityRow({city:first.place,country:firstCountry?.label||first.country||'',days:totalDays,baseDate:_tripStoryDMY_(first.startDate)});const row=qs('.city-row',$cityList);if(!row)return;const segments=[];for(let i=1;i<stays.length;i++){const prev=stays[i-1],st=stays[i];segments.push({id:`story_move_${st.id}`,origin:prev.place,destination:st.place,departureDate:st.departureDate||st.startDate,arrivalDate:st.arrivalDate||st.startDate,departureTime:st.departureTime||'',arrivalTime:st.arrivalTime||'',transportMode:st.transportMode||'recommend',timePrecision:(st.departureTime&&st.arrivalTime)?'exact':'unknown',disposition:'continue',nights:Number(st.days||1),source:'TRIP_STORY'});}stays.forEach(st=>(st.dayTrips||[]).forEach(dt=>{if(!dt.place)return;const date=_tripStoryAddDays_(st.startDate,dt.day-1);segments.push({id:`story_daytrip_${dt.id}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound.departureTime||'',arrivalTime:dt.outbound.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return.departureTime||'',returnArrivalDate:date,returnArrivalTime:dt.return.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound.transportMode||'recommend',returnTransportMode:dt.return.transportMode||dt.outbound.transportMode||'recommend',timePrecision:(dt.outbound.departureTime&&dt.outbound.arrivalTime&&dt.return.departureTime&&dt.return.arrivalTime)?'exact':'unknown',disposition:'roundtrip',source:'TRIP_STORY_DAYTRIP'});}));_travelV2()?.setRouteSegments?.(row,segments);const days=qs('.days',row);if(days){days.innerHTML=Array.from({length:MAX_TRIP_STORY_DAYS},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');days.value=String(totalDays);days.dispatchEvent(new Event('change',{bubbles:true}));}const base=qs('.baseDate',row);if(base)base.value=_tripStoryDMY_(first.startDate);const dates=Array.from({length:totalDays},(_,i)=>_tripStoryAddDays_(first.startDate,i));const perDay=dates.map((date,idx)=>{const st=stays.find(x=>!x.transitOnly&&date>=x.startDate&&date<=_tripStoryStayEnd_(x))||stays.find(x=>date>=x.startDate&&date<=_tripStoryStayEnd_(x))||stays[Math.max(0,stays.findIndex(x=>x.startDate>date)-1)]||first;const di=Math.max(0,_tripStoryDiffDays_(st.startDate,date));return {day:idx+1,date,start:st.perDay?.[di]?.start||'',end:st.perDay?.[di]?.end||'',physicalDestination:st.place};});qsa('.hours-day',row).forEach((hd,idx)=>{if(!perDay[idx])return;const a=qs('.start',hd),b=qs('.end',hd);if(a)a.value=perDay[idx].start;if(b)b.value=perDay[idx].end;});_travelV2()?.renderRowSummary?.(row);updateAddCityButtonState();updateTravelBuilderProgress();}
 
 
 // Inicialización
