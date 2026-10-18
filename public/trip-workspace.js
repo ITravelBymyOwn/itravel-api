@@ -1283,17 +1283,31 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
 // transport card with an actual commercial offer.
 function v192VisibleContextItems(items,offers,sectionType){
   if(sectionType!=='transport')return items;
-  return items.filter(item=>{
-    if(!v235CommercialMobilityNeed(item))return false;
-    if(!['transport_arrangement','intercity_transport'].includes(item?.need_type))return true;
-    if(isRentalTransportNeed(item))return true;
-    if((offers||[]).some(offer=>v190OfferMatchesNeed(offer,item)))return true;
-    const text=normalizeWorkspaceEntity(`${item.transport||''} ${item.source_summary||''} ${item.user_message||''}`);
-    const walk=/\b(a pie|walking|walk|caminar|caminata|on foot)\b/.test(text);
-    const regional=/\b(tren|train|rail|bus interurbano|regional|intercity|ferry|barco|boat)\b/.test(text);
-    return !(walk&&!regional);
+  // V263: the existence of an attributable usable partner link is authoritative.
+  // A routine urban leg with a real offer must remain visible; an unlinked
+  // candidate is not a monetizable card. Home departure/return are exceptions.
+  return (items||[]).filter(item=>
+    item?.derived_by==='journey_start'||item?.derived_by==='journey_return'||
+    v263MobilityHasOffer(item,offers)
+  );
+}
+function v263MobilityHasOffer(item,offers=[]){
+  const usable=o=>Boolean(o?.offer_token||o?.direct_url||o?.url||o?.affiliate_url||o?.tracking_url);
+  if(isRentalTransportNeed(item))return offers.some(o=>usable(o)&&o?.placement==='city_car_rental');
+  const route=parseResolvedRouteSource(item?.source_route);
+  return offers.some(o=>{
+    if(!usable(o))return false;
+    if(['12go','bookaway'].includes(o?.partner?.slug||''))return v190OfferMatchesNeed(o,item);
+    if(o?.need_id&&item?.id&&o.need_id===item.id)return true;
+    if(o?.partner?.slug==='omio'&&route?.legs?.length){
+      const seg=o.route_segment||{};
+      const from=v190CommercialEndpoint(seg.commercial_origin),to=v190CommercialEndpoint(seg.commercial_destination);
+      return Boolean(from&&to&&route.legs.some(leg=>v190CommercialEndpoint(leg.commercial_origin||leg.origin)===from&&v190CommercialEndpoint(leg.commercial_destination||leg.destination)===to));
+    }
+    return false;
   });
 }
+
 function contextSection(icon,title,description,items,offers=[],sectionId='',sectionType=''){
   if(!items.length)return'';
   const id=sectionId?` id="${esc(sectionId)}"`:'';
@@ -1302,22 +1316,7 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
   // V201: all mobility cards with an actual attributable partner CTA stay
   // visible. Informational cards remain accessible under 'See more'.
   // Preserve V190 12Go/Bookaway physical-leg matching and Omio route segments.
-  const hasMobilityCTA=item=>{
-    if(sectionType!=='transport')return false;
-    if(isRentalTransportNeed(item))return (offers||[]).some(o=>o?.placement==='city_car_rental' && (o?.offer_token||o?.direct_url||o?.url||o?.affiliate_url||o?.tracking_url));
-    const route=parseResolvedRouteSource(item?.source_route);
-    return (offers||[]).some(o=>{
-      if(!(o?.offer_token||o?.direct_url||o?.url||o?.affiliate_url||o?.tracking_url))return false;
-      if(['12go','bookaway'].includes(o?.partner?.slug||''))return v190OfferMatchesNeed(o,item);
-      if(o?.need_id && item?.id && o.need_id===item.id)return true;
-      if(o?.partner?.slug==='omio' && route?.legs?.length){
-        const seg=o.route_segment||{};
-        const from=v190CommercialEndpoint(seg.commercial_origin),to=v190CommercialEndpoint(seg.commercial_destination);
-        return Boolean(from&&to&&route.legs.some(leg=>v190CommercialEndpoint(leg.commercial_origin||leg.origin)===from&&v190CommercialEndpoint(leg.commercial_destination||leg.destination)===to));
-      }
-      return false;
-    });
-  };
+  const hasMobilityCTA=item=>sectionType==='transport'&&v263MobilityHasOffer(item,offers);
   if(sectionType==='transport')ordered.sort((a,b)=>{
     // V210: chronological journey boundaries outrank affiliate CTA ranking.
     // Within the remaining legs, retain the existing bookable-first behavior.
