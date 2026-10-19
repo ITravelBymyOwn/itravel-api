@@ -133,8 +133,27 @@ function v236LocalAccessPair(origin='',destination=''){
   }
   return false;
 }
+// V269: physical same-city station-to-centre access, including hyphenated
+// station names (Segovia-Guiomar -> Segovia centro). No provider-specific logic.
+function v269LocalStationCentre(origin='',destination=''){
+  const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
+  const station=/\b(station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal|railway)\b/;
+  const centre=/\b(centro|center|centre|downtown|historico|historic|old town|casco antiguo)\b/;
+  const stationCity=v=>{
+    if(!station.test(v))return '';
+    const prefix=v.match(/^(.+?)\s+(?:station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal)\b/);
+    const suffix=v.match(/^(?:station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal)\s+(?:de|del|of|at)?\s*(.+)$/);
+    return (prefix?.[1]||suffix?.[1]||'').replace(/\b(?:de|del|of|the)\b/g,' ').trim().split(' ')[0]||'';
+  };
+  const centreCity=v=>v.replace(/\b(?:centro|center|centre|downtown|historico|historic|old|town|casco|antiguo|city|de|del|of|the)\b/g,' ').trim().split(' ')[0]||'';
+  const matches=(st,ct)=>Boolean(station.test(st)&&centre.test(ct)&&stationCity(st)&&centreCity(ct)&&stationCity(st)===centreCity(ct));
+  // Some stations use City–Name without the word 'station'.
+  const hyphenCity=v=>v.match(/^([^–—-]+)[–—-][^–—-]+$/)?.[1]||'';
+  const implicit=(raw,ct)=>{const city=normalizeWorkspaceEntity(hyphenCity(String(raw||'')));return Boolean(city&&centre.test(ct)&&centreCity(ct)===city);};
+  return matches(a,b)||matches(b,a)||implicit(origin,b)||implicit(destination,a);
+}
 function v236CommercialRoutePair(origin='',destination=''){
-  return _v67CommercialIntercityEndpoints_(origin,destination) && !v236LocalAccessPair(origin,destination);
+  return _v67CommercialIntercityEndpoints_(origin,destination) && !v236LocalAccessPair(origin,destination) && !v269LocalStationCentre(origin,destination);
 }
 function tripRoutes(){
   const routes=[];
@@ -1186,7 +1205,7 @@ function v190OfferMatchesNeed(offer,item){
   if(!['12go','bookaway'].includes(offer?.partner?.slug||''))return false;
   const seg=offer?.route_segment||{};
   const from=v190CommercialEndpoint(seg.commercial_origin),to=v190CommercialEndpoint(seg.commercial_destination);
-  if(!from||!to||from===to)return false;
+  if(!from||!to||from===to||v269LocalStationCentre(seg.commercial_origin,seg.commercial_destination))return false;
   const legs=v190NeedLegs(item);
   const exactLeg=legs.some(leg=>leg.from===from&&leg.to===to);
   const verifiedJourneyLeg=item?.derived_by==='v192_explicit_excursion_mobility' &&
