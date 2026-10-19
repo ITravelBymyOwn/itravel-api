@@ -8600,6 +8600,55 @@ function _v254PropagatePhysicalChain_(city,rows,contract,totalDays,perDay,baseDa
   return accepted;
 }
 
+// V267: backward-only mobility alignment for an overlap with an immovable visit.
+// This complements forward propagation; no activities, durations or anchors are deleted.
+// The SAME authoritative QA must improve before a candidate can be committed.
+function _v267AlignInboundMobility_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
+  let accepted=rows;
+  const master=_v3SyntheticMaster_(totalDays);
+  const audit=value=>_localGlobalAudit_(city,value,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
+  const hardCodes=_v3HardBlockingCodes_();
+  const score=issues=>({overlap:issues.filter(x=>x.code==='OVERLAP').length,hard:issues.filter(x=>hardCodes.has(String(x.code||''))).length,total:issues.length});
+  for(let pass=0;pass<12;pass++){
+    const before=audit(accepted),baseline=score(before);
+    if(!baseline.overlap)break;
+    let committed=false;
+    for(const finding of before.filter(x=>x.code==='OVERLAP')){
+      const day=Number(finding.day),index=Number(finding.row)-1;
+      if(!day||index<1)continue;
+      const candidate=JSON.parse(JSON.stringify(accepted));
+      const chain=_rowsByDayObject_(candidate)[day]||[];
+      const prior=chain[index-1],current=chain[index],earlier=chain[index-2];
+      if(!prior||!current||!_isPureTransportRow_(prior)||_v115IsHardRow_(prior)||prior.fixed===true||prior.user_fixed===true||_v114IsNightOverlayRow_(prior))continue;
+      const ps=_v114LogicalStartMinutes_(prior),pe=_v114LogicalEndMinutes_(prior),cs=_v114LogicalStartMinutes_(current);
+      if(ps==null||pe==null||cs==null||pe<=cs||pe<=ps)continue;
+      const delta=pe-cs;
+      if(delta>60)continue;
+      const earlierEnd=earlier?_v114LogicalEndMinutes_(earlier):null;
+      if(earlierEnd!=null&&ps-delta<earlierEnd)continue;
+      const id=String(prior.planning_window_id||prior?.commerce_context?.planning_window_id||'');
+      const currentId=String(current.planning_window_id||current?.commerce_context?.planning_window_id||'');
+      if(id&&currentId&&id!==currentId)continue;
+      const windows=(contract?.route_days||[]).find(d=>Number(d.day)===day)?.location_windows||[];
+      const matched=id?windows.find(w=>String(w.window_id||'')===id):null;
+      if(id&&!matched)continue;
+      const lower=matched?_hhmmToMinutes_(matched.start):null;
+      if(lower!=null&&ps-delta<lower)continue;
+      const rawStart=_hhmmToMinutes_(prior.start),rawEnd=_hhmmToMinutes_(prior.end);
+      if(rawStart==null||rawEnd==null||rawStart-delta<0||rawEnd-delta<0)continue;
+      prior.start=_minutesToHHMM_(rawStart-delta);
+      prior.end=_minutesToHHMM_(rawEnd-delta);
+      const next=score(audit(candidate));
+      if(next.overlap>=baseline.overlap||next.hard>baseline.hard||next.total>baseline.total)continue;
+      accepted=candidate;committed=true;
+      console.info(`[ITBMO V267 INBOUND ALIGNMENT] ${city} · day ${day} · row ${index} · -${delta} min · overlaps ${baseline.overlap}→${next.overlap}`);
+      break;
+    }
+    if(!committed)break;
+  }
+  return accepted;
+}
+
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
@@ -8610,6 +8659,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
   // only the unit's supplied windows determine the available clock budget.
   out=_v254PropagatePhysicalChain_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
   out=_v249ReconcileUnitWindow_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
+  out=_v267AlignInboundMobility_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
