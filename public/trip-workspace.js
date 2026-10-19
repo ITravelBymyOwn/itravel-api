@@ -980,8 +980,21 @@ function contextualNeedsForCity(cityName,needs){
     return !coveredByItinerary(item) && !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
   const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
-  merged.push(...v187ProviderMobilityNeeds(cityName,merged));
-  merged.push(...v192ExcursionMobilityNeeds(cityName,merged));
+  // V268: a continuous rental is one purchase decision, not one purchase per drive.
+  // Preserve rail/ferry/bus and distinct modes; itinerary rows themselves remain intact.
+  const coveredRentalDays=new Set(rentalPlan?.rental_user_selected ? (rentalPlan.rental_scope_days||[]).map(Number) : []);
+  const isCoveredCarLeg=item=>{
+    if(!coveredRentalDays.has(Number(item?.day)))return false;
+    const mode=normalizeWorkspaceEntity(item?.transport||'');
+    if(/\b(tren|train|rail|bus|autobus|ferry|ferri|barco|boat|avion|flight|plane|taxi|shuttle|tour guiado|guided tour)\b/.test(mode))return false;
+    return rentalTransportTextMatches(mode)||/\b(coche|carro|auto|car|vehiculo|vehicle|conduccion|driving)\b/.test(mode);
+  };
+  // Apply coverage to server and route-derived mobility, not just later extractors.
+  for(let i=merged.length-1;i>=0;i--){
+    if(merged[i]!==rentalPlan && v208TransportNeed(merged[i]) && isCoveredCarLeg(merged[i]))merged.splice(i,1);
+  }
+  merged.push(...v187ProviderMobilityNeeds(cityName,merged).filter(item=>!isCoveredCarLeg(item)));
+  merged.push(...v192ExcursionMobilityNeeds(cityName,merged).filter(item=>!isCoveredCarLeg(item)));
   // Ticket/access needs are first-class deterministic data. V3 emits
   // commerce_context on each row; use it directly so subdestination cards do
   // not depend on the parent planning-unit classifier.
@@ -1629,7 +1642,14 @@ async function fetchPartnerOffers(action,needs=[]){
   // suppressing a valid mobility CTA. It uses the same /api/partners function,
   // so no additional Vercel Function is introduced.
   const transport_routes=omioTransportRoutesForRequest(v235FilterMobilityNeeds(needs));
-  const mobilityNeeds=v235FilterMobilityNeeds(v187ProviderMobilityNeeds(city||'',needs));
+  const activeRental=needs.find(n=>n?.derived_by==='workspace_rental_plan'&&n?.rental_user_selected);
+  const coveredDays=new Set((activeRental?.rental_scope_days||[]).map(Number));
+  const mobilityNeeds=v235FilterMobilityNeeds(v187ProviderMobilityNeeds(city||'',needs)).filter(n=>{
+    if(!coveredDays.has(Number(n.day)))return true;
+    const mode=normalizeWorkspaceEntity(n.transport||'');
+    if(/\b(tren|train|rail|bus|autobus|ferry|ferri|barco|boat|avion|flight|plane|taxi|shuttle|tour guiado|guided tour)\b/.test(mode))return true;
+    return !(rentalTransportTextMatches(mode)||/\b(coche|carro|auto|car|vehiculo|vehicle|conduccion|driving)\b/.test(mode));
+  });
   // V193: resolve the SAME contextual journey needs shown in the Workspace.
   // Omio's independent feed request remains unchanged.
   const excursionNeeds=needs.filter(n=>n?.derived_by==='v192_explicit_excursion_mobility');
