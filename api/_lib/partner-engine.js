@@ -1147,10 +1147,39 @@ function v226StationAccess(need,route){
   if(station.test(normalizeKey(`${route?.origin||''} ${route?.destination||''}`))&&local.test(mode))return true;
   return false;
 }
+// V269: a station named "City–Station" and "City centre" are the same
+// local market. This check is endpoint-based and provider-neutral; it does not
+// classify a station in one city to a station in another as local.
+function v269LocalStationCentre(origin='',destination=''){
+  const a=normalizeKey(origin),b=normalizeKey(destination);
+  const station=/\b(station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal|railway|train station)\b/;
+  const centre=/\b(centro|center|centre|downtown|historico|historic|old town|casco antiguo)\b/;
+  const stationCity=v=>{
+    if(!station.test(v))return '';
+    const prefix=v.match(/^(.+?)\s+(?:station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal)\b/);
+    const suffix=v.match(/^(?:station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal)\s+(?:de|del|of|at)?\s*(.+)$/);
+    const candidate=(prefix?.[1]||suffix?.[1]||'').replace(/\b(?:de|del|of|the)\b/g,' ').trim();
+    return candidate.split(' ').filter(Boolean)[0]||'';
+  };
+  const centreCity=v=>{
+    if(!centre.test(v))return '';
+    return v.replace(/\b(?:centro|center|centre|downtown|historico|historic|old|town|casco|antiguo|city|de|del|of|the)\b/g,' ').trim().split(' ').filter(Boolean)[0]||'';
+  };
+  const matches=(st,ct)=>Boolean(station.test(st)&&centre.test(ct)&&stationCity(st)&&centreCity(ct)&&stationCity(st)===centreCity(ct));
+  // A named terminal may omit the word 'station' (e.g. City–Guiomar).
+  // Only treat a hyphenated place as access when the other endpoint explicitly
+  // identifies the same city's centre; never classify two terminals this way.
+  const hyphenCity=v=>v.match(/^([^–—-]+)[–—-][^–—-]+$/)?.[1]||'';
+  const implicit=(raw,ct)=>{
+    const city=normalizeKey(hyphenCity(String(raw||'')));
+    return Boolean(city&&centre.test(ct)&&centreCity(ct)===city);
+  };
+  return matches(a,b)||matches(b,a)||implicit(origin,b)||implicit(destination,a);
+}
 function v225GroundTransportNeed(need,route){
   const mode=twelveGoCommercialMode(`${need?.transport||''} ${need?.transport_mode||''} ${route?.mode==='alternative'?'':route?.mode||''}`);
   if(mode==='flight')return false;
-  if(v226StationAccess(need,route))return false;
+  if(v226StationAccess(need,route)||v269LocalStationCentre(route?.origin,route?.destination))return false;
   // V268: a station-to-its-own-city-center access is local, even when a
   // generic 'train' label hides the taxi/walk mode. Do not reject two stations
   // in different cities or intercity journeys originating at a station.
@@ -1212,6 +1241,7 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[],destinations=[]){
     // Never synthesize a 12Go market from editorial parent labels or narrative
     // free text. Structured legs or an explicit legacy A→B source are required.
     for(const route of candidates){
+      if(v269LocalStationCentre(route.origin,route.destination))continue;
       if(!route.verified_url&&localTransportMarket(route,need))continue;
       const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b||normalizeKey(a)===normalizeKey(b))continue;
       const key=`${clean(need?.id,120)}|${v187RouteKey(route.origin,city)}|${v187RouteKey(route.destination,city)}`; if(seen.has(key))continue;
@@ -1303,6 +1333,7 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
     });
     else{const route=bookawayLegacyMarket(need);if(route)candidates.push(route);}
     for(const route of candidates){
+      if(v269LocalStationCentre(route.origin,route.destination))continue;
       if(!route.verified_url&&localTransportMarket(route,need))continue;
       const key=`${clean(need?.id,120)}|${v187RouteKey(route.origin,city)}|${v187RouteKey(route.destination,city)}`;
       if(seen.has(key))continue;
