@@ -1851,7 +1851,7 @@ function _restorePostPaymentProgress_(trip){
     $preferencesGenerateV2.textContent=getLang()==='es'?'Generar mi itinerario ✨':'Generate my itinerary ✨';
   }
 
-  if(phase==='collecting_hotels' || phase==='collecting_language'){
+  if((phase==='collecting_hotels' || phase==='collecting_language') && !['generated','completed'].includes(String(plannerState?.status||''))){
     // Legacy checkpoint compatibility only. New V2 trips no longer use Planner Chat for structure.
     if($chatBox) $chatBox.style.display='flex';
     setPlanningChatLocked(false);
@@ -10727,7 +10727,9 @@ function _hydrateGenerationTrip_(trip){
     $start.dataset.itbmoConsumed='1';
   }
   $resetBtn?.removeAttribute('disabled');
-  if($chatBox) $chatBox.style.display='flex';
+  // V268: completed-trip hydration must never resurrect the retired Planner Agent Chat.
+  if($chatBox) $chatBox.style.display='none';
+  setPlanningChatLocked(true);
   renderCityTabs();
   setExportToolbarVisibility(trip.status==='generated');
   restoreInfoChatStateForTrip(currentTripId,persistedPlanner.info_chat_state);
