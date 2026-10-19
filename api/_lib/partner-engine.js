@@ -1342,10 +1342,12 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
       const verified=route.verified_url||verifiedTransportUrl('bookaway',route,city);
       // V188: verified publisher routes only; generic home searches are not commercial matches.
       if(!v225GroundTransportNeed(need,route))continue;
-      // Bookaway route pages are not predictable from country and city slugs.
-      // Do not emit speculative 404 links until a verified route or API exists.
-      const inferred='';
-      if(!verified)continue;
+      // V270: Until Bookaway provides a route feed/API, mirror 12Go's
+      // explicitly unverified route-search behavior. Country must be grounded
+      // in the trip metadata; physical legs and station/local gates above stay
+      // mandatory. Never imply inventory or confirmed route publication.
+      const inferred=verified?'':v225PublisherSearchCandidate('bookaway',route,need,city,destinations);
+      if(!verified&&!inferred)continue;
       seen.add(key);
       const targetUrl=appendParams(verified||inferred,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
