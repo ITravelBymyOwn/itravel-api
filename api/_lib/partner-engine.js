@@ -1151,6 +1151,15 @@ function v225GroundTransportNeed(need,route){
   const mode=twelveGoCommercialMode(`${need?.transport||''} ${need?.transport_mode||''} ${route?.mode==='alternative'?'':route?.mode||''}`);
   if(mode==='flight')return false;
   if(v226StationAccess(need,route))return false;
+  // V268: a station-to-its-own-city-center access is local, even when a
+  // generic 'train' label hides the taxi/walk mode. Do not reject two stations
+  // in different cities or intercity journeys originating at a station.
+  const cleanStationCity=v=>normalizeKey(v).replace(/\b(estacion|station|stazione|estacao|gare|bahnhof|hbf|terminal|centro|center|centre|city|downtown|historico|historic|de|del|of|the)\b/g,' ').replace(/\s+/g,' ').trim();
+  const oa=normalizeKey(route?.origin||''),ob=normalizeKey(route?.destination||'');
+  const station=/\b(estacion|station|stazione|estacao|gare|bahnhof|hbf|terminal)\b/;
+  const center=/\b(centro|center|centre|downtown|historico|historic)\b/;
+  if(((station.test(oa)&&center.test(ob))||(station.test(ob)&&center.test(oa))) &&
+     cleanStationCity(oa)&&cleanStationCity(oa)===cleanStationCity(ob))return false;
   const raw=normalizeKey(`${need?.transport||''} ${need?.source_activity||''}`);
   if(/\b(plane|flight|airplane|aircraft|avion|vuelo|aereo|aeropuerto|airport)\b/.test(raw))return false;
   const a=normalizeKey(route?.origin||''),b=normalizeKey(route?.destination||'');
