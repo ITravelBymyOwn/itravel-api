@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V250';
-const ITBMO_RUNTIME_ASSET='planner.js?v=252';
+const ITBMO_RUNTIME_BUILD='V271';
+const ITBMO_RUNTIME_ASSET='planner.js?v=271';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -1288,7 +1288,7 @@ async function restoreITBMOSession({broadcast=true}={}){
           // V265: retain only this browser's interrupted paid-generation pointer.
           const interruptedTripId=getStoredActiveTripId();
           enterFreshPlannerAfterAuth();
-          if(interruptedTripId) void restorePaidGenerationIfNeeded(interruptedTripId);
+          void restorePaidGenerationIfNeeded(interruptedTripId);
         }
         return;
       }
@@ -1320,7 +1320,7 @@ async function restoreITBMOSession({broadcast=true}={}){
           // V265: retain only this browser's interrupted paid-generation pointer.
           const interruptedTripId=getStoredActiveTripId();
           enterFreshPlannerAfterAuth();
-          if(interruptedTripId) void restorePaidGenerationIfNeeded(interruptedTripId);
+          void restorePaidGenerationIfNeeded(interruptedTripId);
         }
   }
 }
@@ -2925,7 +2925,7 @@ function showPreferencesStage(){
 
   // Do not lock here: this screen can be reached before payment in non-commerce/test flows.
   // Locking is applied only after a positive server payment/admin-bypass entitlement.
-  const canonicalStory=_travelV2()?.state?.tripStory || plannerState?.travelModelV2?.trip_story || null;
+  const canonicalStory=plannerState?.travelModelV2?.trip_story || _travelV2()?.state?.tripStory || null;
   if(canonicalStory){
     _travelV2()?.setTripStory?.(canonicalStory);
     if(plannerState){plannerState.travelModelV2=_currentTravelModelV2_();plannerState.travelModelV2.trip_story=JSON.parse(JSON.stringify(canonicalStory));}
@@ -6520,12 +6520,7 @@ function _v110SemanticRole_(row={}){
   if(/\b(rest|descanso|recovery|recuperacion|pausa|break)\b/.test(t)) return 'recovery';
   if(/\b(return|regreso|retorno|back to|vuelta).*(hotel|alojamiento|base|lodging|accommodation)\b/.test(t)) return 'return';
   if(/^(transfer|traslado|transporte|transport|regreso|retorno|return|walk to|caminar hacia|paseo hacia|drive to|conducir hacia|train to|tren hacia|bus to|autobus hacia)\b/.test(t)) return 'transfer';
-  // V211: utility roles must be identified by the scheduled action, not by
-  // incidental guidance in Notes (e.g. an alpine viewpoint's ticket 'acceso').
-  // Otherwise the V115 shield mistakes a real experience for a flexible buffer
-  // and truncates its duration, leaving a large unexplained gap before lunch.
-  const action=_canonicalText_(`${row?.kind||''} ${row?.activity||''}`);
-  if(/\b(buffer|margen|access|acceso|check in|control|queue|fila|security)\b/.test(action)) return 'buffer';
+  if(/\b(buffer|margen|access|acceso|check in|control|queue|fila|security)\b/.test(t)) return 'buffer';
   if(/\b(free time|tiempo libre|flexible|flexibilidad)\b/.test(t)) return 'free_time';
   return 'experience';
 }
@@ -8458,208 +8453,12 @@ function _v3FitDurationToInterval_(row={}){
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
-// V252 — Constraint-aware transactional scheduler for generated physical units.
-// No model calls, no changes to the TIE/physical-unit generator or its contracts.
-// Operates on an isolated copy, commits only on strictly improved authoritative QA.
-function _v249ReconcileUnitWindow_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
-  let accepted=rows;
-  const master=_v3SyntheticMaster_(totalDays);
-  const audit=candidate=>_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-  const hardCodes=_v3HardBlockingCodes_();
-  const score=errors=>({overlaps:errors.filter(e=>e.code==='OVERLAP').length,
-    hard:errors.filter(e=>hardCodes.has(String(e?.code||''))).length,total:errors.length});
-  // Use the actual authoritative window, not merely its optional row identifier.
-  // Missing identifiers may be inferred ONLY from an unambiguous contract window.
-  const windowOf=row=>{
-    const day=Number(row?.day||0),id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
-    const windows=(contract?.route_days||[]).find(d=>Number(d?.day)===day)?.location_windows||[];
-    if(id){const exact=windows.find(w=>String(w?.window_id||'')===id);if(exact)return exact;return null;}
-    const start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
-    if(start==null||end==null)return null;
-    const matches=windows.filter(w=>{
-      const a=_hhmmToMinutes_(w?.start),b=_hhmmToMinutes_(w?.end);
-      return a!=null&&start>=a&&(b==null||start<b)&&(w?.open_end||b==null||end<=b);
-    });
-    return matches.length===1?matches[0]:null;
-  };
-  const rigid=row=>_v115IsHardRow_(row)||_v114IsNightOverlayRow_(row)||
-    String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high';
-  // A maximum of one accepted transaction per pass prevents oscillation.
-  for(let pass=0;pass<12;pass++){
-    const before=audit(accepted),baseline=score(before);
-    if(!baseline.overlaps)break;
-    let committed=false;
-    for(const issue of before.filter(e=>e.code==='OVERLAP')){
-      const day=Number(issue?.day||0),index=Number(issue?.row||0)-1;
-      if(!day||index<1)continue;
-      const candidate=JSON.parse(JSON.stringify(accepted));
-      const chain=_rowsByDayObject_(candidate)[day]||[];
-      if(index>=chain.length)continue;
-      const previous=chain[index-1],first=chain[index];
-      if(rigid(previous)&&rigid(first))continue;
-      const referenceWindow=windowOf(first),previousWindow=windowOf(previous);
-      if(!referenceWindow||!previousWindow||String(referenceWindow.window_id||'')!==String(previousWindow.window_id||'') || String(referenceWindow.start||'')!==String(previousWindow.start||'') || String(referenceWindow.end||'')!==String(previousWindow.end||''))continue;
-      const upper=referenceWindow.open_end?null:_hhmmToMinutes_(referenceWindow.end);
-      const lower=_hhmmToMinutes_(referenceWindow.start);
-      let cursor=_v114LogicalEndMinutes_(previous),moved=0,maxDelta=0,valid=true;
-      if(cursor==null)continue;
-      for(let j=index;j<chain.length;j++){
-        const row=chain[j],start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
-        if(start==null||end==null||end<=start){valid=false;break;}
-        if(start>=cursor)break; // natural slack absorbs all remaining displacement
-        const rowWindow=windowOf(row);
-        if(!rowWindow||String(rowWindow.window_id||'')!==String(referenceWindow.window_id||'')||String(rowWindow.start||'')!==String(referenceWindow.start||'')||String(rowWindow.end||'')!==String(referenceWindow.end||'')||rigid(row)){valid=false;break;}
-        const delta=cursor-start;
-        if(delta>180||lower!=null&&start<lower||upper!=null&&end+delta>upper){valid=false;break;}
-        const rawStart=_hhmmToMinutes_(row.start),rawEnd=_hhmmToMinutes_(row.end);
-        if(rawStart==null||rawEnd==null){valid=false;break;}
-        row.start=_minutesToHHMM_(rawStart+delta);
-        row.end=_minutesToHHMM_(rawEnd+delta);
-        cursor=end+delta;moved++;maxDelta=Math.max(maxDelta,delta);
-      }
-      if(!valid||!moved)continue;
-      const after=audit(candidate),next=score(after);
-      // Never trade one blocking issue for another or hide an error in a new row.
-      if(next.overlaps>=baseline.overlaps||next.hard>baseline.hard||next.total>baseline.total)continue;
-      accepted=candidate;committed=true;
-      console.info(`[ITBMO V252 CONSTRAINT TRANSACTION] ${city} · day ${day} · ${moved} rows · max +${maxDelta} min · overlaps ${baseline.overlaps}→${next.overlaps}`);
-      break;
-    }
-    if(!committed)break;
-  }
-  return accepted;
-}
-
-// V254: single transactional forward propagation over a complete physical-day chain.
-// Unlike V48, this never commits a one-row shift that merely relocates the collision.
-// Unlike V252, absent optional planning_window_id does not block a safe repair.
-// All rows, fixed anchors, contract boundaries and authoritative QA remain protected.
-function _v254PropagatePhysicalChain_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
-  let accepted=rows;
-  const master=_v3SyntheticMaster_(totalDays);
-  const audit=value=>_localGlobalAudit_(city,value,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-  const hard=_v3HardBlockingCodes_();
-  const measure=issues=>({overlap:issues.filter(e=>e.code==='OVERLAP').length,
-    hard:issues.filter(e=>hard.has(String(e?.code||''))).length,total:issues.length});
-  const rigid=row=>_v115IsHardRow_(row)||_v114IsNightOverlayRow_(row)||row?.fixed===true||row?.user_fixed===true||
-    String(row?.kind||'').toLowerCase()==='fixed_transfer'||
-    String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase()==='high';
-  const window=row=>{
-    const id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
-    const options=(contract?.route_days||[]).find(d=>Number(d?.day)===Number(row?.day))?.location_windows||[];
-    if(id)return options.find(w=>String(w?.window_id||'')===id)||null;
-    const start=_v114LogicalStartMinutes_(row),end=_v114LogicalEndMinutes_(row);
-    const matches=options.filter(w=>{const a=_hhmmToMinutes_(w.start),b=_hhmmToMinutes_(w.end);
-      return a!=null&&start>=a&&(w.open_end||b==null||end<=b);});
-    return matches.length===1?matches[0]:null;
-  };
-  const key=w=>w?`${String(w.window_id||'')}|${w.start||''}|${w.end||''}`:null;
-  for(let pass=0;pass<12;pass++){
-    const before=audit(accepted),old=measure(before);
-    if(!old.overlap)break;
-    let committed=false;
-    for(const issue of before.filter(e=>e.code==='OVERLAP')){
-      const day=Number(issue.day),rowNum=Number(issue.row);
-      if(!day||rowNum<2)continue;
-      const candidate=JSON.parse(JSON.stringify(accepted));
-      const chain=_rowsByDayObject_(candidate)[day]||[];
-      if(rowNum>chain.length)continue;
-      const previous=chain[rowNum-2],first=chain[rowNum-1];
-      if(rigid(first)||_v114IsNightOverlayRow_(previous))continue;
-      const anchorWindow=window(first),priorWindow=window(previous);
-      // Explicit windows must agree; when neither exists, respect fixed anchors
-      // and accept only a full authoritative audit improvement.
-      if((anchorWindow||priorWindow)&&(!anchorWindow||!priorWindow||key(anchorWindow)!==key(priorWindow)))continue;
-      const ceiling=anchorWindow&&!anchorWindow.open_end?_hhmmToMinutes_(anchorWindow.end):null;
-      let cursor=_v114LogicalEndMinutes_(previous),moved=0,valid=cursor!=null;
-      for(let j=rowNum-1;valid&&j<chain.length;j++){
-        const r=chain[j],start=_v114LogicalStartMinutes_(r),end=_v114LogicalEndMinutes_(r);
-        if(start==null||end==null||end<=start){valid=false;break;}
-        if(start>=cursor)break;
-        if(rigid(r)){valid=false;break;}
-        const rw=window(r);
-        if((anchorWindow||rw)&&(!anchorWindow||!rw||key(anchorWindow)!==key(rw))){valid=false;break;}
-        const delta=cursor-start;
-        const rawStart=_hhmmToMinutes_(r.start),rawEnd=_hhmmToMinutes_(r.end);
-        if(delta>180||rawStart==null||rawEnd==null||(ceiling!=null&&end+delta>ceiling)){
-          valid=false;break;
-        }
-        r.start=_minutesToHHMM_(rawStart+delta);
-        r.end=_minutesToHHMM_(rawEnd+delta);
-        cursor=end+delta;moved++;
-      }
-      if(!valid||!moved)continue;
-      const next=measure(audit(candidate));
-      if(next.overlap>=old.overlap||next.hard>old.hard||next.total>old.total)continue;
-      accepted=candidate;committed=true;
-      console.info(`[ITBMO V254 PHYSICAL CHAIN TRANSACTION] ${city} · day ${day} · ${moved} rows · overlaps ${old.overlap}→${next.overlap}`);
-      break;
-    }
-    if(!committed)break;
-  }
-  return accepted;
-}
-
-// V267: backward-only mobility alignment for an overlap with an immovable visit.
-// This complements forward propagation; no activities, durations or anchors are deleted.
-// The SAME authoritative QA must improve before a candidate can be committed.
-function _v267AlignInboundMobility_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride){
-  let accepted=rows;
-  const master=_v3SyntheticMaster_(totalDays);
-  const audit=value=>_localGlobalAudit_(city,value,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-  const hardCodes=_v3HardBlockingCodes_();
-  const score=issues=>({overlap:issues.filter(x=>x.code==='OVERLAP').length,hard:issues.filter(x=>hardCodes.has(String(x.code||''))).length,total:issues.length});
-  for(let pass=0;pass<12;pass++){
-    const before=audit(accepted),baseline=score(before);
-    if(!baseline.overlap)break;
-    let committed=false;
-    for(const finding of before.filter(x=>x.code==='OVERLAP')){
-      const day=Number(finding.day),index=Number(finding.row)-1;
-      if(!day||index<1)continue;
-      const candidate=JSON.parse(JSON.stringify(accepted));
-      const chain=_rowsByDayObject_(candidate)[day]||[];
-      const prior=chain[index-1],current=chain[index],earlier=chain[index-2];
-      if(!prior||!current||!_isPureTransportRow_(prior)||_v115IsHardRow_(prior)||prior.fixed===true||prior.user_fixed===true||_v114IsNightOverlayRow_(prior))continue;
-      const ps=_v114LogicalStartMinutes_(prior),pe=_v114LogicalEndMinutes_(prior),cs=_v114LogicalStartMinutes_(current);
-      if(ps==null||pe==null||cs==null||pe<=cs||pe<=ps)continue;
-      const delta=pe-cs;
-      if(delta>60)continue;
-      const earlierEnd=earlier?_v114LogicalEndMinutes_(earlier):null;
-      if(earlierEnd!=null&&ps-delta<earlierEnd)continue;
-      const id=String(prior.planning_window_id||prior?.commerce_context?.planning_window_id||'');
-      const currentId=String(current.planning_window_id||current?.commerce_context?.planning_window_id||'');
-      if(id&&currentId&&id!==currentId)continue;
-      const windows=(contract?.route_days||[]).find(d=>Number(d.day)===day)?.location_windows||[];
-      const matched=id?windows.find(w=>String(w.window_id||'')===id):null;
-      if(id&&!matched)continue;
-      const lower=matched?_hhmmToMinutes_(matched.start):null;
-      if(lower!=null&&ps-delta<lower)continue;
-      const rawStart=_hhmmToMinutes_(prior.start),rawEnd=_hhmmToMinutes_(prior.end);
-      if(rawStart==null||rawEnd==null||rawStart-delta<0||rawEnd-delta<0)continue;
-      prior.start=_minutesToHHMM_(rawStart-delta);
-      prior.end=_minutesToHHMM_(rawEnd-delta);
-      const next=score(audit(candidate));
-      if(next.overlap>=baseline.overlap||next.hard>baseline.hard||next.total>baseline.total)continue;
-      accepted=candidate;committed=true;
-      console.info(`[ITBMO V267 INBOUND ALIGNMENT] ${city} · day ${day} · row ${index} · -${delta} min · overlaps ${baseline.overlap}→${next.overlap}`);
-      break;
-    }
-    if(!committed)break;
-  }
-  return accepted;
-}
-
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
   const compiled=_v111CompileTimeline_(city,out,contract); out=compiled.rows.map(_v113CanonicalizeRowSemantics_); // V113/V115: timeline first, then canonical row semantics.
-  // V252: QA-gated chronology for BASE_STAY and DAY_TRIP;
-  // only the unit's supplied windows determine the available clock budget.
-  out=_v254PropagatePhysicalChain_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
-  out=_v249ReconcileUnitWindow_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
-  out=_v267AlignInboundMobility_(city,out,contract,totalDays,perDay,baseDate,routeContextOverride,expectedDaysOverride);
 
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
@@ -8668,56 +8467,6 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     const errors=report?.errors||[];
     let changed=false;
     const byDay=_rowsByDayObject_(out);
-
-    // V247: transactional, slack-aware repair of short chronological collisions.
-    // The old single-row patch often moved a conflict to the NEXT row, so QA
-    // rejected it despite a valid schedule being possible (Toledo/Montserrat).
-    // Move the entire dependent flexible chain, preserving every experience,
-    // duration, ordering and fixed transport. Never cross planning windows or
-    // hard/calendar-sensitive rows. Commit ONLY after full local QA improves.
-    for(const finding of errors.filter(e=>e.code==='OVERLAP')){
-      const day=Number(finding?.day||0),rowNum=Number(finding?.row||0);
-      if(!day||rowNum<2)continue;
-      const original=_rowsByDayObject_(out)[day]||[];
-      if(rowNum>original.length)continue;
-      const candidate=JSON.parse(JSON.stringify(out));
-      const chain=_rowsByDayObject_(candidate)[day]||[];
-      const previous=chain[rowNum-2],current=chain[rowNum-1];
-      if(_v114IsNightOverlayRow_(previous)||_v114IsNightOverlayRow_(current))continue;
-      const previousEnd=_v114LogicalEndMinutes_(previous),currentStart=_v114LogicalStartMinutes_(current);
-      if(previousEnd==null||currentStart==null||previousEnd<=currentStart||previousEnd-currentStart>45)continue;
-      const windowId=String(current?.planning_window_id||current?.commerce_context?.planning_window_id||'');
-      const previousWindow=String(previous?.planning_window_id||previous?.commerce_context?.planning_window_id||'');
-      if(!windowId||windowId!==previousWindow)continue;
-      let end=previousEnd,ok=true,moved=0,maxDelta=0;
-      for(let j=rowNum-1;j<chain.length;j++){
-        const row=chain[j];
-        const rowWindow=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'');
-        if(rowWindow!==windowId||_v114IsNightOverlayRow_(row))break;
-        const start=_v114LogicalStartMinutes_(row),finish=_v114LogicalEndMinutes_(row);
-        if(start==null||finish==null||finish<=start){ok=false;break;}
-        if(start>=end)break; // existing slack absorbs the upstream delay
-        const delta=end-start;
-        const calendar=String(row?.calendar_sensitivity||row?.commerce_context?.calendar_sensitivity||'').toLowerCase();
-        if(delta>90||_v115IsHardRow_(row)||calendar==='high'||
-           String(row?.kind||'').toLowerCase()==='fixed_transfer'||row?.user_fixed===true||row?.fixed===true){ok=false;break;}
-        const win=_v111WindowForRow_(row,contract),winEnd=_hhmmToMinutes_(win?.end);
-        if(winEnd!=null&&finish+delta>winEnd){ok=false;break;}
-        row.start=_minutesToHHMM_(start+delta);row.end=_minutesToHHMM_(finish+delta);
-        end=finish+delta;moved++;maxDelta=Math.max(maxDelta,delta);
-      }
-      if(!ok||!moved)continue;
-      const nextErrors=_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride)?.errors||[];
-      const oldBlocking=errors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
-      const newBlocking=nextErrors.filter(e=>_v3HardBlockingCodes_().has(String(e?.code||''))).length;
-      const oldOverlaps=errors.filter(e=>e.code==='OVERLAP').length;
-      const newOverlaps=nextErrors.filter(e=>e.code==='OVERLAP').length;
-      if(newBlocking>oldBlocking||newOverlaps>=oldOverlaps||nextErrors.length>errors.length)continue;
-      out=candidate;changed=true;
-      console.info(`[ITBMO V247 CHAIN REPAIR] ${city} · day ${day} · ${moved} flexible row(s) · max +${maxDelta} min · overlaps ${oldOverlaps}→${newOverlaps}`);
-      break; // audit again before touching another collision
-    }
-    if(changed)continue;
 
     // V48 deterministic micro-overlap repair. Treat a <=30 minute activity
     // overlap as arithmetic, but accept the shift only transactionally: re-run
@@ -8743,10 +8492,9 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       const candidateReport=_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride);
       const candidateErrors=candidateReport?.errors||[];
       const sameOverlap=candidateErrors.some(e=>e.code==='OVERLAP'&&Number(e?.day||0)===day&&Number(e?.row||0)===rowNum);
-      if(sameOverlap||candidateErrors.length>errors.length||candidateErrors.filter(e=>e.code==='OVERLAP').length>=errors.filter(e=>e.code==='OVERLAP').length)continue;
+      if(sameOverlap||candidateErrors.length>errors.length)continue;
       out=candidate;changed=true;
       console.info(`[ITBMO V3 DETERMINISTIC OVERLAP] ${city} · day ${day} · row ${rowNum} · +${overlap} min`,{from:error.start,to:candidateRow.start,end:candidateRow.end});
-      break; // V253: refresh QA before repairing another collision
     }
 
     // Timeline/duration defects are arithmetic, not creative-writing problems.
@@ -9197,11 +8945,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         ...dt,
         expected_date:startISO?_tripStoryAddDays_(startISO,Math.max(0,Number(dt.day||1)-1)):null
       }));
-      const fullStory=(contract.trip_story_stays||[]);
-      const originalIndex=fullStory.findIndex(x=>x.id===st.id);
-      const previous=originalIndex>0?fullStory[originalIndex-1]:null;
-      const next=originalIndex>=0?fullStory[originalIndex+1]||null:null;
-      // Boundaries must follow the complete route, including transit stops.
+      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
       // Prefer the shared transition date. This prevents an earlier Day Trip to
       // the next city from being mistaken for the actual inter-stay boundary.
       const inbound=previous?findBoundaryTransfer(previous.place,st.place,startISO):null;
@@ -9292,10 +9036,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     descriptors.forEach(d=>{
       const {st,index,dayTrips}=d;
       const allWindows=(ownedWindows.get(index)||[]).sort((a,b)=>_v114LogicalRowCompare_(a,b));
-      const fullStory=(contract.trip_story_stays||[]);
-      const originalIndex=fullStory.findIndex(x=>x.id===st.id);
-      const previous=originalIndex>0?fullStory[originalIndex-1]:null;
-      const next=originalIndex>=0?fullStory[originalIndex+1]||null:null;
+      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
       const parentId=st.id||`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(index+1).padStart(2,'0')}`;
 
       // Resolve whether the traveler fixed the excursion clock. Route-estimated
@@ -10103,21 +9844,6 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       rows=generated.rows||[];
       if(!rows.length) throw new Error(`V3_EMPTY:${city}`);
       const mergeCoverage=_v3Coverage_(rows,dest.days);
-      // V240: normalize immutable movement facts before the merged hard gate.
-      // Accepted Stay rows are not regenerated. If the movement facts overlap
-      // accepted tourism, the audit still reports it as a blocking defect.
-      const preflight=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
-      const preflightCodes=new Set((preflight.errors||[]).map(e=>String(e.code||'')));
-      if(preflightCodes.has('MISSING_USER_FIXED_TRANSFER')){
-        const restored=_v3EnforceHardRouteFacts_(rows,generated.contract);
-        const restoredReport=_v3MergedHardPhysicalAudit_(restored,generated.contract,dest.days);
-        const restoredCodes=new Set((restoredReport.errors||[]).map(e=>String(e.code||'')));
-        if(!restoredCodes.has('MISSING_USER_FIXED_TRANSFER') &&
-           !_v70ExactPhysicalUnitConservation_(restored,generated.stayResults||[]).length){
-          rows=restored;
-          console.info('[ITBMO V240 FIXED CHAIN] restored missing canonical movement(s) before merge QA');
-        }
-      }
       const mergeReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
       const mergeErrors=[...(mergeReport.errors||[]),...(generated.conservationErrors||[])];
       console.info(`[ITBMO V3 INTERNAL MERGE QA] trip · ${mergeAttempt}/${ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS}`,_v3AuditSummary_({errors:mergeErrors}),mergeErrors);
@@ -11417,24 +11143,33 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
   if(!_plannerOwnsAutomaticGenerationRecovery_()) return;
   // Explicit new journeys must never revive a previous payment/generation.
   if(new URLSearchParams(window.location.search).get('mode')==='new') return;
-  if(!interruptedTripId) return;
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   const restoreEpoch=generationRunEpoch;
   try{
     const token=getStoredSessionToken();
-    const tripId=String(interruptedTripId).trim();
+    // V271: MAIN recovery discovery: explicit trip, active pointer, then paid
+    // interrupted generation on the server. Completed/saved trips are NEVER hydrated.
+    const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
+    const tripId=requestedTripId || String(interruptedTripId || getStoredActiveTripId() || '').trim();
     let trip=null;
-    try{
-      const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
-      trip=data?.trip || null;
-    }catch(err){
-      if(err?.status===404) return;
-      throw err;
+    if(tripId){
+      try{
+        const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
+        trip=data?.trip || null;
+      }catch(err){
+        if(err?.status===404) storeActiveTripId(null);
+        else throw err;
+      }
     }
-    // Never recover an unrelated trip or fall back to historical recoverable trips.
-    if(!trip || String(trip.id)!==tripId) return;
+    if(!trip || !['generating','failed'].includes(trip.status)){
+      // V270 server recoverable endpoint filters to paid generating/failed
+      // and excludes auto_recovery_disabled. No completed-trip fallback.
+      const data=await tripApi({action:'recoverable',session_token:token});
+      trip=data?.trip || null;
+    }
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
     if(!trip || !['generating','failed'].includes(trip.status)) return;
+    storeActiveTripId(String(trip.id));
 
     // V86 RECOVERY CONTRACT:
     // Login/new Planner = blank. Completed/saved route creation is never restored.
