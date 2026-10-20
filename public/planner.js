@@ -8409,6 +8409,53 @@ function _v266CrossStayAdvisories_(rows=[]){
   return issues;
 }
 
+// V274 — Read-only QA signals; never mutate itinerary or trigger Luna retries.
+function _v274QualityAdvisories_(rows=[],contract={}){
+  const issues=[], byDay=_rowsByDayObject_(rows), seen=new Map();
+  const utility=/\b(almuerzo|comida|cena|desayuno|lunch|dinner|breakfast|descanso|rest|hotel|alojamiento)\b/i;
+  for(const [dayKey,dayRows] of Object.entries(byDay)){
+    const day=Number(dayKey);
+    for(let i=0;i<dayRows.length;i++){
+      const row=dayRows[i],prev=i?dayRows[i-1]:null;
+      if(!row||_isPureTransportRow_(row))continue;
+      const activity=String(row.activity||'').trim(),place=String(row.to||'').trim();
+      if(prev&&!_isPureTransportRow_(prev)&&_hhmmToMinutes_(prev.end)!=null&&
+         _hhmmToMinutes_(prev.end)===_hhmmToMinutes_(row.start)&&
+         String(prev.to||'').trim()&&String(row.from||'').trim()&&
+         !_arePoiAliases_(prev.to,row.from)){
+        issues.push({code:'POSSIBLE_MISSING_LOCATION_TRANSITION',day,row:i+1,previous_to:prev.to,next_from:row.from,time:row.start});
+      }
+      // A late finish at a ticketed indoor/heritage site warrants checking
+      // official opening hours. No generic closing hour is enforced.
+      const finish=_hhmmToMinutes_(row.end);
+      if(finish!=null&&finish>18*60&&
+         /\b(museo|museum|arqueol[oó]gic|archaeological|catedral|cathedral|templo|temple|palacio|palace)\b/i.test(activity)&&
+         !/\b(nocturn|night|evening|noche|espect[aá]culo|show|aurora)\b/i.test(activity)){
+        issues.push({code:'VERIFY_LATE_ATTRACTION_ACCESS',day,row:i+1,end:row.end,
+          activity,note:'Verify official hours; no closure time assumed'});
+      }
+      const key=_canonicalText_(activity);
+      if(key.length>=18&&place&&!utility.test(activity)&&!utility.test(place)){
+        const exactKey=key+'|'+_canonicalText_(place),first=seen.get(exactKey);
+        if(first)issues.push({code:'POSSIBLE_REPEATED_EXPERIENCE',day,row:i+1,first_day:first.day,first_row:first.row,activity});
+        else seen.set(exactKey,{day,row:i+1});
+      }
+    }
+  }
+  // Only short, explicitly separated must-do entries are checked; long prose is
+  // not interpreted as a mandatory attraction list. All results are advisory.
+  for(const [place,pref] of Object.entries(contract?.place_preferences||{})){
+    const raw=String(pref?.mustDo||'').trim();if(!raw)continue;
+    const items=raw.split(/[\n;]+/).map(x=>x.replace(/^[\s\-*•\d.)]+/,'').trim()).filter(x=>x.length>=4&&x.length<=100).slice(0,30);
+    for(const item of items){
+      if(/[.!?]/.test(item)||item.split(/\s+/).length>9)continue;
+      const found=rows.some(r=>!_isPureTransportRow_(r)&&[r.activity,r.to,r.from].some(v=>_arePoiAliases_(item,String(v||''))));
+      if(!found)issues.push({code:'MUST_DO_COVERAGE_REVIEW',place,requested:item,note:'Advisory only; aliases and paraphrases may differ'});
+    }
+  }
+  return issues;
+}
+
 function _v3IssueFingerprint_(report={}){
   return JSON.stringify((report?.errors||[]).map(e=>({code:e?.code,day:e?.day,row:e?.row,days:e?.days,to:e?.to,transport:e?.transport})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))));
 }
@@ -9885,6 +9932,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     const blockingErrors=[...(finalReport.errors||[]),..._v70ExactPhysicalUnitConservation_(rows,generated.stayResults||[])];
     console.info(`[ITBMO V3 MERGE HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:blockingErrors}),blockingErrors);
     console.info('[ITBMO V266 CROSS-STAY ADVISORY] trip',_v266CrossStayAdvisories_(rows));
+    console.info('[ITBMO V274 QUALITY ADVISORY] trip',_v274QualityAdvisories_(rows,generated.contract));
     _v3LogAuditDetails_('MERGED TRIP HARD AUDIT','trip','all-stays',blockingErrors);
     if(blockingErrors.length){
       const error=new Error(`V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE:trip`);
