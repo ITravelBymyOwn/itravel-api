@@ -594,7 +594,12 @@
       // transit-only rule: a stop explicitly flagged as transit is logistics.
       const transitOnlyLocation=(location,date)=>{
         const visits=stays.filter(st=>norm(st.place).toLowerCase()===norm(location).toLowerCase() && date>=st.startDate && date<=endOf(st));
-        return visits.length>0 && visits.every(st=>st.transitOnly===true || st.transitOnly==='true');
+        // A regional excursion may explicitly visit a corridor location even
+        // when a separate logistical stay with the same name is transit-only.
+        const excursionVisit=stays.some(st=>!(st.transitOnly===true || st.transitOnly==='true') &&
+          (st.dayTrips||[]).some(dt=>norm(dt.place).toLowerCase()===norm(location).toLowerCase() &&
+          addDays(st.startDate,Math.max(0,Number(dt.day||1)-1))===date));
+        return !excursionVisit && visits.length>0 && visits.every(st=>st.transitOnly===true || st.transitOnly==='true');
       };
       ctx.location_windows=ctx.location_windows.filter(w=>w.type==='fixed_transfer' || !transitOnlyLocation(w.location,ctx.date));
       delete ctx._owner;delete ctx._dayStart;delete ctx._dayEnd;
