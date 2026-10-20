@@ -142,8 +142,8 @@ const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
 const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,12000];
 // V2.10.66: quality convergence happens internally and Day Trips are isolated physical units. A traveler-facing retry is
 // reserved for genuinely interrupted/technical runs, not normal QA convergence.
-const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 2; // V111 convergence budget: one primary generation + at most one structural regeneration
-const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 1; // V111: one localized semantic repair after deterministic compilation
+const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 2; // V273: standard budget; complex journeys may use one exceptional additional generation
+const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 2; // V273: second local repair only if first measurably improves QA; no expansion to healthy days
 const ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS = 3;
 let paidGenerationRunning = false;
 let generationRecoveryState = null;
@@ -9618,9 +9618,13 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
       }
 
       let accepted=null,lastError=null;
-      for(let stayAttempt=1;stayAttempt<=ITBMO_STAY_GENERATION_MAX_ATTEMPTS&&!accepted;stayAttempt++){
+      // V273: exceptional third generation only for complex trips, after quality/structure
+      // failure. Approved physical units remain checkpointed and are never regenerated.
+      const complexTrip=Number(dest.days)>=10 && units.length>=4;
+      const stayGenerationBudget=ITBMO_STAY_GENERATION_MAX_ATTEMPTS+(complexTrip?1:0);
+      for(let stayAttempt=1;stayAttempt<=stayGenerationBudget&&!accepted;stayAttempt++){
         try{
-          console.log(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · isolated attempt ${stayAttempt}/${ITBMO_STAY_GENERATION_MAX_ATTEMPTS}`);
+          console.log(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · isolated attempt ${stayAttempt}/${stayGenerationBudget}`);
           const generated=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
           const generationGate=_v112GenerationStructurallyInvalid_(generated,unit);
           if(generationGate.invalid){
