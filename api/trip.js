@@ -1020,17 +1020,22 @@ async function handleRecoverable(res, session) {
   const rows = await supabaseFetch(
     `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
     `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
-    // V245: Only an interrupted paid generation is eligible. A recent
-    // generated/saved record must never shadow a pending failed/generating run.
-    `status=in.(generating,failed)&order=updated_at.desc&limit=100`,
+    // V272: include paid saved checkpoints, but prioritize actively interrupted
+    // generations and never recover generated/archived trips.
+    `status=in.(saved,generating,failed)&order=updated_at.desc&limit=100`,
     { method:"GET" }
   );
 
   const candidates = Array.isArray(rows) ? rows : [];
+  // A recent saved draft must not hide an actual failed/in-progress generation.
+  const priority = {generating:0, failed:0, saved:1};
+  candidates.sort((a,b) => (priority[a?.status] ?? 2) - (priority[b?.status] ?? 2));
   for (const trip of candidates) {
     const plannerInput = generationCheckpoint(trip?.planner_input);
     if (plannerInput.auto_recovery_disabled === true) continue;
-
+    // A saved record is recoverable only if generation had already begun.
+    // A paid draft that never began remains accessible through its explicit ID.
+    if (trip.status === 'saved' && !(Number(trip.generation_count || 0)>0 || generationCheckpoint(trip.itinerary_data).run_token)) continue;
     if (trip?.id && await hasGenerationEntitlement(trip.id, session.user_id)) {
       return res.status(200).json({ ok:true, action:"recoverable", trip });
     }
