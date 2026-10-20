@@ -6251,7 +6251,7 @@ HARD RULES:
 - Apply intelligent minimum dwell times by experience category. Never create 5–10 minute activities except clearly labeled photographic micro-stops.
 - Detect semantic duplicate experiences, including aliases and overlapping district/sub-area descriptions, and keep only the strongest representation.
 - Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers. When TIE supplied base_strategy, lodging_base already reflects either the traveler's immutable lodging/base or ITBMO's jointly optimized base area; do not re-optimize or substitute it downstream.
-- V129 CORRIDOR EXECUTION: TIE has already resolved strategic corridor selection. Execute the supplied day_directive/route_manifest as one coherent route and do not rediscover a competing attraction set. For BASE days, group the selected urban/local experiences from the lodging base in a geographically sensible sequence with minimal backtracking. For REGIONAL days, preserve the selected corridor and its CORE/HIGH anchors; OPTIONAL/DROP_FIRST remain the only disposable marginal opportunities when capacity tightens. When OPTIONAL/DROP_FIRST choices compete for genuinely available capacity, prefer a low-detour stop that adds a distinctive facet or meaningfully completes the selected corridor over a redundant/generic stop, but never add a stop merely for completeness and never compromise CORE/HIGH dwell, safe return, daylight or fatigue margin.
+- V276 REGIONAL RETURN: Every same-day regional excursion must explicitly reach the overnight base within its available physical window, unless the authoritative trip story specifies an onward overnight movement. The return is part of the route, not an optional activity. Do not claim an unverified booked service.\n- V276 MUST-DO COVERAGE: Distinguish named mandatory attractions in the destination-specific mustDo field from optional notes. Preserve each feasible named must-do attraction; do not silently replace one with a nearby site. If the schedule is physically impossible, preserve higher-priority user-fixed facts and do not invent access.\n- V129 CORRIDOR EXECUTION: TIE has already resolved strategic corridor selection. Execute the supplied day_directive/route_manifest as one coherent route and do not rediscover a competing attraction set. For BASE days, group the selected urban/local experiences from the lodging base in a geographically sensible sequence with minimal backtracking. For REGIONAL days, preserve the selected corridor and its CORE/HIGH anchors; OPTIONAL/DROP_FIRST remain the only disposable marginal opportunities when capacity tightens. When OPTIONAL/DROP_FIRST choices compete for genuinely available capacity, prefer a low-detour stop that adds a distinctive facet or meaningfully completes the selected corridor over a redundant/generic stop, but never add a stop merely for completeness and never compromise CORE/HIGH dwell, safe return, daylight or fatigue margin.
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity. V129 UTILITY-SLACK GUARD: flexible meals, generic rest and access/buffer rows must keep an honest utility duration and must never be stretched merely to absorb unused clock time or to bridge chronology before a later selected anchor. Preserve genuine slack as slack; when a downstream CORE/HIGH or selected experience remains, protect its useful timing/dwell instead of inflating the utility row. User-fixed/reservation-hard utility facts remain authoritative.
 - Respect all user-provided hard time boundaries; optimize open windows only when beneficial. If a day has no user-provided end, choose its natural end dynamically. Require meaningful use of the available day, but never force a fixed finishing hour or add filler; continue later only when a high-value evening experience materially improves the itinerary.
@@ -8170,7 +8170,7 @@ function _v3HardBlockingCodes_(){
   return new Set([
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
-    'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','WRONG_OVERNIGHT_BASE',
+    'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','MISSING_REGIONAL_RETURN','WRONG_OVERNIGHT_BASE',
     'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT'
   ]);
 }
@@ -8425,6 +8425,20 @@ function _v274QualityAdvisories_(rows=[],contract={}){
          !_arePoiAliases_(prev.to,row.from)){
         issues.push({code:'POSSIBLE_MISSING_LOCATION_TRANSITION',day,row:i+1,previous_to:prev.to,next_from:row.from,time:row.start});
       }
+      // V276: adjacent rows with two distinct concrete endpoints can hide a
+      // missing transfer even when the next row is itself a transfer. This is
+      // advisory only: no inferred travel time, geography or auto-inserted leg.
+      if(prev && _hhmmToMinutes_(prev.end)!=null &&
+         _hhmmToMinutes_(prev.end)===_hhmmToMinutes_(row.start) &&
+         String(prev.to||'').trim() && String(row.from||'').trim() &&
+         !_v111BroadPlace_(prev.to) && !_v111BroadPlace_(row.from) &&
+         !_arePoiAliases_(prev.to,row.from) &&
+         !_v111LocationsCompatible_(prev.to,row.from,'')){
+        const already=issues.some(e=>e.code==='POSSIBLE_MISSING_LOCATION_TRANSITION' && e.day===day && e.row===i+1);
+        if(!already)issues.push({code:'POSSIBLE_MISSING_LOCATION_TRANSITION',day,row:i+1,
+          previous_to:prev.to,next_from:row.from,time:row.start,
+          note:'Review only: do not infer a travel duration or invent a transfer'});
+      }
       // A late finish at a ticketed indoor/heritage site warrants checking
       // official opening hours. No generic closing hour is enforced.
       const finish=_hhmmToMinutes_(row.end);
@@ -8442,15 +8456,32 @@ function _v274QualityAdvisories_(rows=[],contract={}){
       }
     }
   }
-  // Only short, explicitly separated must-do entries are checked; long prose is
-  // not interpreted as a mandatory attraction list. All results are advisory.
+  // V276: recognize compact comma-separated attraction lists in the destination
+  // mustDo field. Do not treat logistics prose as an attraction. Review-only:
+  // aliases, plural labels and regional umbrella names can be ambiguous.
   for(const [place,pref] of Object.entries(contract?.place_preferences||{})){
-    const raw=String(pref?.mustDo||'').trim();if(!raw)continue;
-    const items=raw.split(/[\n;]+/).map(x=>x.replace(/^[\s\-*•\d.)]+/,'').trim()).filter(x=>x.length>=4&&x.length<=100).slice(0,30);
+    const raw=String(pref?.mustDo||'').trim();
+    if(!raw)continue;
+    const firstParagraph=raw.split(/\n\s*\n/)[0]||'';
+    const items=firstParagraph.split(/[\n;,]+/).flatMap(part=>{
+      const clean=part.replace(/^[\s\-*•\d.)]+/,'').trim();
+      // Split a final conjunction only when it clearly joins short POI names.
+      return clean.split(/\s+(?:y|and)\s+(?=[A-ZÁÉÍÓÚÑ])/);
+    }).map(x=>x.trim()).filter(x=>x.length>=4&&x.length<=85&&x.split(/\s+/).length<=9).slice(0,40);
+    const norm=v=>_canonicalText_(String(v||''))
+      .replace(/\b(puca\s*pucara|puka\s*pukara|puka\s*pucara)\b/g,'pukapukara')
+      .replace(/\b(kenko|qenko|qenqo)\b/g,'qenqo');
     for(const item of items){
-      if(/[.!?]/.test(item)||item.split(/\s+/).length>9)continue;
-      const found=rows.some(r=>!_isPureTransportRow_(r)&&[r.activity,r.to,r.from].some(v=>_arePoiAliases_(item,String(v||''))));
-      if(!found)issues.push({code:'MUST_DO_COVERAGE_REVIEW',place,requested:item,note:'Advisory only; aliases and paraphrases may differ'});
+      const itemKey=norm(item);
+      if(!itemKey||/\b(prioridad|conexiones|jornadas|planificar|margenes|evitando|recorridos)\b/.test(itemKey))continue;
+      const found=rows.some(r=>!_isPureTransportRow_(r)&&
+        [r.activity,r.to].some(v=>{
+          const label=norm(v);
+          return label && (label.includes(itemKey) ||
+            (itemKey.length>=7 && itemKey.includes(label) && label.length>=7));
+        }));
+      if(!found)issues.push({code:'MUST_DO_COVERAGE_REVIEW',place,requested:item,
+        note:'Candidate omission only; aliases and regional umbrella names may differ. Never auto-delete another anchor.'});
     }
   }
   return issues;
@@ -9518,8 +9549,31 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       const hasExperience=chainRows.some(r=>_v110SemanticRole_(r)==='experience');
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
+    // V276: A REGIONAL day trip must finish at its overnight base unless an
+    // authoritative outbound boundary explicitly changes the overnight city.
+    // Only concrete endpoints are judged; ambiguous/generic labels are advisory.
+    const regionalReturn=[];
+    if(String(unit?.unit_type||'').startsWith('REGIONAL')){
+      for(const day of unitDays){
+        const dayRows=(rows||[]).filter(r=>Number(r?.day)===day)
+          .slice().sort(_v114LogicalRowCompare_);
+        const last=dayRows.at(-1),base=String(unit?.base_destination||'').trim();
+        const end=String(last?.to||'').trim();
+        const boundary=unit?.outbound_boundary;
+        if(!last||!base||!end||_v111BroadPlace_(end)||/^(hotel|lodging|accommodation|alojamiento|base de alojamiento)$/i.test(end))continue;
+        if(boundary && Number(boundary.day)===day)continue;
+        const baseKey=_canonicalText_(base),endKey=_canonicalText_(end);
+        const inBase=_arePoiAliases_(base,end) ||
+          (baseKey&&endKey&&(endKey.includes(baseKey)||baseKey.includes(endKey)));
+        if(!inBase){
+          regionalReturn.push({code:'MISSING_REGIONAL_RETURN',day,
+            row:dayRows.length,previous_to:end,base_destination:base,
+            instruction:'The regional excursion must explicitly return to its overnight base within the available physical window. Repair only this day, preserve all selected attractions, and do not invent a booked transport service. If the physical window cannot fit a safe return, do not silently remove the return.'});
+        }
+      }
+    }
     const nightOwnerLeaks=_v127NightOwnerDayLeakErrors_(rows);
-    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...missingNightExecution,...nightOwnerLeaks]});
+    return _v111CompileAuditReport_({...base,errors:[...(base.errors||[]),...missing,...regionalFirstOrigin,...regionalReturn,...missingNightExecution,...nightOwnerLeaks]});
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
@@ -9556,7 +9610,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // day/window findings intentionally expose the whole affected day.
     console.info(`[ITBMO V3 REPAIR SCOPE] ${unitCity} · ${unit.id} · ${repairScope.type}${scopeDays.length?` · day(s) ${scopeDays.join(',')}`:''} · block rows ${repairRows.length} · full Stay QA after merge`);
     const prompt=`
-PHYSICAL STAY LOCAL QA REPAIR CONTRACT — authoritative JSON:
+V276 PHYSICAL CONTINUITY: A regional same-day excursion must contain its explicit return to the overnight base unless the supplied boundary specifies a different overnight city. Preserve requested must-do POIs and do not silently substitute a nearby site. Never fabricate booked services or compress protected attractions to force a return.\n\nPHYSICAL STAY LOCAL QA REPAIR CONTRACT — authoritative JSON:
 ${JSON.stringify({...stayContract,windows:repairWindows})}
 
 REPAIR SCOPE:
@@ -9970,7 +10024,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     const blockingErrors=[...(finalReport.errors||[]),..._v70ExactPhysicalUnitConservation_(rows,generated.stayResults||[])];
     console.info(`[ITBMO V3 MERGE HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:blockingErrors}),blockingErrors);
     console.info('[ITBMO V266 CROSS-STAY ADVISORY] trip',_v266CrossStayAdvisories_(rows));
-    console.info('[ITBMO V274 QUALITY ADVISORY] trip',_v274QualityAdvisories_(rows,generated.contract));
+    console.info('[ITBMO V276 QUALITY ADVISORY] trip',_v274QualityAdvisories_(rows,generated.contract));
     _v3LogAuditDetails_('MERGED TRIP HARD AUDIT','trip','all-stays',blockingErrors);
     if(blockingErrors.length){
       const error=new Error(`V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE:trip`);
