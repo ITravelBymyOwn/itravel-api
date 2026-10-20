@@ -11161,14 +11161,14 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
         else throw err;
       }
     }
-    if(!trip || !['generating','failed'].includes(trip.status)){
-      // V270 server recoverable endpoint filters to paid generating/failed
-      // and excludes auto_recovery_disabled. No completed-trip fallback.
+    if(!trip || !['saved','generating','failed'].includes(trip.status)){
+      // V272: discover eligible unfinished paid trips; completed trips remain terminal.
       const data=await tripApi({action:'recoverable',session_token:token});
       trip=data?.trip || null;
     }
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
-    if(!trip || !['generating','failed'].includes(trip.status)) return;
+    if(!trip || !['saved','generating','failed'].includes(trip.status)) return;
+    // A paid saved trip is a recoverable pre-generation state, not a completed trip.
     storeActiveTripId(String(trip.id));
 
     // V86 RECOVERY CONTRACT:
@@ -11176,13 +11176,6 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
     // The ONLY automatic hydration allowed here is a paid generation retry.
     if(trip.status==='generated'){
       _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:true});
-      return;
-    }
-    if(trip.status==='saved'){
-      storeActiveTripId(null);
-      currentTripId=null;
-      paymentGateSatisfiedTripId=null;
-      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
       return;
     }
 
@@ -11216,6 +11209,12 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
       return;
     }
 
+    if(trip.status==='saved'){
+      // V272: payment entitlement confirmed. Resume from the paid checkpoint
+      // using the same retry entry point; never create a new trip/payment.
+      _showGenerationRetry_();
+      return;
+    }
     if(trip.status==='generating'){
       chatMsg(getLang()==='es'
         ? 'ITBMO detectó una generación interrumpida y continuará desde la última ciudad guardada.'
