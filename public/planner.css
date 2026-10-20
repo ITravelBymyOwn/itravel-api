@@ -9249,7 +9249,7 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 ========================================================= */
 body.itbmo-builder-closed-clean .planner-stage-nav,
 body.itbmo-builder-closed-clean .planner-builder-intro,
-body.itbmo-builder-closed-clean #account-box,
+body.itbmo-builder-closed-clean #account-box:not(.is-auth-dialog-open),
 body.itbmo-builder-closed-clean .guided-journey-legacy,
 body.itbmo-builder-closed-clean #preferences-stage,
 body.itbmo-builder-closed-clean #planner-agent-flow,
@@ -9268,3 +9268,6 @@ select option[value="transit"]{font-weight:800;color:#0a7187;background:#e9f8fb}
 .city-row .time-selector-inputs .time-hhmm{width:100%;min-width:0;text-align:center}
 .route-v2-time>div{display:block!important}
 .route-v2-time select[data-time-value]{width:100%;min-height:43px;text-align:center;border-radius:12px!important}
+
+/* V273: logged-out clean landing must not suppress a deliberately opened auth dialog. */
+body.itbmo-builder-closed-clean #account-box.is-auth-dialog-open{display:block!important;}
