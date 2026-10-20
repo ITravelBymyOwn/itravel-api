@@ -8500,8 +8500,45 @@ function _v3FitDurationToInterval_(row={}){
   return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
+// V275: Ordinary lunch is flexible utility time, never a three-hour anchor.
+// This is deliberately narrow: no shifting other rows, no touching user-fixed
+// facts, and no rewriting special food experiences or their reservations.
+function _v275OrdinaryLunch_(row={}){
+  if(_isPureTransportRow_(row))return false;
+  const title=String(row.activity||'').trim();
+  if(!/\b(almuerzo|lunch|comida del mediod[ií]a|pausa para comer|midday meal)\b/i.test(title))return false;
+  if(/\b(tour|taller|clase|curso|experiencia|degustaci[oó]n|cata|gastron[oó]mic|culinari|tasting|cooking|workshop|food tour|ceremonia|celebraci[oó]n|banquete|fest[ií]n|maridaje)\b/i.test(title))return false;
+  const all=String([row.notes,row.note,row.description,row.transport].filter(Boolean).join(' '));
+  if(/\b(clase de cocina|cooking class|food tour|tour gastron[oó]mico|men[uú] degustaci[oó]n|tasting menu|experiencia gastron[oó]mica)\b/i.test(all))return false;
+  const context=row.commerce_context||{};
+  if(row.user_fixed===true||row.reservation_hard===true||row.fixed===true||
+     row.is_fixed===true||row.reservation_confirmed===true||
+     context.user_fixed===true||context.reservation_hard===true||
+     context.reservation_confirmed===true)return false;
+  // Fixed/reservation wording is treated conservatively; leave unchanged.
+  if(/\b(reserva confirmada|confirmed reservation|prepagad[oa]|prepaid|hora fija|fixed time|reservado para|booked for)\b/i.test(all))return false;
+  return true;
+}
+function _v275CapOrdinaryLunches_(rows=[]){
+  let capped=0;
+  const result=(rows||[]).map(row=>{
+    if(!_v275OrdinaryLunch_(row))return row;
+    const start=_hhmmToMinutes_(row.start),end=_hhmmToMinutes_(row.end);
+    if(start==null||end==null)return row;
+    let minutes=end-start;if(minutes<0)minutes+=1440;
+    if(minutes<=60||minutes>12*60)return row;
+    const changed={...row,end:_minutesToHHMM_(start+60)};
+    // Keep the duration label aligned with the shortened time interval.
+    const fitted=_v3FitDurationToInterval_(changed);
+    capped++;
+    return fitted;
+  });
+  if(capped)console.info('[ITBMO V275 ORDINARY LUNCH CAP]',{capped,max_minutes:60});
+  return result;
+}
+
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
-  let out=_v3EnforceHardRouteFacts_(rows,contract).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
+  let out=_v275CapOrdinaryLunches_(_v3EnforceHardRouteFacts_(rows,contract)).map(r=>_isPureTransportRow_(r)?_v3FitDurationToInterval_(r):r);
   // V115: semantic shield runs before arithmetic compilation so DIC receives a
   // causally coherent, utility-sane timeline. It is deterministic and adds no API calls.
   const shield=_v115AdaptiveSemanticShield_(city,out,contract,totalDays); out=shield.rows;
@@ -9386,6 +9423,7 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler. Build chronology as ONE dependency chain, not as independently estimated appointments: finish current experience -> add the real movement block -> only then start the next experience. Once a row has an end time, no downstream transfer or experience may retain an earlier pre-imagined clock. Recompute downstream clocks from the chain. If the corridor cannot fit, drop OPTIONAL then DROP_FIRST stops before compressing CORE/HIGH anchors or overlapping rows. This rule is global for every multi-anchor corridor and does not depend on destination identity.
 - V118 REFINEMENT: do not create generic café/shopping/flexible-walk blocks solely to consume remaining window time. If the day's meaningful experience is complete, end naturally. A micro-stop or optional scenic pause is supportive slack and must not masquerade as a selected anchor. Avoid repeating a POI/experience family already meaningfully visited on another day when an equally coherent distinct close exists; if not, prefer ending early over filler.
 - V118 INTERNAL COHERENCE: when a general complex/area block is followed by a dedicated sub-anchor block, do not describe that sub-anchor as already completed inside the earlier general block. Transport alternatives may have different durations; keep the scheduled interval consistent with at least one explicitly offered mode and do not silently use the slowest alternative as mandatory.
+- V275 ORDINARY LUNCH LIMIT: an ordinary lunch or midday meal must be at most 60 minutes (usually 45–60). Never assign 2–3 hours to an ordinary lunch to fill slack. Genuine culinary classes, food tours, tasting menus, explicitly requested special meals and user-fixed confirmed reservations are exceptions. Do not remove or compress a selected tourist anchor to protect a flexible lunch.
 - V129 UTILITY-SLACK GUARD: a flexible meal/rest/access/buffer is never a reservoir for unused time. Keep its duration semantically normal; if unused capacity remains before a later selected/CORE/HIGH anchor, leave honest slack or advance the flexible chain when physically coherent rather than stretching the utility block. Never shorten/move a user-fixed or reservation-hard utility fact, and never shorten a protected experience to normalize utility time.
 - PREMIUM PACING CONTRACT: empty clock time is not automatically a defect. Meals, rest, access, buffers and hotel returns are logistics, not tourism richness. Use at most one lunch and one dinner unless the traveler explicitly requests otherwise; never add a second meal/rest/buffer merely to fill a gap or satisfy row count. A destination-defining long anchor plus necessary logistics can be a complete premium day with few rows. End naturally when the day is experientially sufficient; preserve recovery after high-fatigue or late-night experiences, including when the previous owner-day NIGHT_OVERLAY physically ended after midnight.
 - DECISIVE MAIN PLAN: an experience_inventory item selected for this owner day is a main-plan commitment, not an A/B choice. Schedule the selected experience as primary. Put alternatives/fallbacks in Notes only. When live opening, show, weather or availability data is genuinely required, keep the selected experience conditional and explicitly ask the traveler to verify rather than inventing confirmation.
@@ -9530,7 +9568,7 @@ ${JSON.stringify(repairRows)}
 LOCAL VALIDATOR FINDINGS TO CORRECT:
 ${JSON.stringify(repairFindings)}
 
-Repair ONLY the supplied local row block(s). Rows not supplied are immutable and must not be recreated, summarized or deleted. Preserve the semantic identity of every healthy experience anchor. V129: never solve a chronology defect by stretching a flexible meal/rest/access/buffer to absorb slack before a later experience; keep utility duration semantically normal and protect downstream selected/CORE/HIGH dwell. User-fixed/reservation-hard utility facts remain immutable. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
+Repair ONLY the supplied local row block(s). Rows not supplied are immutable and must not be recreated, summarized or deleted. Preserve the semantic identity of every healthy experience anchor. V275: ordinary lunch/midday meal is at most 60 minutes; preserve genuine special culinary experiences and confirmed user-fixed reservations. Never use a 2–3 hour ordinary lunch to absorb slack. V129: never solve a chronology defect by stretching a flexible meal/rest/access/buffer to absorb slack before a later experience; keep utility duration semantically normal and protect downstream selected/CORE/HIGH dwell. User-fixed/reservation-hard utility facts remain immutable. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
 `.trim();
     const raw=await _v3Call_(prompt);
     const parsed=parseJSON(raw);
