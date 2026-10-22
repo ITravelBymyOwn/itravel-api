@@ -2107,7 +2107,14 @@ function tripToWorkspace(trip){
     trip_id:trip.id,
     destinations,
     city_meta:cityMeta,
-    itineraries
+    itineraries,
+    // V278: retain the paid journey boundaries on server-based workspace recovery.
+    journey_story:(()=>{
+      const model=plannerState.travelModelV2||plannerState.travel_model_v2||{};
+      const story=checkpoint.journey_story||model.trip_story||model.tripStory;
+      return Array.isArray(story?.stays)&&story.stays.length
+        ? {stays:story.stays,start:story.start,returnTrip:story.returnTrip}:null;
+    })()
   };
 }
 
