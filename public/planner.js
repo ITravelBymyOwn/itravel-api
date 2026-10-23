@@ -23,7 +23,7 @@
 
 
 const ITBMO_RUNTIME_BUILD='V271';
-const ITBMO_RUNTIME_ASSET='planner.js?v=271';
+const ITBMO_RUNTIME_ASSET='planner.js?v=283';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -8978,6 +8978,18 @@ function _tieOverlayWindow_(baseUnit,overlay={}){
   const latestAbsolute=latestStartMin<startMin?latestStartMin+1440:latestStartMin;
   const windowEndAbsolute=latestAbsolute+duration;
   const end=_minutesToHHMM_(windowEndAbsolute%1440);
+  // V283: a return-day overlay must finish before the tourist cutoff, including
+  // overnight spillover. Never let an uncertain night become mandatory.
+  const story=_travelV2()?.state?.tripStory;
+  const ret=story?.returnTrip;
+  const sourceDate=String(source.date||'');
+  if(ret?.enabled&&ret.departureTime&&sourceDate&&sourceDate===String(ret.departureDate||_tripStoryStayEnd_(story.stays?.at(-1)))){
+    const cutoff=story.stays?.at(-1)?._itbmo_return_tourism_cutoff;
+    if(cutoff?.date===sourceDate){
+      const cutoffMin=_hhmmToMinutes_(cutoff.time);
+      if(cutoffMin!=null && windowEndAbsolute>cutoffMin)return null;
+    }
+  }
   return {window_id:`${source.window_id||`day-${day}`}-tie-night`,day,date:source.date||null,location:baseUnit.base_destination||source.location,start,end,open_end:false,minimum_useful_target:duration,role:'NIGHT_OVERLAY',crosses_midnight:windowEndAbsolute>=1440};
 }
 function _tieReserveNightBoundary_(windows=[],nightWindows=[]){
@@ -15632,7 +15644,21 @@ function _tripStoryRestoreMinimizedFabAfterNavigation_(){
   _tripStoryCreateResumeFab_(()=>{openTripStoryBuilder();});
 }
 function _tripStoryClampDepartureEnd_(prev,departureTime){if(!prev?.perDay?.length||!departureTime)return;const last=prev.perDay[prev.perDay.length-1],dep=_tripStoryTimeMinutes_(departureTime),cur=_tripStoryTimeMinutes_(last.end);if(dep!=null&&(cur==null||cur>dep))last.end=departureTime;}
-function _tripStoryApplyBoundaryHours_(story){const stays=story?.stays||[];if(!stays.length)return story;const first=stays[0],last=stays.at(-1);if(!first.transitOnly&&first.firstDayReadyTime){const ready=_tripStoryTimeMinutes_(first.firstDayReadyTime);if(ready!=null&&first.perDay?.[0]){const current=_tripStoryTimeMinutes_(first.perDay[0].start);if(current==null||current<ready)first.perDay[0].start=first.firstDayReadyTime;const end=_tripStoryTimeMinutes_(first.perDay[0].end);if(end!=null&&ready>=end){first.perDay[0].start='';first.perDay[0].end='';}}}for(let i=1;i<stays.length;i++){const st=stays[i],prev=stays[i-1],prevEnd=_tripStoryStayEnd_(prev);if(st.arrivalTime&&(!st.arrivalDate||st.arrivalDate===st.startDate))_tripStoryClampArrivalStart_(st);if(st.departureTime&&st.departureDate===prevEnd)_tripStoryClampDepartureEnd_(prev,st.departureTime);}if(story.returnTrip?.enabled&&story.returnTrip?.departureTime&&(!story.returnTrip.departureDate||story.returnTrip.departureDate===_tripStoryStayEnd_(last)))_tripStoryClampDepartureEnd_(last,story.returnTrip.departureTime);return story;}
+function _tripStoryApplyBoundaryHours_(story){const stays=story?.stays||[];if(!stays.length)return story;const first=stays[0],last=stays.at(-1);if(!first.transitOnly&&first.firstDayReadyTime){const ready=_tripStoryTimeMinutes_(first.firstDayReadyTime);if(ready!=null&&first.perDay?.[0]){const current=_tripStoryTimeMinutes_(first.perDay[0].start);if(current==null||current<ready)first.perDay[0].start=first.firstDayReadyTime;const end=_tripStoryTimeMinutes_(first.perDay[0].end);if(end!=null&&ready>=end){first.perDay[0].start='';first.perDay[0].end='';}}}for(let i=1;i<stays.length;i++){const st=stays[i],prev=stays[i-1],prevEnd=_tripStoryStayEnd_(prev);if(st.arrivalTime&&(!st.arrivalDate||st.arrivalDate===st.startDate))_tripStoryClampArrivalStart_(st);if(st.departureTime&&st.departureDate===prevEnd)_tripStoryClampDepartureEnd_(prev,st.departureTime);}if(story.returnTrip?.enabled&&story.returnTrip?.departureTime&&(!story.returnTrip.departureDate||story.returnTrip.departureDate===_tripStoryStayEnd_(last))){
+    // V283: departure is a flight/transport clock, NOT the end of sightseeing.
+    // Apply the existing pre-departure transport buffer plus airport/station access.
+    // Never mutate the user-entered departureTime; constrain only the last tourism day.
+    const mode=String(story.returnTrip.transportMode||'plane').toLowerCase();
+    const prep={plane:120,train:45,bus:30,ferry:60,car:15,transfer:15,recommend:45,other:30}[mode]??30;
+    const access={plane:60,train:30,bus:25,ferry:40,car:0,transfer:0,recommend:30,other:25}[mode]??25;
+    const dep=_tripStoryTimeMinutes_(story.returnTrip.departureTime);
+    if(dep!=null){
+      const end=Math.max(0,dep-prep-access);
+      const hh=String(Math.floor(end/60)).padStart(2,'0')+':'+String(end%60).padStart(2,'0');
+      _tripStoryClampDepartureEnd_(last,hh);
+      last._itbmo_return_tourism_cutoff={date:story.returnTrip.departureDate||_tripStoryStayEnd_(last),time:hh,departure_time:story.returnTrip.departureTime,prep_minutes:prep,access_minutes:access,mode};
+    }
+  }return story;}
 function _tripStoryDefaultHours_(dayIndex,st){return {day:dayIndex+1,start:(st?.perDay?.[dayIndex]?.start||DEFAULT_START||''),end:(st?.perDay?.[dayIndex]?.end||DEFAULT_END||'')};}
 function _tripStoryEnsureDayTrip_(dt={}){dt.id=dt.id||_tripStoryId_('daytrip');dt.day=Math.max(1,Number(dt.day||1));dt.countryCode=dt.countryCode||'';dt.country=dt.country||'';dt.place=dt.place||'';dt.outbound=dt.outbound||{};dt.return=dt.return||{};dt.outbound.transportMode=dt.outbound.transportMode||dt.transportMode||'';dt.outbound.routeResolution=dt.outbound.routeResolution||null;dt.outbound.departureTime=dt.outbound.departureTime||dt.departureTime||'';dt.outbound.arrivalTime=dt.outbound.arrivalTime||dt.arrivalTime||'';dt.outbound.timeStatus=dt.outbound.timeStatus||dt.timeStatus||'estimated';dt.return.transportMode=dt.return.transportMode||dt.returnTransportMode||dt.outbound.transportMode||'';dt.return.routeResolution=dt.return.routeResolution||null;dt.return.departureTime=dt.return.departureTime||dt.returnDepartureTime||'';dt.return.arrivalTime=dt.return.arrivalTime||dt.returnArrivalTime||'';dt.return.timeStatus=dt.return.timeStatus||dt.timeStatus||'estimated';return dt;}
 function _tripStoryEnsureStay_(st={}){st.id=st.id||_tripStoryId_('stay');st.countryCode=st.countryCode||'';st.country=st.country||'';st.place=st.place||'';st.transitOnly=Boolean(st.transitOnly);st.firstDayReadyTime=typeof st.firstDayReadyTime==='string'?st.firstDayReadyTime:'';st.firstDaysSelected=st.firstDaysSelected===true||Boolean(st.firstDayReadyTime)||st.transitOnly;st.days=Math.max(1,Number(st.days||1));st.startDate=st.startDate||'';st.transportMode=st.transportMode||'';st.transportStatus=st.transportStatus||((st.transportMode||st.arrivalTime)?'user_defined':'route_to_resolve');st.routeResolution=st.routeResolution||null;st.departureDate=st.departureDate||'';st.departureTime=st.departureTime||'';st.arrivalDate=st.arrivalDate||st.startDate||'';st.arrivalTime=st.arrivalTime||'';st.timeStatus=st.timeStatus||'estimated';st.dayTrips=(Array.isArray(st.dayTrips)?st.dayTrips:[]).map(_tripStoryEnsureDayTrip_);const old=Array.isArray(st.perDay)?st.perDay:[];st.perDay=Array.from({length:st.days},(_,i)=>({day:i+1,start:old[i]&&Object.prototype.hasOwnProperty.call(old[i],'start')?old[i].start:(DEFAULT_START||''),end:old[i]&&Object.prototype.hasOwnProperty.call(old[i],'end')?old[i].end:(DEFAULT_END||'')}));return st;}
@@ -16103,7 +16129,7 @@ function _v71CaptureTravelerClockAuthority_(story={}){
       // V75 · Preserve field-level authority. Arrival is traveler-fixed only when
       // it existed before route estimation; otherwise ITBMO may estimate it.
       if(st._itbmo_user_arrival_date==null) st._itbmo_user_arrival_date=(st.arrivalDate && String(st.timeStatus||'').toLowerCase()!=='estimated')?st.arrivalDate:'';
-      if(st._itbmo_user_arrival_time==null) st._itbmo_user_arrival_time=(st.arrivalTime && String(st.timeStatus||'').toLowerCase()!=='estimated')?st.arrivalTime:'';
+      if(st._itbmo_user_arrival_time==null) st._itbmo_user_arrival_time=(st.arrivalTime && !st.arrival_route_estimated && String(st.timeStatus||'').toLowerCase()!=='estimated')?st.arrivalTime:'';
     }
   });
   (story.stays||[]).forEach(st=>(st.dayTrips||[]).forEach(dt=>{
