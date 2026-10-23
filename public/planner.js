@@ -9511,11 +9511,30 @@ function _v70ExactPhysicalUnitConservation_(mergedRows=[],stayResults=[]){
   return errors;
 }
 
+// V288: explicit, executable owner-day night commitments passed to both Luna calls.
+function _v288NightCommitments_(unit,days=null){
+  const allowed=days?new Set(days.map(Number)):null;
+  return (unit?.tie_structure?.night_overlays||[]).filter(o=>{
+    const day=Number(o?.preferred_day);
+    return day&&(!allowed||allowed.has(day))&&(unit?.windows||[]).some(w=>Number(w.day)===day&&String(w.role)==='NIGHT_OVERLAY');
+  }).map(o=>{
+    const day=Number(o.preferred_day);
+    const w=(unit.windows||[]).find(w=>Number(w.day)===day&&String(w.role)==='NIGHT_OVERLAY');
+    const inventory=(unit?.tie_structure?.experience_inventory||[]).filter(x=>x?.selected&&Number(x?.owner_day)===day);
+    return {owner_day:day,window_id:w?.window_id,window_start:w?.start,window_end:w?.end,crosses_midnight:Boolean(w?.crosses_midnight),selected_overlay:o,selected_inventory:inventory};
+  });
+}
+
 async function _v3GeneratePhysicalStay_(contract,unit,totalDays){
   const stayContract=_v3StayContract_(contract,unit);
   const prompt=`
 PHYSICAL STAY GENERATION CONTRACT — authoritative JSON:
 ${JSON.stringify(stayContract)}
+
+V288 EXECUTABLE NIGHT COMMITMENTS — authoritative selected TIE identity, NOT generic free time:
+${JSON.stringify(_v288NightCommitments_(unit))}
+
+V288 HARD NIGHT OUTPUT: For EACH commitment above, create an explicit substantive experience row that names and executes selected_overlay identity/experience/type or the matching selected_inventory anchor. Assign it to its NIGHT_OVERLAY window by its actual start/end clock, not merely by metadata. Dinner, restaurant, lodging, preparation, walking transfer, and return are NOT substitutes. When the selected commitment is genuinely a culinary experience, describe the distinctive selected event itself, not an ordinary dinner. Reserve enough of the night window for that experience BEFORE placing optional meals. Keep any after-midnight continuation on the owner global day. Do not invent a different night attraction when the selected TIE identity is unclear; use the selected contract verbatim and verification notes.
 
 Plan ONLY the useful time supplied for this physical planning unit. Its type is ${unit.unit_type||'BASE_STAY'}, its overnight/base destination is ${unit.base_destination||unit.physical_destination}, and its physical tourism destination is ${unit.physical_destination||unit.base_destination}. This is one chronological fragment of a continuous trip.
 - Never regenerate USER_FIXED/fixed boundary movements; ITBMO inserts those deterministically. For a TIE-discovered REGIONAL unit with no supplied fixed excursion legs, you DO own the non-fixed regional access, micro-stop movements and realistic return to the overnight base inside the planning window.
@@ -9699,6 +9718,11 @@ ${JSON.stringify(repairRows)}
 
 LOCAL VALIDATOR FINDINGS TO CORRECT:
 ${JSON.stringify(repairFindings)}
+
+V288 MANDATORY SELECTED NIGHT EXPERIENCE FOR THIS REPAIR SCOPE:
+${JSON.stringify(_v288NightCommitments_(unit,scopeDays))}
+
+V288 REPAIR PRIORITY: A MISSING_NIGHT_OVERLAY_EXECUTION finding means the previous answer DID NOT execute the selected TIE night event. Do not return another ordinary dinner or return-only chain. Include at least one actual selected, substantive experience row inside the indicated night window, with realistic duration and movements. The selected overlay is an executable commitment, not a suggestion; preserve its identity and the owner day. If this requires replacing an ordinary dinner in the supplied repair block, replace it rather than protecting filler. Do not fabricate reservations, operators or availability.
 
 V286 NIGHT OVERLAY REPAIR: For every NIGHT_OVERLAY referenced in the validator findings,
 use the authoritative planning_windows and tie_structure to restore the actual
