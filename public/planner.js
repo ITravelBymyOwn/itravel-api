@@ -16205,6 +16205,25 @@ async function _v71FetchRouteResolver_(movements=[]){
   throw lastError||new Error('ROUTE_RESOLVER_FAILED');
 }
 
+// V282: Compare day-trip clocks on an elapsed timeline. A return arriving just
+// after midnight belongs to the next calendar date, not before its departure.
+// Do not accept an arbitrary next-day rollover for an implausibly long journey.
+function _v282DayTripTimeline_(outDeparture,outArrival,retDeparture,retArrival){
+  const values=[outDeparture,outArrival,retDeparture,retArrival];
+  if(values.some(v=>v==null))return {valid:false,reason:'MISSING_CLOCK'};
+  const [od,oa,rd,ra]=values;
+  if(oa<=od)return {valid:false,reason:'OUTBOUND_NONPOSITIVE'};
+  if(rd<=oa)return {valid:false,reason:'RETURN_BEFORE_VISIT_END'};
+  let arrival=ra,rollover=false;
+  if(arrival<=rd){
+    // A legitimate late-night return may end after midnight. Restrict the
+    // inference to a departure in the evening and a reasonable trip duration.
+    if(rd<18*60 || arrival+1440-rd>12*60)return {valid:false,reason:'RETURN_NONPOSITIVE'};
+    arrival+=1440;rollover=true;
+  }
+  return {valid:true,returnArrivalNextDay:rollover,returnDuration:arrival-rd};
+}
+
 async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}={}){
   const engine=_travelV2(),story=engine?.state?.tripStory;
   if(!story?.stays?.length)return {ok:true,resolved:0};
@@ -16283,14 +16302,14 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
       const estimatedArrival=_hhmmToMinutes_(r.return_arrival_time||retLast.arrival_time);
       if(original!=null&&selected!=null&&estimatedArrival!=null&&original!==selected){
         const duration=estimatedArrival-original;
-        if(duration>0 && selected+duration<1440){
+        if(duration>0 && duration<=12*60){
           const clock=mins=>`${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
-          candidateRet.arrivalTime=clock(selected+duration);
+          candidateRet.arrivalTime=clock((selected+duration)%1440);
           const delta=selected-original;
           for(const leg of returnLegs){
             for(const field of ['departure_time','arrival_time']){
               const minutes=_hhmmToMinutes_(leg[field]);
-              if(minutes!=null && minutes+delta>=0 && minutes+delta<1440)leg[field]=clock(minutes+delta);
+              if(minutes!=null)leg[field]=clock(((minutes+delta)%1440+1440)%1440);
             }
           }
           r.return_departure_time=fixedReturn;
@@ -16306,8 +16325,9 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
     const retArrival=_hhmmToMinutes_(candidateRet.arrivalTime);
     const userReturnDeparture=fixedReturn||null;
     const resolverReturnDeparture=r.return_departure_time||ret.departure_time||null;
-    if(outDeparture==null||outArrival==null||outArrival<=outDeparture||retDeparture==null||retArrival==null||retDeparture<=outArrival||retArrival<=retDeparture){
-      console.error('[ITBMO V279 ROUTE RESOLVER] invalid day-trip chronology',{place:dt.place,movement_id:`daytrip:${dt.id}`,fixed_user_return_departure:userReturnDeparture,resolver_return_departure:resolverReturnDeparture,outbound_departure:candidateOut.departureTime,outbound_arrival:candidateOut.arrivalTime,return_departure:candidateRet.departureTime,return_arrival:candidateRet.arrivalTime,route:r});
+    const timeline=_v282DayTripTimeline_(outDeparture,outArrival,retDeparture,retArrival);
+    if(!timeline.valid){
+      console.error('[ITBMO V279 ROUTE RESOLVER] invalid day-trip chronology',{place:dt.place,movement_id:`daytrip:${dt.id}`,fixed_user_return_departure:userReturnDeparture,resolver_return_departure:resolverReturnDeparture,outbound_departure:candidateOut.departureTime,outbound_arrival:candidateOut.arrivalTime,return_departure:candidateRet.departureTime,return_arrival:candidateRet.arrivalTime,reason:timeline.reason,route:r});
       const error=new Error(`ROUTE_RESOLVER_DAYTRIP_CHRONOLOGY_INVALID:${dt.place}`);
       error.code='ROUTE_RESOLVER_DAYTRIP_CHRONOLOGY_INVALID';
       throw error;
@@ -16319,6 +16339,9 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
     }
     Object.assign(dt.outbound,candidateOut);
     Object.assign(dt.return,candidateRet);
+    // Preserve the actual calendar boundary for itinerary/compatibility export.
+    dt._itbmo_return_arrival_next_day=timeline.returnArrivalNextDay;
+    dt.return.arrivalDate=_tripStoryAddDays_(_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1)),timeline.returnArrivalNextDay?1:0);
     dt.outbound.timeStatus=(fixedOut||fixedOutArrival)?'user_fixed':'estimated';dt.return.timeStatus=(fixedReturn||fixedReturnArrival)?'user_fixed':'estimated';dt.routeResolution={summary:r.summary||'',legs,alternatives:Array.isArray(r.alternatives)?r.alternatives:[],confidence:r.confidence||'planning_estimate'};resolved++;
   }
   if(allowReallocation){
@@ -16337,7 +16360,7 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
   return {ok:true,resolved};
 }
 
-function applyTripStoryToCompatibility(story){const stays=(story?.stays||[]).map(_tripStoryEnsureStay_);if(!stays.length)return;const first=stays[0],last=stays.at(-1),firstCountry=_tripStoryCountryFromCode_(first.countryCode),totalDays=Math.max(1,_tripStoryDiffDays_(first.startDate,_tripStoryStayEnd_(last))+1);$cityList.innerHTML='';addCityRow({city:first.place,country:firstCountry?.label||first.country||'',days:totalDays,baseDate:_tripStoryDMY_(first.startDate)});const row=qs('.city-row',$cityList);if(!row)return;const segments=[];for(let i=1;i<stays.length;i++){const prev=stays[i-1],st=stays[i];segments.push({id:`story_move_${st.id}`,origin:prev.place,destination:st.place,departureDate:st.departureDate||st.startDate,arrivalDate:st.arrivalDate||st.startDate,departureTime:st.departureTime||'',arrivalTime:st.arrivalTime||'',transportMode:st.transportMode||'recommend',timePrecision:(st.departureTime&&st.arrivalTime)?'exact':'unknown',disposition:'continue',transitOnly:Boolean(st.transitOnly),nights:st.transitOnly?0:Number(st.days||1),source:'TRIP_STORY'});}stays.forEach(st=>(st.dayTrips||[]).forEach(dt=>{if(!dt.place)return;const date=_tripStoryAddDays_(st.startDate,dt.day-1);segments.push({id:`story_daytrip_${dt.id}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound.departureTime||'',arrivalTime:dt.outbound.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return.departureTime||'',returnArrivalDate:date,returnArrivalTime:dt.return.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound.transportMode||'recommend',returnTransportMode:dt.return.transportMode||dt.outbound.transportMode||'recommend',timePrecision:(dt.outbound.departureTime&&dt.outbound.arrivalTime&&dt.return.departureTime&&dt.return.arrivalTime)?'exact':'unknown',disposition:'roundtrip',source:'TRIP_STORY_DAYTRIP'});}));_travelV2()?.setRouteSegments?.(row,segments);const days=qs('.days',row);if(days){days.innerHTML=Array.from({length:Math.max(MAX_TRIP_STORY_DAYS,totalDays)},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');days.value=String(totalDays);days.dispatchEvent(new Event('change',{bubbles:true}));}const base=qs('.baseDate',row);if(base)base.value=_tripStoryDMY_(first.startDate);const dates=Array.from({length:totalDays},(_,i)=>_tripStoryAddDays_(first.startDate,i));const perDay=dates.map((date,idx)=>{const st=stays.find(x=>!x.transitOnly&&date>=x.startDate&&date<=_tripStoryStayEnd_(x))||stays.find(x=>date>=x.startDate&&date<=_tripStoryStayEnd_(x))||stays[Math.max(0,stays.findIndex(x=>x.startDate>date)-1)]||first;const di=Math.max(0,_tripStoryDiffDays_(st.startDate,date));return {day:idx+1,date,start:st.transitOnly?'':(st.perDay?.[di]?.start??''),end:st.transitOnly?'':(st.perDay?.[di]?.end??''),physicalDestination:st.place};});qsa('.hours-day',row).forEach((hd,idx)=>{if(!perDay[idx])return;const a=qs('.start',hd),b=qs('.end',hd);if(a)a.value=perDay[idx].start;if(b)b.value=perDay[idx].end;});_travelV2()?.renderRowSummary?.(row);updateAddCityButtonState();updateTravelBuilderProgress();}
+function applyTripStoryToCompatibility(story){const stays=(story?.stays||[]).map(_tripStoryEnsureStay_);if(!stays.length)return;const first=stays[0],last=stays.at(-1),firstCountry=_tripStoryCountryFromCode_(first.countryCode),totalDays=Math.max(1,_tripStoryDiffDays_(first.startDate,_tripStoryStayEnd_(last))+1);$cityList.innerHTML='';addCityRow({city:first.place,country:firstCountry?.label||first.country||'',days:totalDays,baseDate:_tripStoryDMY_(first.startDate)});const row=qs('.city-row',$cityList);if(!row)return;const segments=[];for(let i=1;i<stays.length;i++){const prev=stays[i-1],st=stays[i];segments.push({id:`story_move_${st.id}`,origin:prev.place,destination:st.place,departureDate:st.departureDate||st.startDate,arrivalDate:st.arrivalDate||st.startDate,departureTime:st.departureTime||'',arrivalTime:st.arrivalTime||'',transportMode:st.transportMode||'recommend',timePrecision:(st.departureTime&&st.arrivalTime)?'exact':'unknown',disposition:'continue',transitOnly:Boolean(st.transitOnly),nights:st.transitOnly?0:Number(st.days||1),source:'TRIP_STORY'});}stays.forEach(st=>(st.dayTrips||[]).forEach(dt=>{if(!dt.place)return;const date=_tripStoryAddDays_(st.startDate,dt.day-1);segments.push({id:`story_daytrip_${dt.id}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound.departureTime||'',arrivalTime:dt.outbound.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return.departureTime||'',returnArrivalDate:dt.return.arrivalDate||_tripStoryAddDays_(date,dt._itbmo_return_arrival_next_day?1:0),returnArrivalTime:dt.return.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound.transportMode||'recommend',returnTransportMode:dt.return.transportMode||dt.outbound.transportMode||'recommend',timePrecision:(dt.outbound.departureTime&&dt.outbound.arrivalTime&&dt.return.departureTime&&dt.return.arrivalTime)?'exact':'unknown',disposition:'roundtrip',source:'TRIP_STORY_DAYTRIP'});}));_travelV2()?.setRouteSegments?.(row,segments);const days=qs('.days',row);if(days){days.innerHTML=Array.from({length:Math.max(MAX_TRIP_STORY_DAYS,totalDays)},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');days.value=String(totalDays);days.dispatchEvent(new Event('change',{bubbles:true}));}const base=qs('.baseDate',row);if(base)base.value=_tripStoryDMY_(first.startDate);const dates=Array.from({length:totalDays},(_,i)=>_tripStoryAddDays_(first.startDate,i));const perDay=dates.map((date,idx)=>{const st=stays.find(x=>!x.transitOnly&&date>=x.startDate&&date<=_tripStoryStayEnd_(x))||stays.find(x=>date>=x.startDate&&date<=_tripStoryStayEnd_(x))||stays[Math.max(0,stays.findIndex(x=>x.startDate>date)-1)]||first;const di=Math.max(0,_tripStoryDiffDays_(st.startDate,date));return {day:idx+1,date,start:st.transitOnly?'':(st.perDay?.[di]?.start??''),end:st.transitOnly?'':(st.perDay?.[di]?.end??''),physicalDestination:st.place};});qsa('.hours-day',row).forEach((hd,idx)=>{if(!perDay[idx])return;const a=qs('.start',hd),b=qs('.end',hd);if(a)a.value=perDay[idx].start;if(b)b.value=perDay[idx].end;});_travelV2()?.renderRowSummary?.(row);updateAddCityButtonState();updateTravelBuilderProgress();}
 
 
 // Inicialización
