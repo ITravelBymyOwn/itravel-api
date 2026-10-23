@@ -9083,6 +9083,33 @@ async function _tieEnrichPhysicalUnits_(contract,units){
   return enriched;
 }
 
+// V290 · A calendar presence is not a mandate to generate tourism. Resolve
+// ordinary BASE windows against their actual destination boundaries BEFORE
+// ownership, TIE planning, checkpoints and local/global coverage are derived.
+// Excursion and nocturnal overlay windows remain under their separate rules.
+function _v290EffectiveBaseWindow_(w={},date='',descriptor={}){
+  const start=_hhmmToMinutes_(w.start);
+  const end=w.open_end?null:_hhmmToMinutes_(w.end);
+  const inbound=descriptor.inbound&&String(descriptor.inbound.date||'')===date
+    ?_hhmmToMinutes_(descriptor.inbound.arrival):null;
+  const outbound=descriptor.outbound&&String(descriptor.outbound.date||'')===date
+    ?_hhmmToMinutes_(descriptor.outbound.departure):null;
+  // Standard BASE sightseeing does not start at midnight. Night experiences
+  // are planned separately as explicit NIGHT_OVERLAYs, not implicit BASE days.
+  let from=Math.max(start==null?9*60:start,9*60);
+  if(inbound!=null)from=Math.max(from,inbound);
+  let until=end;
+  if(outbound!=null)until=until==null?outbound:Math.min(until,outbound);
+  // An open-ended window is useful only if its physical boundary is known
+  // or it begins early enough to support the normal daytime planning horizon.
+  if(until==null){
+    if(from>=19*60)return null;
+    return {...w,start:_minutesToHHMM_(from),end:null,open_end:true};
+  }
+  if(until-from<90)return null;
+  return {...w,start:_minutesToHHMM_(from),end:_minutesToHHMM_(until),open_end:false};
+}
+
 function _v3BuildPhysicalStayUnits_(contract={}){
   if(Array.isArray(contract?.tie_physical_units)&&contract.tie_physical_units.length&&!contract?._tie_bypass)return JSON.parse(JSON.stringify(contract.tie_physical_units));
   const routeDays=[...(contract.route_days||[])].sort((a,b)=>Number(a.day)-Number(b.day));
@@ -9131,10 +9158,10 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     const ownedWindows=new Map(descriptors.map(d=>[d.index,[]]));
     routeDays.forEach(day=>{
       const fullTransitDay=_v3IsFullTransitDay_(day);
-      if(fullTransitDay) console.info(`[ITBMO V3 TRANSIT DAY] Day ${Number(day.day)}: tourism windows suppressed; fixed movements remain authoritative`);
-      (day.location_windows||[]).forEach((w,windowIndex)=>{
-        if(w?.type==='fixed_transfer') return;
-        if(fullTransitDay) return;
+      if(fullTransitDay) console.info(`[ITBMO V290 TRANSIT DAY] Day ${Number(day.day)}: evaluate destination windows individually; fixed movements remain authoritative`);
+      (day.location_windows||[]).forEach((rawWindow,windowIndex)=>{
+        if(rawWindow?.type==='fixed_transfer') return;
+        const w=rawWindow;
         const location=String(w?.location||'').trim();
         if(!location||/\s[→>]\s/.test(location)) return;
         const date=String(day.date||'');
@@ -9155,8 +9182,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
           const outboundMinute=d.outbound&&String(d.outbound.date||'')===date?_hhmmToMinutes_(d.outbound.departure):null;
           // Same-day Stay transitions can make two cards share the same date and
           // even the same city name. Boundary times disambiguate BASE ownership.
-          if(inboundMinute!=null&&ws!=null&&ws<inboundMinute) return;
-          if(outboundMinute!=null&&we!=null&&we>outboundMinute) return;
+          const effective=_v290EffectiveBaseWindow_(w,date,d);
           let score=0,role=null;
           if(_arePoiAliases_(location,d.st.place)){score=100;role='BASE';}
           d.dayTrips.forEach(dt=>{
@@ -9165,7 +9191,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
               if(dateScore>score){score=dateScore;role='DAY_TRIP';}
             }
           });
-          if(score) candidates.push({descriptor:d,score,role});
+          if(score && (role==='DAY_TRIP'||effective)) candidates.push({descriptor:d,score,role,window:role==='BASE'?effective:w});
         });
         candidates.sort((a,b)=>b.score-a.score||a.descriptor.index-b.descriptor.index);
         let owner=candidates[0];
@@ -9178,21 +9204,20 @@ function _v3BuildPhysicalStayUnits_(contract={}){
             if(!d.dates.has(date)) return false;
             const inboundMinute=d.inbound&&String(d.inbound.date||'')===date?_hhmmToMinutes_(d.inbound.arrival):null;
             const outboundMinute=d.outbound&&String(d.outbound.date||'')===date?_hhmmToMinutes_(d.outbound.departure):null;
-            if(inboundMinute!=null&&ws!=null&&ws<inboundMinute) return false;
-            if(outboundMinute!=null&&we!=null&&we>outboundMinute) return false;
-            return true;
+            return Boolean(_v290EffectiveBaseWindow_(w,date,d));
           });
-          if(eligible.length===1) owner={descriptor:eligible[0],score:1,role:'BASE'};
+          if(eligible.length===1) owner={descriptor:eligible[0],score:1,role:'BASE',window:_v290EffectiveBaseWindow_(w,date,eligible[0])};
         }
         if(!owner){
           console.warn('[ITBMO V3 WINDOW OWNERSHIP] Unassigned physical window', {day:Number(day.day),date,location,start:w.start||null,end:w.end||null});
           return;
         }
+        const effectiveWindow=owner.window||w;
         const windowId=w.window_id||`day-${Number(day.day)}-window-${windowIndex+1}`;
         ownedWindows.get(owner.descriptor.index).push({
           window_id:windowId,
           day:Number(day.day),date:day.date||null,location,
-          start:w.start||null,end:w.end||null,open_end:Boolean(w.open_end),
+          start:effectiveWindow.start||null,end:effectiveWindow.end||null,open_end:Boolean(effectiveWindow.open_end),
           minimum_useful_target:w.minimum_useful_target||null,
           day_trip:owner.role==='DAY_TRIP',role:owner.role||'BASE'
         });
