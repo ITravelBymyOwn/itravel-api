@@ -8093,7 +8093,10 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
     transfers.forEach(t=>{
       const dep=_hhmmToMinutes_(t.departure),arr=_hhmmToMinutes_(t.arrival);
       if(dep==null||arr==null)return;
-      const duration=Math.max(0,arr-dep);
+      // V289: a clock-only arrival earlier than departure belongs to the next
+      // calendar date. Preserve the user's clocks; never coerce overnight
+      // movement duration to zero.
+      const duration=arr>=dep?arr-dep:arr+1440-dep;
       // USER_FIXED movements are deterministic facts. Never spend a model repair
       // call trying to recreate them, and never allow generated sightseeing to
       // occupy their interval.
@@ -8867,7 +8870,20 @@ function _v3IsFullTransitDay_(routeDay={}){
   // Multiple movements with at least six hours of travel/operational burden are
   // a travel day. Apparent gaps are reserved for luggage, access, check-in,
   // delays, meals and recovery instead of being forced into sightseeing rows.
-  return movementMinutes+operationalMinutes>=360;
+  // V289: the transit label may describe the burden of the day, but it
+  // cannot erase a separately compiled, usable destination window after the
+  // last movement. Window ownership and fixed-transfer buffers remain authoritative.
+  const burdensome=movementMinutes+operationalMinutes>=360;
+  if(!burdensome)return false;
+  const lastArrival=Math.max(...transfers.map(t=>_hhmmToMinutes_(t.arrival)).filter(Number.isFinite));
+  const hasArrivalDestinationWindow=(routeDay.location_windows||[]).some(w=>{
+    if(w?.type==='fixed_transfer')return false;
+    const start=_hhmmToMinutes_(w?.start),end=_hhmmToMinutes_(w?.end);
+    return start!=null&&start>=lastArrival&&
+      (w.open_end?start<19*60:(end!=null&&end-start>=90))&&
+      transfers.some(t=>_arePoiAliases_(w.location,t.destination));
+  });
+  return !hasArrivalDestinationWindow;
 }
 
 
@@ -10113,7 +10129,10 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
         });
       }
       const affectedUnits=(generated.units||[]).filter(unit=>affectedIds.has(String(unit.id||'')));
-      if(!affectedUnits.length || mergeAttempt>=ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS) break;
+      if(!affectedUnits.length || mergeAttempt>=ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS){
+        if(mergeCoverage.missing.length)console.warn('[ITBMO V289 MERGE RECOVERY] Missing chronological day has no owning Stay or retries exhausted; accepted Stay checkpoints preserved',mergeCoverage.missing);
+        break;
+      }
       console.warn(`[ITBMO V3 INTERNAL MERGE RECOVERY] regenerating ${affectedUnits.length} affected physical unit(s); healthy checkpoints preserved`,affectedUnits.map(u=>({id:u.id,type:u.unit_type||'BASE_STAY',destination:u.physical_destination||u.base_destination,base:u.base_destination,days:u.days})));
       _v3AcceptedStayClear_(generated.contract,affectedUnits);
       await _queueGenerationCheckpoint_('generating');
@@ -10126,6 +10145,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     const coverage=_v3Coverage_(rows,dest.days);
     const physicalWindowCoverage=_v3PhysicalWindowCoverage_(rows,generated.units||[]);
     console.info(`[ITBMO V3 MERGE COVERAGE] trip`,coverage);
+    if(coverage.missing.length) console.error('[ITBMO V289 MISSING CHRONOLOGICAL DAYS]',JSON.stringify(coverage.missing.map(day=>({day,date:generated.contract?.route_days?.find(d=>Number(d.day)===day)?.date||null,route_day:generated.contract?.route_days?.find(d=>Number(d.day)===day)||null})),null,2));
     console.info(`[ITBMO V3 MERGE WINDOW COVERAGE] trip`,physicalWindowCoverage);
     if(coverage.missing.length){
       const error=new Error(`V3_INCOMPLETE_AFTER_STAY_MERGE:missing_days=${coverage.missing.join(',')}:rows=${coverage.rowCount}`);
