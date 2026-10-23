@@ -514,6 +514,12 @@
     });
   }
 
+  function effectiveStoryDayTrips(st,stays){
+    const key=x=>norm(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const independent=new Set((stays||[]).map(s=>key(s?.place)).filter(Boolean));
+    return (st?.dayTrips||[]).filter(dt=>!independent.has(key(dt?.place)));
+  }
+
   function compileTripStoryContinuous(destination,story,model){
     const stays=(story?.stays||[]).filter(x=>x&&x.startDate&&norm(x.place));
     if(!stays.length) return null;
@@ -541,7 +547,7 @@
       const arrivalUserFixed=Boolean(st.arrivalTime && String(st.timeStatus||'').toLowerCase()!=='estimated' && !st.arrival_route_estimated);
       movements.push({id:`story_move_${st.id||i}`,origin:prev.place,destination:st.place,departureDate:st.departureDate||st.startDate,arrivalDate:st.arrivalDate||st.startDate,departureTime:st.departureTime||'',arrivalTime:st.arrivalTime||'',transportMode:st.transportMode||'other',timePrecision:(st.departureTime&&st.arrivalTime)?(arrivalUserFixed?'exact':'estimated'):'unknown',source:departureUserFixed?(arrivalUserFixed?'USER_FIXED':'MIXED_AUTHORITY'):'ROUTE_ESTIMATED',departure_source:departureUserFixed?'USER_FIXED':'ROUTE_ESTIMATED',arrival_source:arrivalUserFixed?'USER_FIXED':'ROUTE_ESTIMATED',transport_source:st.transportStatus==='route_estimated'?'ROUTE_ESTIMATED':'USER_FIXED',departure_user_fixed:departureUserFixed,arrival_user_fixed:arrivalUserFixed,routeResolution:st.routeResolution||null,disposition:'continue',nights:Number(st.days||1)});
     }
-    stays.forEach(st=>(st.dayTrips||[]).forEach((dt,j)=>{if(!norm(dt.place))return;const date=addDays(st.startDate,Math.max(0,Number(dt.day||1)-1));movements.push({id:`story_daytrip_${dt.id||j}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound?.departureTime||'',arrivalTime:dt.outbound?.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return?.departureTime||'',returnArrivalDate:date,returnArrivalTime:dt.return?.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound?.transportMode||'other',returnTransportMode:dt.return?.transportMode||dt.outbound?.transportMode||'other',timePrecision:(dt.outbound?.departureTime&&dt.outbound?.arrivalTime&&dt.return?.departureTime&&dt.return?.arrivalTime)?(dt.outbound?.timeStatus==='estimated'?'estimated':'exact'):'unknown',source:dt.outbound?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',routeResolution:dt.routeResolution||null,disposition:'roundtrip'});}));
+    stays.forEach(st=>effectiveStoryDayTrips(st,stays).forEach((dt,j)=>{if(!norm(dt.place))return;const date=addDays(st.startDate,Math.max(0,Number(dt.day||1)-1));movements.push({id:`story_daytrip_${dt.id||j}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound?.departureTime||'',arrivalTime:dt.outbound?.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return?.departureTime||'',returnArrivalDate:date,returnArrivalTime:dt.return?.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound?.transportMode||'other',returnTransportMode:dt.return?.transportMode||dt.outbound?.transportMode||'other',timePrecision:(dt.outbound?.departureTime&&dt.outbound?.arrivalTime&&dt.return?.departureTime&&dt.return?.arrivalTime)?(dt.outbound?.timeStatus==='estimated'?'estimated':'exact'):'unknown',source:dt.outbound?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',routeResolution:dt.routeResolution||null,disposition:'roundtrip'});}));
     dayContexts.forEach(ctx=>{
       const dayMoves=movements.filter(m=>m.departureDate===ctx.date||m.returnDepartureDate===ctx.date).sort((a,b)=>(a.departureTime||'99:99').localeCompare(b.departureTime||'99:99'));
       let cursor=ctx._dayStart,location=ctx.start_location;
@@ -597,7 +603,7 @@
         // A regional excursion may explicitly visit a corridor location even
         // when a separate logistical stay with the same name is transit-only.
         const excursionVisit=stays.some(st=>!(st.transitOnly===true || st.transitOnly==='true') &&
-          (st.dayTrips||[]).some(dt=>norm(dt.place).toLowerCase()===norm(location).toLowerCase() &&
+          effectiveStoryDayTrips(st,stays).some(dt=>norm(dt.place).toLowerCase()===norm(location).toLowerCase() &&
           addDays(st.startDate,Math.max(0,Number(dt.day||1)-1))===date));
         return !excursionVisit && visits.length>0 && visits.every(st=>st.transitOnly===true || st.transitOnly==='true');
       };
