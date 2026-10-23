@@ -1033,9 +1033,9 @@ async function handleRecoverable(res, session) {
   for (const trip of candidates) {
     const plannerInput = generationCheckpoint(trip?.planner_input);
     if (plannerInput.auto_recovery_disabled === true) continue;
-    // A saved record is recoverable only if generation had already begun.
-    // A paid draft that never began remains accessible through its explicit ID.
-    if (trip.status === 'saved' && !(Number(trip.generation_count || 0)>0 || generationCheckpoint(trip.itinerary_data).run_token)) continue;
+    // V281: a paid saved trip is recoverable even if Route Resolver failed
+    // before generation_begin (no run_token / generation_count yet).
+    // Entitlement is verified server-side below, not inferred from status.
     if (trip?.id && await hasGenerationEntitlement(trip.id, session.user_id)) {
       return res.status(200).json({ ok:true, action:"recoverable", trip });
     }
