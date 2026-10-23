@@ -9353,8 +9353,26 @@ function _v81ProtectTicketedMealContinuity_(rows=[]){
   return rows;
 }
 
+// V287: targeted night-chain diagnostics; no itinerary mutation.
+function _v287NightTrace_(stage,unit,rows=[]){
+  const nights=(unit?.windows||[]).filter(w=>String(w?.role||'')==='NIGHT_OVERLAY');
+  if(!nights.length)return;
+  for(const w of nights){
+    const day=Number(w.day),id=String(w.window_id||'');
+    const sameDay=(rows||[]).filter(r=>Number(r?.day)===day);
+    const assigned=sameDay.filter(r=>String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'')===id);
+    const selected=(unit?.tie_structure?.night_overlays||[]).filter(o=>Number(o?.preferred_day)===day);
+    console.groupCollapsed(`[ITBMO V287 NIGHT TRACE] ${stage} · ${unit.base_destination||unit.physical_destination||''} · day ${day} · ${id}`);
+    console.log('contract',{stay_unit_id:unit.id,window:{...w},selected_night_overlays:selected,unit_type:unit.unit_type});
+    console.table(sameDay.map((r,i)=>({index:i,day:r.day,start:r.start,end:r.end,activity:r.activity,to:r.to,window_id:r.planning_window_id||r.commerce_context?.planning_window_id||'',semantic_role:_v110SemanticRole_(r),day_offset:r._itbmo_day_offset||0,night_chain_id:r._itbmo_night_chain_id||''})));
+    console.log('evaluation',{same_day_rows:sameDay.length,assigned_rows:assigned.length,experience_rows:assigned.filter(r=>_v110SemanticRole_(r)==='experience').length,assigned_roles:assigned.map(r=>_v110SemanticRole_(r))});
+    console.groupEnd();
+  }
+}
+
 function _v3StampStayRows_(rows=[],unit={}){
   const windows=unit.windows||[];
+  _v287NightTrace_("BEFORE STAMP",unit,rows);
   const stamped=(rows||[]).flatMap(row=>{
     const day=Number(row?.day),start=_hhmmToMinutes_(row?.start),end=_hhmmToMinutes_(row?.end);
     const candidates=windows.filter(w=>{
@@ -9411,6 +9429,7 @@ function _v3StampStayRows_(rows=[],unit={}){
     const note=getLang()==='es'?adjustment.note_es:adjustment.note_en;
     if(note&&!String(stamped[0].notes||'').includes(note))stamped[0].notes=[note,stamped[0].notes].filter(Boolean).join(' · ');
   }
+  _v287NightTrace_("AFTER STAMP",unit,stamped);
   return _v81ProtectTicketedMealContinuity_(stamped);
 }
 
@@ -9640,6 +9659,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
   let normalized=_v3DeterministicQualityCleanup_(unitCity,rows,scopedContract,totalDays,scopedPerDay,unitAuditBaseDate,false,unitDays);
   rows=_v3StampStayRows_(normalized.rows,unit);
   let report=audit(rows);
+  _v287NightTrace_("AFTER LOCAL NORMALIZE",unit,rows);
   let material=_v3MaterialAuditErrors_(report);
   const repairBudget=ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS;
   let attempt=0,previousFingerprint='',stagnant=0;
@@ -9731,11 +9751,13 @@ Repair ONLY the supplied local row block(s). Rows not supplied are immutable and
       console.warn(`[ITBMO V112 PATCH INTEGRITY] ${unitCity} · ${unit.id}: repair candidate rejected because it removed protected experience anchor(s)`,missingProtected);
       break;
     }
+    _v287NightTrace_(`LOCAL REPAIR CANDIDATE ${attempt}`,unit,nextRows);
     const nextReport=audit(nextRows);
     const before=_auditScore_(report),after=_auditScore_(nextReport);
     const beforeBlocking=_v3BlockingAuditErrors_(report).length;
     const afterBlocking=_v3BlockingAuditErrors_(nextReport).length;
     const improved=afterBlocking<beforeBlocking || (afterBlocking===beforeBlocking && (after<before || (after===before && (nextReport.errors||[]).length<(report.errors||[]).length)));
+    console.info("[ITBMO V287 NIGHT REPAIR DECISION]",{stay_unit_id:unit.id,attempt,improved,before_blocking:beforeBlocking,after_blocking:afterBlocking,before_score:before,after_score:after,errors_before:report.errors,errors_after:nextReport.errors});
     if(improved){rows=nextRows;report=nextReport;material=_v3MaterialAuditErrors_(report);stagnant=0;}
     else{
       stagnant+=1;
