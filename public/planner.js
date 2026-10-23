@@ -1161,7 +1161,7 @@ async function loginITBMOUser(){
   try{
     const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); void restorePaidGenerationIfNeeded(); return;
     }
     setAccountMessage(authCopy('loginFail'),'error');
   }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1178,7 +1178,7 @@ async function continueAsGuest(){
   try{
     const {response,data}=await postUserAction({action:'guest',name,email,...authTrackingPayload(),...legalPayload('guest')});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); return;
+      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); void restorePaidGenerationIfNeeded(); return;
     }
     if(response.status===409 && data?.account_exists) setAccountMessage(authCopy('guestHasAccount'),'error');
     else if(response.status===403 && data?.guest_mismatch) setAccountMessage(authCopy('guestMismatch'),'error');
@@ -1215,7 +1215,7 @@ async function completeEmailConfirmation(accessToken){
   try{
     const {response,data}=await postUserAction({action:'complete_auth',access_token:accessToken});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); enterFreshPlannerAfterAuth(); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); enterFreshPlannerAfterAuth(); void restorePaidGenerationIfNeeded(); return;
     }
     setAccountMessage(authCopy('confirmationFail'),'error');
   }catch(err){ console.error('ITBMO confirmation error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1325,15 +1325,15 @@ async function restoreITBMOSession({broadcast=true}={}){
   }
 }
 
-function clearPlannerUIForLogout(){
+function clearPlannerUIForLogout({preservePaidRecovery=false}={}){
   const tripIdToClear=currentTripId || getStoredActiveTripId();
 
   // Logout is NOT a trip reset: do not archive or modify the trip in Supabase.
   // We only remove private trip state from this browser so another person using
   // the same device cannot see the previous user's itinerary while signed out.
   clearInfoChatStateForTrip(tripIdToClear);
-  _clearPostPaymentProgressLocal_(tripIdToClear);
-  try{ _tripStoryClearDraft_(); }catch(_){ }
+  if(!preservePaidRecovery) _clearPostPaymentProgressLocal_(tripIdToClear);
+  if(!preservePaidRecovery) try{ _tripStoryClearDraft_(); }catch(_){ }
   closeAstraCoach({remember:false});
 
   savedDestinations=[];
@@ -1356,7 +1356,7 @@ function clearPlannerUIForLogout(){
   preferencesStageTripId=null;
   preferencesConfirmedTripId=null;
   currentTripId=null;
-  storeActiveTripId(null);
+  if(!preservePaidRecovery) storeActiveTripId(null);
 
   if($cityList){
     $cityList.innerHTML='';
@@ -1424,7 +1424,8 @@ function clearPlannerUIForLogout(){
 // remain available from My Trips; no previous planning draft is auto-hydrated.
 // This is UI/session lifecycle only and never deletes or mutates server-side trips.
 function enterFreshPlannerAfterAuth(){
-  clearPlannerUIForLogout();
+  // V281: visual reset must never erase a paid trip pointer or its local checkpoint.
+  clearPlannerUIForLogout({preservePaidRecovery:true});
   // V262: a fresh authenticated entry must not inherit TravelV2's in-memory
   // Trip Story. Clearing only the local draft left the old flight and stays
   // available to the guided editor, even after its UI had been reset.
@@ -11290,21 +11291,16 @@ function bindJourneyHome(){
 }
 
 function _plannerOwnsAutomaticGenerationRecovery_(){
-  // Automatic paid-generation recovery belongs only to the standalone Planner.
-  // preview-home embeds planner.html as an iframe for interactive product preview;
-  // loading the public website must never resume a paid generation in that frame.
-  // A generation explicitly started by the traveler inside the embedded Planner is
-  // unaffected: this guard applies only to automatic restore on page/session load.
-  try{
-    if(window.self!==window.top) return false;
-  }catch(_){ return false; }
+  // V281: Planner also operates inside Webflow/Vercel iframe. Authenticated
+  // recovery is permitted there; never run this on unrelated HTML pages.
   return /(?:^|\/)planner\.html$/i.test(String(window.location.pathname||''));
 }
 
 async function restorePaidGenerationIfNeeded(interruptedTripId){
   if(!_plannerOwnsAutomaticGenerationRecovery_()) return;
   // Explicit new journeys must never revive a previous payment/generation.
-  if(new URLSearchParams(window.location.search).get('mode')==='new') return;
+  // Explicit new-mode stays blank unless this browser holds an interrupted paid trip.
+  if(new URLSearchParams(window.location.search).get('mode')==='new' && !interruptedTripId && !getStoredActiveTripId()) return;
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   const restoreEpoch=generationRunEpoch;
   try{
@@ -11372,9 +11368,10 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
     }
 
     if(trip.status==='saved'){
-      // V272: payment entitlement confirmed. Resume from the paid checkpoint
-      // using the same retry entry point; never create a new trip/payment.
-      _showGenerationRetry_();
+      // V281: recover the actual post-payment stage, as the September baseline did.
+      // A route-resolver failure before generation_begin may still have a
+      // generation_requested checkpoint; it resumes the same paid trip.
+      if(!_restorePostPaymentProgress_(trip)) showPreferencesStage();
       return;
     }
     if(trip.status==='generating'){
