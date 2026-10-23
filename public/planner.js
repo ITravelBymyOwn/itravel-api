@@ -8276,11 +8276,29 @@ function _v3PhysicalWindowCoverage_(rows=[],units=[]){
 // Final trip gate for the independent-Stay architecture. Local Stay QA already
 // owns semantic continuity and within-stay itinerary quality. The merge gate must
 // validate only deterministic physical integrity against the Route Compiler facts.
+// V291: calendar days with neither plannable windows nor fixed movements are
+// legitimate empty transit/connection days. They remain in the calendar/export,
+// but must not force invented sightseeing rows.
+function _v291RequiredCalendarDays_(contract={},totalDays=1){
+  const route=new Map((contract?.route_days||[]).map(d=>[Number(d.day),d]));
+  const owned=new Set(_v3BuildPhysicalStayUnits_(contract).flatMap(u=>(u.windows||[]).map(w=>Number(w.day))));
+  return Array.from({length:Math.max(1,Number(totalDays)||1)},(_,i)=>i+1).filter(day=>{
+    const d=route.get(day);
+    if(!d)return true; // fail closed if the compiler omitted a day entirely
+    return owned.has(day) || (d.fixed_transfers||[]).some(t=>t?.departure&&t?.arrival);
+  });
+}
+function _v291Coverage_(rows=[],contract={},totalDays=1){
+  const required=_v291RequiredCalendarDays_(contract,totalDays);
+  const raw=_v3Coverage_(rows,totalDays);
+  return {...raw,required,transit_only_empty:raw.missing.filter(d=>!required.includes(d)),
+    missing:raw.missing.filter(d=>required.includes(d))};
+}
 function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   const errors=[];
   const maxDay=Math.max(1,Number(totalDays)||1);
   const byDay=_rowsByDayObject_(rows);
-  const coverage=_v3Coverage_(rows,maxDay);
+  const coverage=_v291Coverage_(rows,contract,maxDay);
   coverage.missing.forEach(day=>errors.push({code:'MISSING_DAY',day}));
 
   const routeDays=new Map((contract?.route_days||[]).map(d=>[Number(d.day),d]));
@@ -8324,9 +8342,14 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
         const windowEnd=we!=null&&we<=ws?we+1440:we;
         return start>=ws&&(windowEnd==null||rowEnd<=windowEnd);
       });
-      const absoluteEnd=matchingNightWindow&&end!=null&&start!=null&&end<=start?end+1440:end;
+      // A fixed transfer crossing midnight is valid when its authoritative
+      // departure/arrival clocks match the Route Compiler movement ledger.
+      const overnightFixedTransfer=isTransport&&start!=null&&end!=null&&end<start&&
+        transfers.some(t=>_hhmmToMinutes_(t.departure)===start&&_hhmmToMinutes_(t.arrival)===end&&
+          _arePoiAliases_(row.from,t.origin)&&_arePoiAliases_(row.to,t.destination));
+      const absoluteEnd=(matchingNightWindow||overnightFixedTransfer)&&end!=null&&start!=null&&end<=start?end+1440:end;
       if(start==null||absoluteEnd==null||absoluteEnd<=start){
-        errors.push({code:'INVALID_TIME',day,row:index+1,start:row.start,end:row.end});
+        errors.push({code:'INVALID_TIME',day,row:index+1,start:row.start,end:row.end,activity:row.activity||null,kind:row.kind||null,from:row.from||null,to:row.to||null,stay_unit_id:row.stay_unit_id||null});
         return;
       }
       if(isTransport) return;
@@ -10141,10 +10164,11 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       generated=await _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,transport);
       rows=generated.rows||[];
       if(!rows.length) throw new Error(`V3_EMPTY:${city}`);
-      const mergeCoverage=_v3Coverage_(rows,dest.days);
+      const mergeCoverage=_v291Coverage_(rows,generated.contract,dest.days);
       const mergeReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
       const mergeErrors=[...(mergeReport.errors||[]),...(generated.conservationErrors||[])];
       console.info(`[ITBMO V3 INTERNAL MERGE QA] trip · ${mergeAttempt}/${ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS}`,_v3AuditSummary_({errors:mergeErrors}),mergeErrors);
+      if(mergeErrors.length) _v3LogAuditDetails_('V291 MERGE DIAGNOSTIC','trip','all-stays',mergeErrors);
       if(!mergeCoverage.missing.length && !mergeErrors.length) break;
 
       const affectedIds=new Set(mergeErrors.map(e=>String(e?.stay_unit_id||'')).filter(Boolean));
@@ -10167,9 +10191,10 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     // The merged trip receives only a final HARD physical-integrity gate. We do
     // not re-run trip-wide semantic repair, which would couple independent stays
     // and recreate the historical "everything belongs to Madrid" behavior.
-    const coverage=_v3Coverage_(rows,dest.days);
+    const coverage=_v291Coverage_(rows,generated.contract,dest.days);
     const physicalWindowCoverage=_v3PhysicalWindowCoverage_(rows,generated.units||[]);
     console.info(`[ITBMO V3 MERGE COVERAGE] trip`,coverage);
+    console.info('[ITBMO V291 EMPTY TRANSIT DAYS]',coverage.transit_only_empty);
     if(coverage.missing.length) console.error('[ITBMO V289 MISSING CHRONOLOGICAL DAYS]',JSON.stringify(coverage.missing.map(day=>({day,date:generated.contract?.route_days?.find(d=>Number(d.day)===day)?.date||null,route_day:generated.contract?.route_days?.find(d=>Number(d.day)===day)||null})),null,2));
     console.info(`[ITBMO V3 MERGE WINDOW COVERAGE] trip`,physicalWindowCoverage);
     if(coverage.missing.length){
