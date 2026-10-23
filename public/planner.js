@@ -8980,14 +8980,7 @@ async function _tieCallStructure_(request){
     const res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'tie_structure',tie_request:request})});
     const data=await res.json();
     if(data?.usage)_captureExactUsage_(data);
-    if(!res.ok||!data?.ok||!data?.plan){
-      // V297: expose the server's *validation codes*, never the model response,
-      // traveler details or raw request. The server already returns these codes.
-      const code=String(data?.error?.code||`TIE_HTTP_${res.status}`);
-      const details=Array.isArray(data?.error?.details)?data.error.details.map(x=>String(x).slice(0,160)).slice(0,24):[];
-      console.warn('[ITBMO V297 TIE REJECTION]',{code,http_status:res.status,validation_errors:details,model_calls:Number(data?.usage?.model_calls||0)});
-      throw new Error(code+(details.length?':'+details.join('|'):''));
-    }
+    if(!res.ok||!data?.ok||!data?.plan)throw new Error(data?.error?.code||`TIE_HTTP_${res.status}`);
     const validation=_tieValidateBrowser_(data.plan,request);
     if(!validation.ok)throw new Error(`TIE_BROWSER_VALIDATION:${validation.errors.join(',')}`);
     const value={plan:data.plan,fingerprint,duration_ms:Math.round(performance.now()-started)};
@@ -9705,15 +9698,6 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
         const base=String(unit?.base_destination||'').trim();
         const baseKey=_canonicalText_(base),fromKey=_canonicalText_(first?.from||'');
         const baseCompatible=_v111LocationsCompatible_(base,first?.from||'',base) || (baseKey&&fromKey&&(fromKey.includes(baseKey)||baseKey.includes(fromKey)));
-        // V297: reject a regional unit whose first substantive row starts at the
-        // attraction. No destination lists, no changes to fixed inbound boundaries.
-        // This runs inside existing local QA/repair, not at TIE structure time.
-        const fixedInbound=Boolean(unit?.inbound_boundary && Number(unit.inbound_boundary.day)===Number(day));
-        if(first && base && !fixedInbound && !_isPureTransportRow_(first)){
-          regionalFirstOrigin.push({code:'MISSING_REGIONAL_OUTBOUND',day:Number(day),row:1,
-            base_destination:base,first_place:first.from||first.to||'',
-            instruction:'The first regional row must be a real transport movement from the overnight base to the first regional attraction. Insert the missing outbound movement within the day clock, shift downstream model-owned rows, and retain CORE/HIGH attractions and the return. Never modify user-fixed transfers.'});
-        }
         if(first && base && _isPureTransportRow_(first) && first.from && !baseCompatible){
           regionalFirstOrigin.push({code:'ORPHAN_TRANSFER_ORIGIN',day:Number(day),row:1,previous_to:base,current_from:first.from,activity:first.activity||null,instruction:'This regional owner-day begins at the overnight base. Start the first model-owned transfer from that base unless an authoritative fixed movement explicitly establishes another origin. Never invent a hidden pre-route movement.'});
         }
@@ -10057,36 +10041,7 @@ function _v294QualityObservations_(rows=[],units=[]){
       anchors.push({day,experience:name,matched:matching.length>0,verification_required:Boolean(item.verification_required),unit_id:unit.id||null});
     }
   }
-  // V297 read-only: same venue visited substantively on different days.
-  // Conservative: exact canonical POI only; never delete or rewrite a row.
-  const venueRepeats=[];
-  for(let i=0;i<experiences.length;i++)for(let j=0;j<i;j++){
-    const a=experiences[j],b=experiences[i];
-    const venue=_canonicalText_(a.poi);
-    if(a.day===b.day||venue.length<8||venue!==_canonicalText_(b.poi))continue;
-    if(!venueRepeats.some(x=>x.poi===a.poi&&x.first_day===a.day&&x.repeat_day===b.day))
-      venueRepeats.push({poi:a.poi,first_day:a.day,repeat_day:b.day,first_activity:a.row.activity,repeat_activity:b.row.activity,review_required:true});
-  }
-  // The chronology of +1 night rows has multiple legacy encodings. Observe
-  // explicit NIGHT_OVERLAY windows instead of guessing from 00:xx row strings.
-  const nightRecovery=[];
-  for(const u of units||[]){
-    const nightWindows=(u.windows||[]).filter(w=>String(w?.role||'')==='NIGHT_OVERLAY');
-    for(const w of nightWindows){
-      const day=Number(w.day),next=ordered.filter(r=>Number(r.day)===day+1).sort(_v114LogicalRowCompare_);
-      if(!next.length)continue;
-      const endText=String(w.end||'');const match=endText.match(/(\d{1,2}):(\d{2})/);
-      if(!match)continue;
-      const endClock=Number(match[1])*60+Number(match[2]);
-      const explicitNext=/\+1|next.day|siguiente|翌日/i.test(endText)||endClock<360;
-      if(!explicitNext)continue;
-      const first=_hhmmToMinutes_(next[0].start);
-      if(first==null)continue;
-      const gap=first-endClock;
-      if(gap<600)nightRecovery.push({previous_day:day,day:day+1,minimum_observed_gap_minutes:gap,first_activity:next[0].activity,review_required:true,note:'Window end may exclude final return; check actual lodging return.'});
-    }
-  }
-  return {schema:'v297_observability_only',experience_rows:experiences.length,possible_repeats:repeats,possible_venue_repeats:venueRepeats,night_recovery_advisories:nightRecovery,selected_anchors:anchors.length,unmatched_selected_anchors:anchors.filter(a=>!a.matched),matched_selected_anchors:anchors.filter(a=>a.matched).length};
+  return {schema:'v294_observability_only',experience_rows:experiences.length,possible_repeats:repeats,selected_anchors:anchors.length,unmatched_selected_anchors:anchors.filter(a=>!a.matched),matched_selected_anchors:anchors.filter(a=>a.matched).length};
 }
 
 function _v3DedupeMergedStayRows_(rows=[]){
@@ -10302,7 +10257,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     console.info('[ITBMO V266 CROSS-STAY ADVISORY] trip',_v266CrossStayAdvisories_(rows));
     console.info('[ITBMO V276 QUALITY ADVISORY] trip',_v274QualityAdvisories_(rows,generated.contract));
     // V294: observe TIE execution and possible cross-day repeats; never block publication.
-    try{console.info('[ITBMO V297 GLOBAL EXPERIENCE QUALITY]',_v294QualityObservations_(rows,generated.units||[]));}
+    try{console.info('[ITBMO V294 GLOBAL EXPERIENCE QUALITY]',_v294QualityObservations_(rows,generated.units||[]));}
     catch(qualityError){console.warn('[ITBMO V294 QUALITY OBSERVATION UNAVAILABLE]',String(qualityError?.message||qualityError));}
     _v3LogAuditDetails_('MERGED TRIP HARD AUDIT','trip','all-stays',blockingErrors);
     if(blockingErrors.length){
