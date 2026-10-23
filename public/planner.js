@@ -10847,6 +10847,7 @@ async function runPaidGeneration({manualRetry=false}={}){
   document.body.classList.remove('guided-preferences-open');
   const runEpoch=++generationRunEpoch;
   paidGenerationRunning=true;
+  let generationOpened=false;
   let completionPublished=false;
   let recoveryPublished=false;
   setPlanningChatLocked(true);
@@ -10857,6 +10858,8 @@ async function runPaidGeneration({manualRetry=false}={}){
     // V72: never erase a terminal-success marker before we know the server has opened a genuinely new run.
     // A transient Route Resolver failure must not resurrect an already completed trip.
     showWOW(true,getLang()==='es'?'✨ ITBMO está resolviendo la logística de tu recorrido…':'✨ ITBMO is resolving your trip logistics…');
+    // V279: preserve the paid, not-yet-generated route before any external resolver call.
+    try{const pendingStory=_travelV2()?.state?.tripStory;if(pendingStory?.stays?.length)_tripStorySaveDraft_(JSON.parse(JSON.stringify(pendingStory)));}catch(e){console.warn('[ITBMO V279 RECOVERY] local route snapshot unavailable',e);}
     await _resolveTripStoryRoutesBeforeGeneration_();
     _assertGenerationRunActive_(runEpoch);
     const token=getStoredSessionToken();
@@ -10866,6 +10869,7 @@ async function runPaidGeneration({manualRetry=false}={}){
       trip_id:currentTripId
     });
     _assertGenerationRunActive_(runEpoch);
+    generationOpened=true;
 
     if(begin?.new_run) _v71ClearTripCompletionMarker_(currentTripId);
     if(begin?.already_completed){
@@ -11021,7 +11025,9 @@ async function runPaidGeneration({manualRetry=false}={}){
       generationRecoveryState={...(generationRecoveryState || {}),generation_count:2};
     }
     try{
-      if(!['GENERATION_PAYMENT_REQUIRED','GENERATION_ALREADY_COMPLETED','GENERATION_RUN_MISMATCH','GENERATION_ARCHIVED'].includes(err?.code)){
+      // Resolver errors happen before generation_begin; there is no valid run_token yet.
+      // Never issue a server checkpoint for a run that was not opened.
+      if(generationOpened && generationRecoveryState?.run_token && !['GENERATION_PAYMENT_REQUIRED','GENERATION_ALREADY_COMPLETED','GENERATION_RUN_MISMATCH','GENERATION_ARCHIVED'].includes(err?.code)){
         await _persistGenerationCheckpoint_('failed',{
           active_city:null,
           last_error:{code:err?.code || 'GENERATION_ORCHESTRATOR_FAILED',at:new Date().toISOString()}
@@ -15985,10 +15991,10 @@ function openTripStoryBuilder(){
       bindLocation(active.querySelector('[data-dt-place]'),x=>{const changed=dt.place!==x.label;dt.place=x.label;if(x.countryCode){dt.countryCode=x.countryCode;dt.country=x.country||dt.country;}if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;}},'city',()=>dt.countryCode||st.countryCode,{global:true});
       const dtKnown=Boolean(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime);active.querySelectorAll('[data-dt-details] select').forEach(x=>{x.disabled=!dtKnown;x.setAttribute('aria-disabled',String(!dtKnown));});active.querySelector('[data-dt-details]')?.classList.toggle('is-itbmo-resolved',!dtKnown);
       active.querySelector('[data-dt-day]').onchange=e=>{const next=Number(e.target.value),changed=dt.day!==next;dt.day=next;if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;dt.scheduleAdjustment=null;}};
-      active.querySelectorAll('[data-dt-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.dtKnowledge==='known';dt._itbmo_user_clock_authority=known;active.querySelectorAll('[data-dt-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelectorAll('[data-dt-details] select').forEach(x=>{x.disabled=!known;x.setAttribute('aria-disabled',String(!known));});active.querySelector('[data-dt-details]')?.classList.toggle('is-itbmo-resolved',!known);if(!known){dt.outbound.transportMode='';dt.outbound.departureTime='';dt.return.departureTime='';dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.scheduleAdjustment=null;}});
+      active.querySelectorAll('[data-dt-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.dtKnowledge==='known';dt._itbmo_user_clock_authority=known;if(!known){dt._itbmo_user_outbound_departure_time='';dt._itbmo_user_return_departure_time='';dt._itbmo_user_outbound_arrival_time='';dt._itbmo_user_return_arrival_time='';}active.querySelectorAll('[data-dt-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelectorAll('[data-dt-details] select').forEach(x=>{x.disabled=!known;x.setAttribute('aria-disabled',String(!known));});active.querySelector('[data-dt-details]')?.classList.toggle('is-itbmo-resolved',!known);if(!known){dt.outbound.transportMode='';dt.outbound.departureTime='';dt.return.departureTime='';dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.scheduleAdjustment=null;}});
       active.querySelector('[data-dt-out-mode]').onchange=e=>dt.outbound.transportMode=e.target.value;
-      active.querySelector('[data-dt-out-time]').onchange=e=>dt.outbound.departureTime=e.target.value;
-      active.querySelector('[data-dt-return-time]').onchange=e=>dt.return.departureTime=e.target.value;
+      active.querySelector('[data-dt-out-time]').onchange=e=>{dt.outbound.departureTime=e.target.value;dt._itbmo_user_outbound_departure_time=e.target.value;dt.outbound.timeStatus=e.target.value?'user_fixed':'estimated';dt.outbound.arrivalTime='';dt.routeResolution=null;};
+      active.querySelector('[data-dt-return-time]').onchange=e=>{dt.return.departureTime=e.target.value;dt._itbmo_user_return_departure_time=e.target.value;dt.return.timeStatus=e.target.value?'user_fixed':'estimated';dt.return.arrivalTime='';dt.routeResolution=null;};
 
       active.querySelector('[data-gj-next]').onclick=()=>{if(!dt.place)return;if(Number.isInteger(dayTripEditIndex))st.dayTrips[dayTripEditIndex]=_tripStoryEnsureDayTrip_(JSON.parse(JSON.stringify(dt)));else st.dayTrips.push(_tripStoryEnsureDayTrip_(JSON.parse(JSON.stringify(dt))));dayTripDraft=null;dayTripEditIndex=null;persist();phase='decision';render();};return;
     }
@@ -16104,12 +16110,23 @@ function _v71CaptureTravelerClockAuthority_(story={}){
     }
   });
   (story.stays||[]).forEach(st=>(st.dayTrips||[]).forEach(dt=>{
-    if(dt._itbmo_user_clock_authority==null){
-      dt._itbmo_user_clock_authority=Boolean(
-        dt?.outbound?.departureTime && dt?.return?.departureTime &&
-        (!dt?.routeResolution || String(dt?.outbound?.timeStatus||'').toLowerCase()!=='estimated' || String(dt?.return?.timeStatus||'').toLowerCase()!=='estimated')
-      );
+    // V280: field-level clock authority. Never infer traveler input from an
+    // already-estimated clock. Legacy V279 paid drafts retain their known
+    // departures, while empty fields remain available for estimation.
+    const legacy=dt._itbmo_user_clock_authority===true;
+    for(const [key,part,field] of [
+      ['_itbmo_user_outbound_departure_time','outbound','departureTime'],
+      ['_itbmo_user_return_departure_time','return','departureTime'],
+      ['_itbmo_user_outbound_arrival_time','outbound','arrivalTime'],
+      ['_itbmo_user_return_arrival_time','return','arrivalTime']
+    ]){
+      if(dt[key]!=null)continue;
+      const segment=dt[part]||{};
+      const status=String(segment.timeStatus||'').toLowerCase();
+      const explicit=String(segment[field]||'');
+      dt[key]=(explicit && (status==='user_fixed'||(legacy&&field==='departureTime')||(!dt.routeResolution&&status!=='estimated')))?explicit:'';
     }
+    if(dt._itbmo_user_clock_authority==null)dt._itbmo_user_clock_authority=Boolean(dt._itbmo_user_outbound_departure_time||dt._itbmo_user_return_departure_time);
   }));
 }
 function _v71MainTransitionDates_(story={}){
@@ -16134,7 +16151,7 @@ function _v71ReassignIncompatibleEstimatedDayTrips_(story={}){
     trips.forEach(dt=>{
       const requested=Math.max(1,Number(dt.day||1));
       const requestedDate=_tripStoryAddDays_(st.startDate,requested-1);
-      if(!requestedDate || !transitionDates.has(requestedDate) || _v71DayTripHasTravelerClockAuthority_(dt))return;
+      if(!requestedDate || !transitionDates.has(requestedDate) || _v71DayTripHasTravelerClockAuthority_(dt) || dt._itbmo_user_outbound_departure_time || dt._itbmo_user_return_departure_time || dt._itbmo_user_outbound_arrival_time || dt._itbmo_user_return_arrival_time)return;
       const occupied=new Set(trips.filter(other=>other!==dt).map(other=>Math.max(1,Number(other.day||1))));
       const candidate=_v71CandidateDayOrder_(st.days,requested).find(day=>{
         if(occupied.has(day))return false;
@@ -16200,13 +16217,13 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
     const st=story.stays[i],prev=story.stays[i-1];
     if(!st.departureDate||!st.departureTime)continue;
     const needs=!st.arrivalDate||!st.arrivalTime||!st.transportMode||st.transportMode==='recommend';
-    if(needs)movements.push({movement_id:`main:${st.id}`,kind:'main',origin:prev.place,destination:st.place,departure_date:st.departureDate,earliest_departure:st.departureTime,user_mode:st.transportMode||null,user_arrival_date:st.arrivalDate||null,user_arrival_time:st.arrivalTime||null});
+    if(needs)movements.push({movement_id:`main:${st.id}`,kind:'main',origin:prev.place,destination:st.place,departure_date:st.departureDate,earliest_departure:st.departureTime,user_mode:st.transportMode||null,user_arrival_date:st._itbmo_user_arrival_date||null,user_arrival_time:st._itbmo_user_arrival_time||null});
   }
   for(const st of story.stays)for(const dt of (st.dayTrips||[])){
     if(!dt.place)continue;
     const date=_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1));
     const needs=![dt.outbound?.departureTime,dt.outbound?.arrivalTime,dt.return?.departureTime,dt.return?.arrivalTime].every(Boolean)||!dt.outbound?.transportMode||!dt.return?.transportMode;
-    if(needs)movements.push({movement_id:`daytrip:${dt.id}`,kind:'daytrip',origin:st.place,destination:dt.place,departure_date:date,earliest_departure:dt.outbound?.departureTime||'08:00',must_return_same_day:true,user_return_by:dt.return?.arrivalTime||null,user_mode:dt.outbound?.transportMode||null});
+    if(needs)movements.push({movement_id:`daytrip:${dt.id}`,kind:'daytrip',origin:st.place,destination:dt.place,departure_date:date,earliest_departure:dt._itbmo_user_outbound_departure_time||dt.outbound?.departureTime||'08:00',must_return_same_day:true,user_return_by:dt._itbmo_user_return_arrival_time||null,user_return_departure_time:dt._itbmo_user_return_departure_time||null,user_outbound_departure_time:dt._itbmo_user_outbound_departure_time||null,user_outbound_arrival_time:dt._itbmo_user_outbound_arrival_time||null,user_return_arrival_time:dt._itbmo_user_return_arrival_time||null,user_mode:dt.outbound?.transportMode||null});
   }
   if(!movements.length)return {ok:true,resolved:0};
   console.info('[ITBMO ROUTE RESOLVER] resolving',movements);
@@ -16244,22 +16261,68 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
       console.error('[ITBMO ROUTE RESOLVER] incomplete day-trip round trip',dt.place,r);
       throw new Error(`ROUTE_RESOLVER_DAYTRIP_ROUNDTRIP_INCOMPLETE:${dt.place}`);
     }
-    if(!dt.outbound.transportMode)dt.outbound.transportMode=_routeResolvedPrincipalMode_(legs,'outbound',out.mode||r.primary_mode||'other');
-    if(!dt.outbound.departureTime)dt.outbound.departureTime=out.departure_time||r.departure_time||'08:00';
-    if(!dt.outbound.arrivalTime)dt.outbound.arrivalTime=outLast.arrival_time||out.arrival_time||'';
-    if(!dt.return.transportMode)dt.return.transportMode=_routeResolvedPrincipalMode_(legs,'return',ret.mode||dt.outbound.transportMode||r.primary_mode||'other');
-    if(!dt.return.departureTime)dt.return.departureTime=ret.departure_time||r.return_departure_time||'';
-    if(!dt.return.arrivalTime)dt.return.arrivalTime=retLast.arrival_time||ret.arrival_time||r.return_arrival_time||'';
-    if(!dt.return.departureTime||!dt.return.arrivalTime){
-      console.error('[ITBMO ROUTE RESOLVER] day-trip return unresolved',dt.place,r);
-      throw new Error(`ROUTE_RESOLVER_DAYTRIP_RETURN_MISSING:${dt.place}`);
+    // V279: resolve into a detached candidate. User-provided clocks are immutable.
+    // In particular, return.departureTime is NOT a return-arrival deadline.
+    const fixedOut=String(dt._itbmo_user_outbound_departure_time||'');
+    const fixedReturn=String(dt._itbmo_user_return_departure_time||'');
+    const fixedOutArrival=String(dt._itbmo_user_outbound_arrival_time||'');
+    const fixedReturnArrival=String(dt._itbmo_user_return_arrival_time||'');
+    const candidateOut={...dt.outbound};
+    const candidateRet={...dt.return};
+    if(!candidateOut.transportMode)candidateOut.transportMode=_routeResolvedPrincipalMode_(legs,'outbound',out.mode||r.primary_mode||'other');
+    candidateOut.departureTime=fixedOut||out.departure_time||r.departure_time||candidateOut.departureTime||'';
+    candidateOut.arrivalTime=fixedOutArrival||outLast.arrival_time||out.arrival_time||candidateOut.arrivalTime||'';
+    if(!candidateRet.transportMode)candidateRet.transportMode=_routeResolvedPrincipalMode_(legs,'return',ret.mode||candidateOut.transportMode||r.primary_mode||'other');
+    // Route-level return departure describes the principal return journey; the
+    // first return leg may instead be a local attraction-to-station transfer.
+    candidateRet.departureTime=fixedReturn||r.return_departure_time||ret.departure_time||candidateRet.departureTime||'';
+    candidateRet.arrivalTime=fixedReturnArrival||r.return_arrival_time||retLast.arrival_time||ret.arrival_time||candidateRet.arrivalTime||'';
+    // V279: if the traveler fixed the return departure, translate the resolver's
+    // estimated return chain to that anchor, preserving estimated durations.
+    // Do not invent a published timetable: these remain planning estimates.
+    if(fixedReturn && !fixedReturnArrival && r.return_departure_time){
+      const original=_hhmmToMinutes_(r.return_departure_time);
+      const selected=_hhmmToMinutes_(fixedReturn);
+      const estimatedArrival=_hhmmToMinutes_(r.return_arrival_time||retLast.arrival_time);
+      if(original!=null&&selected!=null&&estimatedArrival!=null&&original!==selected){
+        const duration=estimatedArrival-original;
+        if(duration>0 && selected+duration<1440){
+          const clock=mins=>`${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
+          candidateRet.arrivalTime=clock(selected+duration);
+          const delta=selected-original;
+          for(const leg of returnLegs){
+            for(const field of ['departure_time','arrival_time']){
+              const minutes=_hhmmToMinutes_(leg[field]);
+              if(minutes!=null && minutes+delta>=0 && minutes+delta<1440)leg[field]=clock(minutes+delta);
+            }
+          }
+          r.return_departure_time=fixedReturn;
+          r.return_arrival_time=candidateRet.arrivalTime;
+          r.arrival_time=candidateRet.arrivalTime;
+          console.info('[ITBMO V279 ROUTE RESOLVER] reanchored estimated return to traveler departure',{place:dt.place,departure:fixedReturn,estimated_arrival:candidateRet.arrivalTime});
+        }
+      }
     }
-    const outArrival=_hhmmToMinutes_(dt.outbound.arrivalTime),retDeparture=_hhmmToMinutes_(dt.return.departureTime),retArrival=_hhmmToMinutes_(dt.return.arrivalTime);
-    if(outArrival==null||retDeparture==null||retArrival==null||retDeparture<=outArrival||retArrival<=retDeparture){
-      console.error('[ITBMO ROUTE RESOLVER] invalid day-trip chronology',dt.place,{outbound:dt.outbound,return:dt.return,route:r});
-      throw new Error(`ROUTE_RESOLVER_DAYTRIP_CHRONOLOGY_INVALID:${dt.place}`);
+    const outDeparture=_hhmmToMinutes_(candidateOut.departureTime);
+    const outArrival=_hhmmToMinutes_(candidateOut.arrivalTime);
+    const retDeparture=_hhmmToMinutes_(candidateRet.departureTime);
+    const retArrival=_hhmmToMinutes_(candidateRet.arrivalTime);
+    const userReturnDeparture=fixedReturn||null;
+    const resolverReturnDeparture=r.return_departure_time||ret.departure_time||null;
+    if(outDeparture==null||outArrival==null||outArrival<=outDeparture||retDeparture==null||retArrival==null||retDeparture<=outArrival||retArrival<=retDeparture){
+      console.error('[ITBMO V279 ROUTE RESOLVER] invalid day-trip chronology',{place:dt.place,movement_id:`daytrip:${dt.id}`,fixed_user_return_departure:userReturnDeparture,resolver_return_departure:resolverReturnDeparture,outbound_departure:candidateOut.departureTime,outbound_arrival:candidateOut.arrivalTime,return_departure:candidateRet.departureTime,return_arrival:candidateRet.arrivalTime,route:r});
+      const error=new Error(`ROUTE_RESOLVER_DAYTRIP_CHRONOLOGY_INVALID:${dt.place}`);
+      error.code='ROUTE_RESOLVER_DAYTRIP_CHRONOLOGY_INVALID';
+      throw error;
     }
-    dt.outbound.timeStatus=dt.return.timeStatus='estimated';dt.routeResolution={summary:r.summary||'',legs,alternatives:Array.isArray(r.alternatives)?r.alternatives:[],confidence:r.confidence||'planning_estimate'};resolved++;
+    // Reject a resolver that ignored the fixed traveler clocks. The original
+    // objects remain intact and the paid trip remains retryable.
+    if((fixedOut && String(r.departure_time||out.departure_time||'')!==fixedOut)||(fixedReturn && String(resolverReturnDeparture||'')!==fixedReturn)){
+      console.warn('[ITBMO V279 ROUTE RESOLVER] traveler clocks differ from proposed service; retaining traveler input',{place:dt.place,outbound_user:fixedOut,outbound_resolved:r.departure_time||out.departure_time,return_user:fixedReturn,return_resolved:resolverReturnDeparture});
+    }
+    Object.assign(dt.outbound,candidateOut);
+    Object.assign(dt.return,candidateRet);
+    dt.outbound.timeStatus=(fixedOut||fixedOutArrival)?'user_fixed':'estimated';dt.return.timeStatus=(fixedReturn||fixedReturnArrival)?'user_fixed':'estimated';dt.routeResolution={summary:r.summary||'',legs,alternatives:Array.isArray(r.alternatives)?r.alternatives:[],confidence:r.confidence||'planning_estimate'};resolved++;
   }
   if(allowReallocation){
     const adjustments=_v71ReassignIncompatibleEstimatedDayTrips_(story);
