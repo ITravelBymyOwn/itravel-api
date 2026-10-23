@@ -23,7 +23,7 @@
 
 
 const ITBMO_RUNTIME_BUILD='V271';
-const ITBMO_RUNTIME_ASSET='planner.js?v=285';
+const ITBMO_RUNTIME_ASSET='planner.js?v=286';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -8191,7 +8191,10 @@ function _v3HardBlockingCodes_(){
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','ORPHAN_TRANSFER_ORIGIN','MISSING_REGIONAL_RETURN','WRONG_OVERNIGHT_BASE',
-    'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT'
+    'INVENTED_DEPARTURE_LOGISTICS','ROW_TOO_SHORT',
+    // V286: an authoritative night experience missing or replaced by logistics
+    // cannot be checkpointed locally and rediscovered as a global merge failure.
+    'MISSING_NIGHT_OVERLAY_EXECUTION','NIGHT_OVERLAY_TOO_SHORT','ORPHAN_NIGHT_CONTINUATION'
   ]);
 }
 
@@ -9375,7 +9378,20 @@ function _v3StampStayRows_(rows=[],unit={}){
       return Math.abs(start-bs)-Math.abs(start-as);
     });
     const window=candidates[0];
-    if(!window) return [];
+    if(!window){
+      // V286 diagnostic: never silently lose a Luna row at the physical-window
+      // boundary. Keep the safety rejection, but expose its exact clock and the
+      // authoritative owner-day windows so night repair can be diagnosed.
+      const dayWindows=windows.filter(w=>Number(w?.day)===day);
+      if(dayWindows.some(w=>String(w?.role||'')==='NIGHT_OVERLAY')){
+        console.warn('[ITBMO V286 NIGHT ROW REJECTED]',{
+          stay_unit_id:unit.id,day,activity:row?.activity||null,
+          start:row?.start||null,end:row?.end||null,
+          candidate_windows:dayWindows.map(w=>({id:w.window_id,role:w.role,start:w.start,end:w.end,crosses_midnight:Boolean(w.crosses_midnight)}))
+        });
+      }
+      return [];
+    }
     const physical=window.location||unit.base_destination||unit.physical_destination;
     const directive=(unit.tie_structure?.day_directives||[]).find(d=>Number(d?.day)===day)||null;
     const overlays=(unit.tie_structure?.night_overlays||[]).filter(o=>Number(o?.preferred_day)===day);
@@ -9663,6 +9679,16 @@ ${JSON.stringify(repairRows)}
 
 LOCAL VALIDATOR FINDINGS TO CORRECT:
 ${JSON.stringify(repairFindings)}
+
+V286 NIGHT OVERLAY REPAIR: For every NIGHT_OVERLAY referenced in the validator findings,
+use the authoritative planning_windows and tie_structure to restore the actual
+selected nocturnal EXPERIENCE (not only departure, preparation, transfer, rest,
+or return). Include its coherent outbound/experience/return chain. Preserve the
+owner global day for every post-midnight row; represent after-midnight clocks
+using the existing owner-day convention. Keep the entire chain within the
+night window, with the intended duration. Do not invent an experience if the
+contract does not authorize one; do not replace a selected night anchor with
+a generic evening walk. This requirement is part of the local QA gate.
 
 Repair ONLY the supplied local row block(s). Rows not supplied are immutable and must not be recreated, summarized or deleted. Preserve the semantic identity of every healthy experience anchor. V275: ordinary lunch/midday meal is at most 60 minutes; preserve genuine special culinary experiences and confirmed user-fixed reservations. Never use a 2–3 hour ordinary lunch to absorb slack. V129: never solve a chronology defect by stretching a flexible meal/rest/access/buffer to absorb slack before a later experience; keep utility duration semantically normal and protect downstream selected/CORE/HIGH dwell. User-fixed/reservation-hard utility facts remain immutable. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
 `.trim();
