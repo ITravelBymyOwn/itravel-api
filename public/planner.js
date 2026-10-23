@@ -10224,6 +10224,8 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     }))};
 
     if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:baseDate||null,masterPlan:[],audit:null};
+    // An interrupted or failed new commit must never inherit a prior seal.
+    delete itineraries[city].v292_canonical_seal;
     itineraries[city].masterPlan=master;
     itineraries[city].audit=report;
 
@@ -10286,6 +10288,17 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       error.v3BlockingErrors=postStoreErrors;
       throw error;
     }
+    // Seal exactly the rows that passed the post-storage hard audit. This seal
+    // survives checkpoint hydration and is scoped to the active paid trip.
+    const committedCoverage=_v291Coverage_(storedRows,generated.contract,dest.days);
+    if(committedCoverage.missing.length) throw new Error(`V292_CANONICAL_COVERAGE_BLOCK:${committedCoverage.missing.join(',')}`);
+    itineraries[city].v292_canonical_seal={
+      schema:1,trip_id:String(currentTripId||''),city,total_days:Math.max(1,Number(dest.days)||1),
+      required_days:[...committedCoverage.required],
+      transit_only_empty:[...committedCoverage.transit_only_empty]
+    };
+    if(!_generationCityComplete_(city)) throw new Error('V292_CANONICAL_COMPLETION_BLOCK');
+    console.info('[ITBMO V292 CANONICAL COMPLETION]',{city,required_days:committedCoverage.required,transit_only_empty:committedCoverage.transit_only_empty});
     renderCityTabs();
     if(!activeCity) setActiveCity(city);
     if(activeCity===city) renderCityItinerary(city);
@@ -10296,6 +10309,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     record();
     return true;
   }catch(error){
+    if(itineraries?.[city]) delete itineraries[city].v292_canonical_seal;
     _v3LastFailureByCity_[city]=String(error?.message||error?.code||'V3_FAILED');
     console.error(`[ITBMO V3] trip generation blocked after internal recovery · root=${city}`,{message:String(error?.message||error),blocking_errors:error?.v3BlockingErrors||[],error});
     /* V3 is authoritative. Never fall back automatically to the historical
@@ -10614,8 +10628,25 @@ function _generationISOToDMY_(value){
 function _generationCityComplete_(city){
   const destination=savedDestinations.find(x=>x.city===city);
   const totalDays=Math.max(0,Number(destination?.days || 0));
-  const byDay=itineraries?.[city]?.byDay || {};
+  const itinerary=itineraries?.[city];
+  const byDay=itinerary?.byDay || {};
   if(!totalDays) return false;
+  if(ITBMO_GENERATION_ENGINE==='v3'){
+    // V292: Only a successfully audited canonical V3 commit may declare a
+    // transit-only calendar day empty. Never infer this from absent rows or
+    // from a stale completed_cities flag in a recovered checkpoint.
+    const seal=itinerary?.v292_canonical_seal;
+    if(!seal || seal.schema!==1 || String(seal.trip_id)!==String(currentTripId||'') ||
+       seal.city!==city || seal.total_days!==totalDays || !Array.isArray(seal.required_days) ||
+       !Array.isArray(seal.transit_only_empty) || itinerary?.audit?.errors?.length) return false;
+    const required=new Set(seal.required_days);
+    const allowedEmpty=new Set(seal.transit_only_empty);
+    for(let day=1;day<=totalDays;day++){
+      if(!Array.isArray(byDay[day])) return false;
+      if(byDay[day].length===0 && (required.has(day)||!allowedEmpty.has(day))) return false;
+    }
+    return true;
+  }
   for(let day=1;day<=totalDays;day++){
     if(!Array.isArray(byDay[day]) || byDay[day].length===0) return false;
   }
