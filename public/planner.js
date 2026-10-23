@@ -8980,7 +8980,14 @@ async function _tieCallStructure_(request){
     const res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'tie_structure',tie_request:request})});
     const data=await res.json();
     if(data?.usage)_captureExactUsage_(data);
-    if(!res.ok||!data?.ok||!data?.plan)throw new Error(data?.error?.code||`TIE_HTTP_${res.status}`);
+    if(!res.ok||!data?.ok||!data?.plan){
+      // V297: expose the server's *validation codes*, never the model response,
+      // traveler details or raw request. The server already returns these codes.
+      const code=String(data?.error?.code||`TIE_HTTP_${res.status}`);
+      const details=Array.isArray(data?.error?.details)?data.error.details.map(x=>String(x).slice(0,160)).slice(0,24):[];
+      console.warn('[ITBMO V297 TIE REJECTION]',{code,http_status:res.status,validation_errors:details,model_calls:Number(data?.usage?.model_calls||0)});
+      throw new Error(code+(details.length?':'+details.join('|'):''));
+    }
     const validation=_tieValidateBrowser_(data.plan,request);
     if(!validation.ok)throw new Error(`TIE_BROWSER_VALIDATION:${validation.errors.join(',')}`);
     const value={plan:data.plan,fingerprint,duration_ms:Math.round(performance.now()-started)};
@@ -9614,9 +9621,6 @@ Plan ONLY the useful time supplied for this physical planning unit. Its type is 
 - V118 NIGHT END: after the nocturnal chain returns to the lodging/base, END that owner-day chain. Do not create a standalone "sleep", "rest", "hydrate" or "recovery" itinerary row merely to occupy post-return clock time. Recovery belongs in next-day pacing, not as filler.
 - V118 TEMPORAL PROSE: descriptions must agree with owner-day assignment. Never say "before tonight's/later tonight's" experience when the referenced selected experience is owned by another itinerary day.
 - AURORA EXECUTION: if the preferred overlay is an aurora/northern-lights opportunity, preserve the TIE strategy. A guided mobile aurora hunt is a genuine TOUR_EXPERIENCE: explain that the route/location may change to seek better sky conditions, recommend the guided hunt when TIE marks guided_hunt, and mention self-drive/local dark-sky observation as an alternative when supplied. Use the full extended NIGHT_OVERLAY window rather than collapsing it to a short fixed viewpoint visit. Set commerce_context.guided_tour_value=high and commercial_eligible=true for the hunt so Context Intelligence can surface distinct guided-tour options without inventing an operator. If conditions are poor, state that the opportunity may be moved to another eligible night subject to fatigue and itinerary constraints; never promise a sighting.
-- V296 REGIONAL DEPARTURE COMPLETENESS: for every model-owned regional excursion, the FIRST chronological row must be an explicit travel leg departing the actual overnight base (lodging/base_destination) and arriving at the first regional attraction. Do not start the day at a waterfall, temple, archaeological site or any regional POI without that outbound drive/train/boat leg. Include the travel time inside the available window, not as invisible pre-09:00 travel. The LAST chain must explicitly return to the base unless an authoritative fixed boundary changes the overnight location. Do not modify fixed user transfers.
-- V296 CROSS-DAY NOVELTY: other physical units are generated independently, so do not assume a nearby museum, landmark or indoor visit is unvisited merely because it is absent from this unit's rows. Follow TIE owner-day allocations, and when a selected owner-day experience overlaps another allocated experience family, favor a different named complementary anchor instead of a repeat. Never replace a selected defining anchor with generic filler.
-- V296 NIGHT RECOVERY: if previous_day_recovery_context indicates a post-midnight finish, calculate the real physical finish and leave sufficient realistic sleep/preparation time before the next day's first departure, especially before self-driving. Never label a 09:00 regional departure after a 01:30 lodging return as a protected recovery morning. If the planning window cannot accommodate humane pacing, explicitly disclose the conflict rather than silently claiming recovery.
 - For REGIONAL_FULL or REGIONAL_HALF units, build a coherent route through the supplied route_manifest in sensible order, respecting minimum dwell and the base return. The manifest is a strategic corridor; do not replace it with unrelated city filler. Build chronology as ONE dependency chain, not as independently estimated appointments: finish current experience -> add the real movement block -> only then start the next experience. Once a row has an end time, no downstream transfer or experience may retain an earlier pre-imagined clock. Recompute downstream clocks from the chain. If the corridor cannot fit, drop OPTIONAL then DROP_FIRST stops before compressing CORE/HIGH anchors or overlapping rows. This rule is global for every multi-anchor corridor and does not depend on destination identity.
 - V118 REFINEMENT: do not create generic café/shopping/flexible-walk blocks solely to consume remaining window time. If the day's meaningful experience is complete, end naturally. A micro-stop or optional scenic pause is supportive slack and must not masquerade as a selected anchor. Avoid repeating a POI/experience family already meaningfully visited on another day when an equally coherent distinct close exists; if not, prefer ending early over filler.
 - V118 INTERNAL COHERENCE: when a general complex/area block is followed by a dedicated sub-anchor block, do not describe that sub-anchor as already completed inside the earlier general block. Transport alternatives may have different durations; keep the scheduled interval consistent with at least one explicitly offered mode and do not silently use the slowest alternative as mandatory.
@@ -9701,15 +9705,14 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
         const base=String(unit?.base_destination||'').trim();
         const baseKey=_canonicalText_(base),fromKey=_canonicalText_(first?.from||'');
         const baseCompatible=_v111LocationsCompatible_(base,first?.from||'',base) || (baseKey&&fromKey&&(fromKey.includes(baseKey)||baseKey.includes(fromKey)));
-        // V296: A regional excursion cannot start with a destination attraction
-        // without an outbound leg. Check only non-fixed TIE regional units and
-        // keep the finding local so the existing scoped repair owns the fix.
-        // An arrival/transfer boundary supplied by the traveler is authoritative.
-        const hasFixedOutbound=Boolean(unit?.inbound_boundary && Number(unit.inbound_boundary.day)===Number(day));
-        if(first && base && !hasFixedOutbound && !_isPureTransportRow_(first)){
+        // V297: reject a regional unit whose first substantive row starts at the
+        // attraction. No destination lists, no changes to fixed inbound boundaries.
+        // This runs inside existing local QA/repair, not at TIE structure time.
+        const fixedInbound=Boolean(unit?.inbound_boundary && Number(unit.inbound_boundary.day)===Number(day));
+        if(first && base && !fixedInbound && !_isPureTransportRow_(first)){
           regionalFirstOrigin.push({code:'MISSING_REGIONAL_OUTBOUND',day:Number(day),row:1,
             base_destination:base,first_place:first.from||first.to||'',
-            instruction:'This REGIONAL owner-day begins at the overnight base. Insert a realistic explicit outbound transport row from the base to the first regional attraction, including road time and seasonal driving margin, then shift subsequent model-owned rows chronologically. Preserve all user-fixed times, selected CORE/HIGH experiences and the explicit return. Never pretend the traveler was already at the first attraction.'});
+            instruction:'The first regional row must be a real transport movement from the overnight base to the first regional attraction. Insert the missing outbound movement within the day clock, shift downstream model-owned rows, and retain CORE/HIGH attractions and the return. Never modify user-fixed transfers.'});
         }
         if(first && base && _isPureTransportRow_(first) && first.from && !baseCompatible){
           regionalFirstOrigin.push({code:'ORPHAN_TRANSFER_ORIGIN',day:Number(day),row:1,previous_to:base,current_from:first.from,activity:first.activity||null,instruction:'This regional owner-day begins at the overnight base. Start the first model-owned transfer from that base unless an authoritative fixed movement explicitly establishes another origin. Never invent a hidden pre-route movement.'});
@@ -10054,37 +10057,36 @@ function _v294QualityObservations_(rows=[],units=[]){
       anchors.push({day,experience:name,matched:matching.length>0,verification_required:Boolean(item.verification_required),unit_id:unit.id||null});
     }
   }
-  // V296 supplementary diagnostics: different wording can describe the same
-  // venue; report only, never delete, reschedule or force a model retry.
+  // V297 read-only: same venue visited substantively on different days.
+  // Conservative: exact canonical POI only; never delete or rewrite a row.
   const venueRepeats=[];
   for(let i=0;i<experiences.length;i++)for(let j=0;j<i;j++){
     const a=experiences[j],b=experiences[i];
-    if(a.day===b.day||!_arePoiAliases_(a.poi,b.poi))continue;
-    const key=_canonicalText_(a.poi);
-    if(key.length<7)continue;
-    if(!venueRepeats.some(x=>x.first_day===a.day&&x.repeat_day===b.day&&x.poi===a.poi))
-      venueRepeats.push({first_day:a.day,repeat_day:b.day,poi:a.poi,first_activity:a.row.activity,repeat_activity:b.row.activity,review_required:true});
+    const venue=_canonicalText_(a.poi);
+    if(a.day===b.day||venue.length<8||venue!==_canonicalText_(b.poi))continue;
+    if(!venueRepeats.some(x=>x.poi===a.poi&&x.first_day===a.day&&x.repeat_day===b.day))
+      venueRepeats.push({poi:a.poi,first_day:a.day,repeat_day:b.day,first_activity:a.row.activity,repeat_activity:b.row.activity,review_required:true});
   }
+  // The chronology of +1 night rows has multiple legacy encodings. Observe
+  // explicit NIGHT_OVERLAY windows instead of guessing from 00:xx row strings.
   const nightRecovery=[];
-  const days=[...new Set(ordered.map(r=>Number(r.day)).filter(Boolean))];
-  for(const day of days){
-    const prior=ordered.filter(r=>Number(r.day)===day-1);
-    const current=ordered.filter(r=>Number(r.day)===day);
-    const afterMidnight=prior.filter(r=>{
-      const start=_hhmmToMinutes_(r.start),end=_hhmmToMinutes_(r.end);
-      return start!=null&&end!=null&&(start>=1440||end>1440||end<start);
-    });
-    if(!afterMidnight.length||!current.length)continue;
-    const lastEnd=Math.max(...afterMidnight.map(r=>{
-      const st=_hhmmToMinutes_(r.start),en=_hhmmToMinutes_(r.end);
-      return en<st?en+1440:en;
-    }));
-    const firstStart=_hhmmToMinutes_(current[0].start);
-    if(firstStart==null)continue;
-    const elapsed=1440+firstStart-lastEnd;
-    if(elapsed<600)nightRecovery.push({day,previous_day:day-1,rest_opportunity_minutes:elapsed,first_activity:current[0].activity,review_required:true});
+  for(const u of units||[]){
+    const nightWindows=(u.windows||[]).filter(w=>String(w?.role||'')==='NIGHT_OVERLAY');
+    for(const w of nightWindows){
+      const day=Number(w.day),next=ordered.filter(r=>Number(r.day)===day+1).sort(_v114LogicalRowCompare_);
+      if(!next.length)continue;
+      const endText=String(w.end||'');const match=endText.match(/(\d{1,2}):(\d{2})/);
+      if(!match)continue;
+      const endClock=Number(match[1])*60+Number(match[2]);
+      const explicitNext=/\+1|next.day|siguiente|翌日/i.test(endText)||endClock<360;
+      if(!explicitNext)continue;
+      const first=_hhmmToMinutes_(next[0].start);
+      if(first==null)continue;
+      const gap=first-endClock;
+      if(gap<600)nightRecovery.push({previous_day:day,day:day+1,minimum_observed_gap_minutes:gap,first_activity:next[0].activity,review_required:true,note:'Window end may exclude final return; check actual lodging return.'});
+    }
   }
-  return {schema:'v296_observability_only',experience_rows:experiences.length,possible_repeats:repeats,possible_venue_repeats:venueRepeats,night_recovery_advisories:nightRecovery,selected_anchors:anchors.length,unmatched_selected_anchors:anchors.filter(a=>!a.matched),matched_selected_anchors:anchors.filter(a=>a.matched).length};
+  return {schema:'v297_observability_only',experience_rows:experiences.length,possible_repeats:repeats,possible_venue_repeats:venueRepeats,night_recovery_advisories:nightRecovery,selected_anchors:anchors.length,unmatched_selected_anchors:anchors.filter(a=>!a.matched),matched_selected_anchors:anchors.filter(a=>a.matched).length};
 }
 
 function _v3DedupeMergedStayRows_(rows=[]){
@@ -10300,7 +10302,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     console.info('[ITBMO V266 CROSS-STAY ADVISORY] trip',_v266CrossStayAdvisories_(rows));
     console.info('[ITBMO V276 QUALITY ADVISORY] trip',_v274QualityAdvisories_(rows,generated.contract));
     // V294: observe TIE execution and possible cross-day repeats; never block publication.
-    try{console.info('[ITBMO V296 GLOBAL EXPERIENCE QUALITY]',_v294QualityObservations_(rows,generated.units||[]));}
+    try{console.info('[ITBMO V297 GLOBAL EXPERIENCE QUALITY]',_v294QualityObservations_(rows,generated.units||[]));}
     catch(qualityError){console.warn('[ITBMO V294 QUALITY OBSERVATION UNAVAILABLE]',String(qualityError?.message||qualityError));}
     _v3LogAuditDetails_('MERGED TRIP HARD AUDIT','trip','all-stays',blockingErrors);
     if(blockingErrors.length){
