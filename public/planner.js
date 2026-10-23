@@ -3812,7 +3812,7 @@ function _immersiveRenderOverview_(){
   const copy=_immersiveViewerCopy_(),grid=qs('#itinerary-workspace-cities'),cities=_immersiveAvailableCities_(); if(!grid)return;
   qs('#itinerary-workspace-kicker').textContent=copy.overviewKicker;qs('#itinerary-workspace-title').textContent=copy.overviewTitle;qs('#itinerary-workspace-intro').textContent=copy.overviewIntro;
   qs('#itinerary-workspace-trip-tools-kicker').textContent=copy.wholeTrip;qs('#itinerary-workspace-trip-tools-title').textContent=copy.wholeTripTitle;qs('#itinerary-workspace-trip-tools-copy').textContent=copy.wholeTripCopy;qs('#itinerary-workspace-coming').textContent=copy.coming;
-  const totalDays=cities.reduce((s,c)=>s+_immersiveDaysForCity_(c).length,0),summary=qs('#itinerary-workspace-summary'); if(summary)summary.textContent=`${effectiveCities.length} ${effectiveCities.length===1?copy.citySingular:copy.cityPlural} · ${totalDays} ${totalDays===1?copy.daySingular:copy.dayPlural}`;
+  const snapshot=_workspaceSnapshotViews_(),dates=new Set();(snapshot.destinations||[]).forEach(d=>{const base=parseDMY(d.baseDate||'');if(base)for(let i=0;i<Number(d.days||0);i++)dates.add(formatDMY(addDays(base,i)));});const totalDays=dates.size||cities.reduce((s,c)=>s+_immersiveDaysForCity_(c).length,0),summary=qs('#itinerary-workspace-summary'); if(summary)summary.textContent=`${cities.length} ${cities.length===1?copy.citySingular:copy.cityPlural} · ${totalDays} ${totalDays===1?copy.daySingular:copy.dayPlural}`;
   grid.innerHTML='';
   cities.forEach((city,index)=>{
     const days=_immersiveDaysForCity_(city),card=document.createElement('button');card.type='button';card.className='itinerary-workspace-city-card';
@@ -7868,7 +7868,7 @@ function _v3CanonicalUserFixedTransfers_(baseDate){
   for(let i=1;i<stays.length;i++){
     const st=stays[i],prev=stays[i-1];
     const date=st.departureDate||st.startDate;
-    push({transfer_id:`story-main-${st.id||i}`,day:dayForDate(date),date,origin:prev.place,destination:st.place,departure:st.departureTime||'',arrival:st.arrivalTime||'',mode:st.transportMode||'other',direction:'main',source:(st.departureTime&&st.arrivalTime&&String(st.timeStatus||'').toLowerCase()!=='estimated'&&!st.arrival_route_estimated?'USER_FIXED':'ROUTE_ESTIMATED'),departure_user_fixed:Boolean(st._itbmo_user_departure_time||st.departureTime),arrival_user_fixed:Boolean(st.arrivalTime&&String(st.timeStatus||'').toLowerCase()!=='estimated'&&!st.arrival_route_estimated),arrival_route_estimated:Boolean(st.arrival_route_estimated||String(st.timeStatus||'').toLowerCase()==='estimated'||st.transportStatus==='route_estimated'),route_resolution:st.routeResolution||null});
+    push({transfer_id:`story-main-${st.id||i}`,day:dayForDate(date),date,origin:prev.place,destination:st.place,departure:st.departureTime||'',arrival:st.arrivalTime||'',mode:st.transportMode||'other',direction:'main',source:(st.departureTime&&st.arrivalTime&&String(st.timeStatus||'').toLowerCase()!=='estimated'&&!st.arrival_route_estimated?'USER_FIXED':'ROUTE_ESTIMATED'),departure_user_fixed:Boolean(st._itbmo_user_departure_time||st.departureTime),arrival_user_fixed:Boolean(st.arrivalTime&&String(st.timeStatus||'').toLowerCase()!=='estimated'&&!st.arrival_route_estimated),arrival_route_estimated:Boolean(st.arrival_route_estimated||String(st.timeStatus||'').toLowerCase()==='estimated'||st.transportStatus==='route_estimated'),tourism_ready_time:st.transitOnly?'':(st.arrivalTime||''),tourism_ready_source:st._itbmo_user_arrival_time?'USER':'ITBMO_OR_UNCONFIRMED',transport_arrival_is_tourism_ready:!st.transitOnly&&Boolean(st.arrivalTime),mode_user_fixed:st.transportStatus==='user_defined'&&Boolean(st.transportMode),route_resolution:st.routeResolution||null});
   }
   stays.forEach((st,si)=>_v285EffectiveStoryDayTrips_(st,stays).forEach((dt,di)=>{
     const date=_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1));
@@ -8116,13 +8116,16 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
         return exact || otherFixed || !overlaps;
       });
       let idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
+      const ambiguousTransitDuration=Boolean(t.transit_connection_boundary||t.transport_arrival_is_tourism_ready);
       const fixedRow={
         day:dayNum,start:t.departure,end:t.arrival,
         activity:es?`Traslado de ${t.origin} a ${t.destination}`:`Transfer from ${t.origin} to ${t.destination}`,
         from:t.origin,to:t.destination,
-        transport:[_v3TransportLabel_(t.mode),`~${_minutesToHuman_(duration)}`].filter(Boolean).join(' · '),
+        transport:[_v3TransportLabel_(t.mode),...(ambiguousTransitDuration?[]:[`~${_minutesToHuman_(duration)}`])].filter(Boolean).join(' · '),
         duration:'',
-        notes:t.transit_connection_boundary
+        notes:t.transport_arrival_is_tourism_ready
+          ? (es?`La hora ${t.arrival} corresponde al inicio de disponibilidad para recorridos turísticos, no necesariamente a la llegada del transporte. El intervalo mostrado es una ventana de planificación; NO representa la duración real del viaje. Confirma la hora efectiva de llegada y el transporte antes de reservar.`:`The ${t.arrival} time is the start of sightseeing availability, not necessarily transport arrival. The displayed interval is a planning window, NOT the actual travel duration. Confirm transport arrival before booking.`)
+          : t.transit_connection_boundary
           ? (es?`Conexión en tránsito: salida siguiente fijada a las ${t.arrival}. La llegada estimada por ITBMO (${t.resolver_estimated_arrival||'sin confirmar'}) supera esa salida; este bloque es un límite de planificación, NO una llegada confirmada. Verifica la viabilidad real antes de reservar.`:`Transit connection: next departure fixed at ${t.arrival}. ITBMO's estimated arrival (${t.resolver_estimated_arrival||'unconfirmed'}) exceeds that departure; this block is a planning boundary, NOT a confirmed arrival. Verify actual feasibility before booking.`)
           : t.route_resolution?.summary
           ? `${t.route_resolution.summary}${es?' · Horario estimado para planificación; confirma las opciones reales antes de reservar.':' · Planning estimate; confirm real options before booking.'}`
@@ -8130,7 +8133,7 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
             ? (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. Este traslado cierra esta etapa del viaje; para planificar ${t.destination}, agrégalo como un destino principal.`:`Expected arrival in ${t.destination} at ${t.arrival}. This transfer closes this trip stage; add ${t.destination} as a main destination to plan it.`)
             : (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. La planificación continúa desde ${t.destination} según el tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. Planning continues from ${t.destination} according to the available time.`)),
         kind:'transport',
-        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,transfer_id:t.transfer_id||null,user_fixed:Boolean(t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')),route_estimated:Boolean(t.route_estimated ?? (String(t.source||'').toUpperCase()==='ROUTE_ESTIMATED')),route_resolution:t.route_resolution||null,source:String(t.source||'USER_FIXED').toUpperCase(),booking_need:'compare_options'}
+        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,transfer_id:t.transfer_id||null,user_fixed:Boolean(t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')),route_estimated:Boolean(t.route_estimated ?? (String(t.source||'').toUpperCase()==='ROUTE_ESTIMATED')),route_resolution:t.route_resolution||null,tourism_ready_time:t.tourism_ready_time||null,tourism_ready_source:t.tourism_ready_source||null,mode_user_fixed:Boolean(t.mode_user_fixed),duration_is_planning_window:ambiguousTransitDuration,source:String(t.source||'USER_FIXED').toUpperCase(),booking_need:'compare_options'}
       };
       if(idx>=0) out[idx]={...out[idx],...fixedRow};
       else out.push(fixedRow);
@@ -13092,15 +13095,30 @@ async function exportItineraryToPDF(options={}){
   // V250: PDF headings must use physical geography, never the storage root.
   const pdfISO=(date)=>{const d=parseDMY(String(date||''));return d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`:'';};
   const pdfSame=(a,b)=>Boolean(a&&b&&_arePoiAliases_(String(a),String(b)));
+  // V293: derive the complete ordered physical route for the day. A transit hub
+  // is a route waypoint, not an extra tourist destination or a separate visit.
   const pdfTransferForDay=(day)=>{
     const iso=pdfISO(day?.date),stays=pdfStory?.stays||[];
-    for(let i=1;i<stays.length;i++){
-      const st=stays[i],prev=stays[i-1];
-      const date=String(st?.departureDate||st?.arrivalDate||st?.startDate||'');
-      if(iso&&iso===date&&prev?.place&&st?.place&&!pdfSame(prev.place,st.place))return {origin:String(prev.place),destination:String(st.place)};
+    const legs=[];
+    const isIntercity=r=>r?.from&&r?.to&&!pdfSame(r.from,r.to)&&
+      (/^traslado de |^transfer from |intercity transfer|traslado entre destinos/i.test(String(r.activity||'')) ||
+       (r?.commerce_context?.semantic_type==='TRANSPORT' && !/daytrip|excursi[oó]n/i.test(String(r?.stay_unit_id||''))));
+    (day?.rows||[]).filter(isIntercity).forEach(r=>{
+      if(!legs.some(l=>pdfSame(l.origin,r.from)&&pdfSame(l.destination,r.to)))
+        legs.push({origin:String(r.from),destination:String(r.to),start:String(r.start||'')});
+    });
+    if(!legs.length){
+      for(let i=1;i<stays.length;i++){
+        const st=stays[i],prev=stays[i-1];
+        if(iso===String(st?.departureDate||st?.startDate||'')&&prev?.place&&st?.place&&!pdfSame(prev.place,st.place))
+          legs.push({origin:String(prev.place),destination:String(st.place),start:String(st.departureTime||'')});
+      }
     }
-    const row=(day?.rows||[]).find(r=>r?.from&&r?.to&&!pdfSame(r.from,r.to)&&(/traslado de .* a |transfer from .* to |intercity transfer|traslado entre destinos/i.test(String(r.activity||''))||r._pdfLogistic&&/traslado entre destinos|intercity transfer/i.test(String(r.activity||''))));
-    return row?{origin:String(row.from),destination:String(row.to)}:null;
+    legs.sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+    if(!legs.length)return null;
+    const chain=[legs[0].origin];
+    legs.forEach(leg=>{if(!pdfSame(chain.at(-1),leg.origin))chain.push(leg.origin);if(!pdfSame(chain.at(-1),leg.destination))chain.push(leg.destination);});
+    return {origin:chain[0],destination:chain.at(-1),chain};
   };
   const pdfBaseForDay=(day)=>{
     const trip=_v69PdfDayTripMeta_(day);if(trip?.base)return trip.base;
@@ -13175,7 +13193,7 @@ async function exportItineraryToPDF(options={}){
     }else{
       const base=pdfBaseForDay(day);
       const transfer=pdfTransferForDay(day);
-      const semantic=transfer?`${transfer.origin} → ${transfer.destination}`:(_v106PdfSemanticDayTitle_(day)||route);
+      const semantic=transfer?transfer.chain.join(' → '):(_v106PdfSemanticDayTitle_(day)||route);
       const different=base&&semantic&&!_arePoiAliases_(base,semantic);
       if(transfer){
         font('bold',14);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(semantic),34,135,{maxWidth:W-68});
