@@ -23,7 +23,7 @@
 
 
 const ITBMO_RUNTIME_BUILD='V271';
-const ITBMO_RUNTIME_ASSET='planner.js?v=283';
+const ITBMO_RUNTIME_ASSET='planner.js?v=284';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -9060,7 +9060,11 @@ async function _tieEnrichPhysicalUnits_(contract,units){
 function _v3BuildPhysicalStayUnits_(contract={}){
   if(Array.isArray(contract?.tie_physical_units)&&contract.tie_physical_units.length&&!contract?._tie_bypass)return JSON.parse(JSON.stringify(contract.tie_physical_units));
   const routeDays=[...(contract.route_days||[])].sort((a,b)=>Number(a.day)-Number(b.day));
-  const storyStays=(contract.trip_story_stays||[]).filter(st=>st?.place&&st?.startDate&&!st?.transitOnly);
+  // V284: preserve every explicit stop as a distinct route node, including
+  // repeated transit-only stops. A one-day stop is NEVER a day trip by duration.
+  const allStoryStays=(contract.trip_story_stays||[]).filter(st=>st?.place&&st?.startDate);
+  const storyStays=allStoryStays.filter(st=>!st.transitOnly);
+  const independentPlaces=new Set(allStoryStays.map(st=>_v3PhysicalKey_(st.place)).filter(Boolean));
   const transfers=routeDays.flatMap(d=>(d.fixed_transfers||[]).map((t,transferIndex)=>({...t,transfer_id:t.transfer_id||`day-${Number(d.day)}-transfer-${transferIndex+1}`,day:Number(d.day),date:d.date||null})));
   const findBoundaryTransfer=(origin,destination,targetDate)=>{
     const candidates=transfers.filter(t=>_arePoiAliases_(t.origin,origin)&&_arePoiAliases_(t.destination,destination));
@@ -9081,11 +9085,19 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     const descriptors=storyStays.map((st,index)=>{
       const startISO=String(st.startDate||'');
       const dates=new Set(Array.from({length:Math.max(1,Number(st.days||1))},(_,i)=>_tripStoryAddDays_(startISO,i)));
-      const dayTrips=(st.dayTrips||[]).map(dt=>({
+      const dayTrips=(st.dayTrips||[]).filter(dt=>{
+        // An explicit independent destination wins over an ambiguous duplicated
+        // day-trip entry, even if it has only one day or the route returns to base.
+        const conflict=independentPlaces.has(_v3PhysicalKey_(dt?.place));
+        if(conflict)console.warn('[ITBMO V284 STAY/DAYTRIP COLLISION] Independent stop preserved; conflicting excursion ignored',{stay:st.place,excursion:dt?.place});
+        return !conflict;
+      }).map(dt=>({
         ...dt,
         expected_date:startISO?_tripStoryAddDays_(startISO,Math.max(0,Number(dt.day||1)-1)):null
       }));
-      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
+      const allIndex=allStoryStays.findIndex(x=>x===st);
+      const previous=allIndex>0?allStoryStays[allIndex-1]:null;
+      const next=allIndex>=0?allStoryStays[allIndex+1]||null:null;
       // Prefer the shared transition date. This prevents an earlier Day Trip to
       // the next city from being mistaken for the actual inter-stay boundary.
       const inbound=previous?findBoundaryTransfer(previous.place,st.place,startISO):null;
@@ -9176,7 +9188,11 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     descriptors.forEach(d=>{
       const {st,index,dayTrips}=d;
       const allWindows=(ownedWindows.get(index)||[]).sort((a,b)=>_v114LogicalRowCompare_(a,b));
-      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
+      // Neighbors must include transit-only route nodes. Skipping them makes
+      // Monopoli -> Bari (transit) -> Sofia look like Monopoli -> Sofia.
+      const allIndex=allStoryStays.findIndex(x=>x===st);
+      const previous=allIndex>0?allStoryStays[allIndex-1]:null;
+      const next=allIndex>=0?allStoryStays[allIndex+1]||null:null;
       const parentId=st.id||`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(index+1).padStart(2,'0')}`;
 
       // Resolve whether the traveler fixed the excursion clock. Route-estimated
