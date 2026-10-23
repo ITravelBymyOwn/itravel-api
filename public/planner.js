@@ -23,7 +23,7 @@
 
 
 const ITBMO_RUNTIME_BUILD='V271';
-const ITBMO_RUNTIME_ASSET='planner.js?v=284';
+const ITBMO_RUNTIME_ASSET='planner.js?v=285';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -7844,6 +7844,13 @@ HARD RULES:
 ========================================================= */
 const ITBMO_GENERATION_ENGINE='v3';
 
+// V285: independent Stay identity takes precedence over an ambiguous dayTrip
+// duplicate across ALL contract layers. Never infer an excursion from duration.
+function _v285EffectiveStoryDayTrips_(st,stays){
+  const independent=new Set((stays||[]).filter(s=>s?.place).map(s=>_v3PhysicalKey_(s.place)));
+  return (st?.dayTrips||[]).filter(dt=>!independent.has(_v3PhysicalKey_(dt?.place)));
+}
+
 function _v3CanonicalUserFixedTransfers_(baseDate){
   const story=_currentTravelModelV2_()?.trip_story;
   const stays=Array.isArray(story?.stays)?story.stays:[];
@@ -7861,9 +7868,9 @@ function _v3CanonicalUserFixedTransfers_(baseDate){
   for(let i=1;i<stays.length;i++){
     const st=stays[i],prev=stays[i-1];
     const date=st.departureDate||st.startDate;
-    push({transfer_id:`story-main-${st.id||i}`,day:dayForDate(date),date,origin:prev.place,destination:st.place,departure:st.departureTime||'',arrival:st.arrivalTime||'',mode:st.transportMode||'other',direction:'main',source:'USER_FIXED',departure_user_fixed:true,arrival_route_estimated:st.transportStatus==='route_estimated',route_resolution:st.routeResolution||null});
+    push({transfer_id:`story-main-${st.id||i}`,day:dayForDate(date),date,origin:prev.place,destination:st.place,departure:st.departureTime||'',arrival:st.arrivalTime||'',mode:st.transportMode||'other',direction:'main',source:(st.departureTime&&st.arrivalTime&&String(st.timeStatus||'').toLowerCase()!=='estimated'&&!st.arrival_route_estimated?'USER_FIXED':'ROUTE_ESTIMATED'),departure_user_fixed:Boolean(st._itbmo_user_departure_time||st.departureTime),arrival_user_fixed:Boolean(st.arrivalTime&&String(st.timeStatus||'').toLowerCase()!=='estimated'&&!st.arrival_route_estimated),arrival_route_estimated:Boolean(st.arrival_route_estimated||String(st.timeStatus||'').toLowerCase()==='estimated'||st.transportStatus==='route_estimated'),route_resolution:st.routeResolution||null});
   }
-  stays.forEach((st,si)=>(st.dayTrips||[]).forEach((dt,di)=>{
+  stays.forEach((st,si)=>_v285EffectiveStoryDayTrips_(st,stays).forEach((dt,di)=>{
     const date=_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1));
     // V48 deterministic reconciliation: excursion clock fields are optional for
     // the traveler. If a transient UI/state write has not copied the resolver
@@ -7883,7 +7890,7 @@ function _v3CanonicalUserFixedTransfers_(baseDate){
   // A Day Trip is a round trip by definition. Both directions are first-class
   // canonical movements, even when ITBMO (Route Resolver) estimated the times.
   // Never allow generation/recovery to continue with only the outbound half.
-  stays.forEach((st,si)=>(st.dayTrips||[]).forEach((dt,di)=>{
+  stays.forEach((st,si)=>_v285EffectiveStoryDayTrips_(st,stays).forEach((dt,di)=>{
     const stem=`story-daytrip-${dt.id||`${si}-${di}`}`;
     const out=ledger.find(x=>x.transfer_id===`${stem}-out`);
     const ret=ledger.find(x=>x.transfer_id===`${stem}-return`);
@@ -9085,13 +9092,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     const descriptors=storyStays.map((st,index)=>{
       const startISO=String(st.startDate||'');
       const dates=new Set(Array.from({length:Math.max(1,Number(st.days||1))},(_,i)=>_tripStoryAddDays_(startISO,i)));
-      const dayTrips=(st.dayTrips||[]).filter(dt=>{
-        // An explicit independent destination wins over an ambiguous duplicated
-        // day-trip entry, even if it has only one day or the route returns to base.
-        const conflict=independentPlaces.has(_v3PhysicalKey_(dt?.place));
-        if(conflict)console.warn('[ITBMO V284 STAY/DAYTRIP COLLISION] Independent stop preserved; conflicting excursion ignored',{stay:st.place,excursion:dt?.place});
-        return !conflict;
-      }).map(dt=>({
+      const dayTrips=_v285EffectiveStoryDayTrips_(st,allStoryStays).map(dt=>({
         ...dt,
         expected_date:startISO?_tripStoryAddDays_(startISO,Math.max(0,Number(dt.day||1)-1)):null
       }));
