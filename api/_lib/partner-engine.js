@@ -3,7 +3,7 @@ import zlib from 'zlib';
 import crypto from 'crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
-const SAFE_SLUGS = new Set(['holafly', 'airalo', 'omio', 'viator', 'getyourguide']);
+const SAFE_SLUGS = new Set(['holafly', 'airalo', 'omio', 'viator', 'getyourguide', '12go', 'bookaway', 'discovercars', 'riseandshield']);
 const SIGNING_SECRET = String(
   process.env.PARTNER_CLICK_SIGNING_SECRET || process.env.SUPABASE_SECRET_KEY || ''
 ).trim();
@@ -12,6 +12,11 @@ const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const VIATOR_PID = 'P00318254';
 const VIATOR_MCID = '42383';
 const GYG_PARTNER_ID = '3FZWELC';
+const TWELVEGO_PARTNER_ID = '17129424';
+const BOOKAWAY_AFFILIATE_ID = '4289';
+const BOOKAWAY_OFFER_ID = '34';
+const DISCOVERCARS_AID = 'itravelbymyown';
+const RISE_SHIELD_REF = 'yzyzndg';
 
 
 // Omio Product Feed is the only authority for route existence and deeplink
@@ -248,6 +253,10 @@ function allowedPartnerUrl(slug, rawUrl) {
     if (slug === 'omio') return host === 'omio.sjv.io' || host === 'www.omio.com' || host === 'www.omio.es';
     if (slug === 'holafly') return host === 'holafly.sjv.io' || host.endsWith('.holafly.com') || host === 'holafly.com';
     if (slug === 'airalo') return host === 'airalo.pxf.io' || host.endsWith('.airalo.com') || host === 'airalo.com';
+    if (slug === 'bookaway') return host === 'www.bookaway.com';
+    if (slug === '12go') return host === '12go.asia' || host === 'www.12go.asia';
+    if (slug === 'discovercars') return host === 'discovercars.com' || host === 'www.discovercars.com';
+    if (slug === 'riseandshield') return host === 'riseandshield.com' || host === 'www.riseandshield.com';
     return false;
   } catch (_) {
     return false;
@@ -305,6 +314,10 @@ function hasRequiredAttribution(slug, rawUrl) {
         url.searchParams.get('utm_medium') === 'online_publisher' &&
         Boolean(url.searchParams.get('cmp'));
     }
+    if (slug === 'bookaway') return url.hostname.toLowerCase() === 'www.bookaway.com' && url.searchParams.get('offer_id') === BOOKAWAY_OFFER_ID && url.searchParams.get('aff_id') === BOOKAWAY_AFFILIATE_ID && (url.pathname === '/' || /^\/(?:[a-z]{2}\/)?(?:s|routes)\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname));
+    if (slug === '12go') return url.searchParams.get('z') === TWELVEGO_PARTNER_ID && url.searchParams.get('sub_id') === 'itbmo';
+    if (slug === 'discovercars') return url.searchParams.get('a_aid') === DISCOVERCARS_AID;
+    if (slug === 'riseandshield') return url.searchParams.get('ref') === RISE_SHIELD_REF && url.searchParams.get('tm_source') === 'itbmo';
     if (slug === 'omio') {
       if (url.hostname.toLowerCase() !== 'omio.sjv.io') return false;
       if (!/^\/c\/7727455\/\d+\/7385\/?$/.test(url.pathname)) return false;
@@ -834,8 +847,553 @@ async function resolveOmioTransportOffers(tripId,userId,city,uiLanguage,needs=[]
   return resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs,transportRoutes);
 }
 
+
+function virtualPartner(slug,name,category=''){
+  return {id:null,slug,name,category,status:'approved',enabled:true,metadata:{source:'itbmo_verified_affiliate'}};
+}
+function syntheticOfferId(slug,key='context'){ return `virtual:${slug}:${campaignPart(key)}`; }
+function signedVirtualOffer({partner,targetUrl,placement,need={},city='',resolutionType='verified_affiliate',titleEs='',titleEn='',descriptionEs='',descriptionEn='',confidence='high',travelDate='',routeSegment=null}){
+  if(!allowedPartnerUrl(partner.slug,targetUrl)||!hasRequiredAttribution(partner.slug,targetUrl))return null;
+  return {
+    id:syntheticOfferId(partner.slug,`${placement}-${need?.id||city||'trip'}-${routeSegment?.index||0}-${routeSegment?.commercial_origin||''}-${routeSegment?.commercial_destination||''}`),
+    partner_id:null,offer_key:`${partner.slug}-${placement}`,need_type:clean(need?.need_type,80),placement,
+    title_es:titleEs,title_en:titleEn,description_es:descriptionEs,description_en:descriptionEn,
+    confidence,enabled:true,metadata:{source:'verified_affiliate_adapter'},target_url:undefined,
+    need_id:clean(need?.id,120),entity_name:clean(need?.entity_name||need?.source_activity,180),city:clean(city||need?.city,160),
+    travel_date:clean(travelDate||need?.travel_date||need?.date,40)||null,resolution_type:resolutionType,
+    route_segment:routeSegment||undefined,
+    partner:{id:null,slug:partner.slug,name:partner.name},
+    offer_token:signResolvedOffer({template:null,partner,targetUrl,placement,need,city,resolutionType,travelDate:travelDate||need?.travel_date||'',partnerLocale:''})
+  };
+}
+function twelveGoSlug(value=''){
+  return clean(value,120).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+}
+function twelveGoCommercialMode(value=''){
+  const key=normalizeKey(value);
+  if(/\b(train|rail|tren|ferrocarril)\b/.test(key))return 'train';
+  if(/\b(bus|coach|autobus|autocar)\b/.test(key))return 'bus';
+  if(/\b(ferry|ferri|ferris|boat|barco)\b/.test(key))return 'ferry';
+  if(/\b(van|minivan|shuttle|transfer|furgoneta)\b/.test(key))return 'van';
+  if(/\b(taxi|cab)\b/.test(key))return 'taxi';
+  if(/\b(plane|flight|air|avion|vuelo)\b/.test(key))return 'flight';
+  return '';
+}
+function twelveGoEndpointSane(value=''){
+  const text=clean(value,120).trim();
+  if(text.length<2)return false;
+  const key=normalizeKey(text);
+  if(!key||/^(area|zona|region|centro|center|downtown|hotel|parking|station|estacion|terminal|airport|aeropuerto)$/.test(key))return false;
+  return true;
+}
+function twelveGoAbstractAccessNode(value=''){
+  const key=normalizeKey(clean(value,160));
+  if(!key)return false;
+  // Generic connection/access labels are useful to humans but are not stable
+  // commercial markets. They may be collapsed only when a contiguous ITBMO
+  // transport need provides a concrete trip base and a concrete opposite end.
+  const access=/(access|acceso|connection|conexion|enlace|transfer point|punto de embarque|boarding point)/.test(key);
+  const transport=/(rail|railway|ferrovi|train|tren|bus|coach|ferry|ferri|boat|port|puerto|airport|aeropuerto|terminal|station|estacion|shuttle)/.test(key);
+  return access&&transport;
+}
+function twelveGoResolvedMarket({leg,city,need,index=0}){
+  const mode=twelveGoCommercialMode(leg?.mode); if(!mode)return null;
+  let origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
+  let destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
+  const originAbstract=twelveGoAbstractAccessNode(origin),destinationAbstract=twelveGoAbstractAccessNode(destination);
+  const base=clean(city||need?.city,120);
+  let resolution='sealed_leg';
+  // Preserve the strict sealed-leg rule for ordinary A→B markets. The only
+  // compatibility bridge for older sealed trips is an abstract access node:
+  // BASE → ACCESS_NODE → DESTINATION (or reverse). In that case collapse the
+  // access node to the trip base; never manufacture a market from free text.
+  if(!leg?.commerce_eligible){
+    if(originAbstract&&!destinationAbstract&&twelveGoEndpointSane(base)&&normalizeKey(base)!==normalizeKey(destination)){
+      origin=base; resolution='collapsed_access_chain';
+    }else if(destinationAbstract&&!originAbstract&&twelveGoEndpointSane(base)&&normalizeKey(origin)!==normalizeKey(base)){
+      destination=base; resolution='collapsed_access_chain';
+    }else return null;
+  }else{
+    // Even on a commerce-eligible leg, never send an abstract access label to
+    // 12Go. Collapse it only when the opposite endpoint and trip base are sane.
+    if(originAbstract&&!destinationAbstract&&twelveGoEndpointSane(base)&&normalizeKey(base)!==normalizeKey(destination)){
+      origin=base; resolution='collapsed_access_chain';
+    }else if(destinationAbstract&&!originAbstract&&twelveGoEndpointSane(base)&&normalizeKey(origin)!==normalizeKey(base)){
+      destination=base; resolution='collapsed_access_chain';
+    }else if(originAbstract||destinationAbstract)return null;
+  }
+  if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
+  return {origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode,resolution};
+}
+function twelveGoLegacyRouteMarket(need={},city=''){
+  // Compatibility for pre-ITBMO_ROUTE_V1 travel needs. Historical trips stored
+  // source_route as human-readable A→B text, so the structured parser correctly
+  // returns null. Parse ONLY an explicit route separator; never infer A/B from a
+  // title or narrative sentence. Unicode/ASCII arrow variants are accepted so a
+  // typography character cannot silently suppress a valid provider candidate.
+  const raw=clean(need?.source_route,1000).trim();
+  if(!raw||raw.startsWith('ITBMO_ROUTE_V1|'))return null;
+  const parts=raw.split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).map(v=>clean(v,160).trim()).filter(Boolean);
+  if(parts.length!==2)return null;
+  const mode=twelveGoCommercialMode(need?.transport||need?.entity_name||need?.source_activity||'')||(need?._workspace_physical?'alternative':'');
+  if(!mode)return null;
+  let [origin,destination]=parts;
+  const originAbstract=twelveGoAbstractAccessNode(origin),destinationAbstract=twelveGoAbstractAccessNode(destination);
+  const base=clean(city||need?.city,120);
+  let resolution='legacy_explicit_route';
+  if(originAbstract&&!destinationAbstract&&twelveGoEndpointSane(base)&&normalizeKey(base)!==normalizeKey(destination)){
+    origin=base; resolution='legacy_collapsed_access_chain';
+  }else if(destinationAbstract&&!originAbstract&&twelveGoEndpointSane(base)&&normalizeKey(origin)!==normalizeKey(base)){
+    destination=base; resolution='legacy_collapsed_access_chain';
+  }else if(originAbstract||destinationAbstract){
+    return null;
+  }
+  if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
+  return {origin,destination,date:need?.travel_date||'',index:1,mode,resolution};
+}
+// V185: small audited publisher route inventory. This is DATA, not a global
+// rule that guesses coverage. Expand through authorized provider feeds or the
+// ITBMO_*_VERIFIED_ROUTES JSON environment catalogs. Dates/seat availability
+// are NOT verified by these landing-page references.
+const PUBLISHED_TRANSPORT_ROUTE_URLS = Object.freeze({
+  '12go': Object.freeze({
+    'ollantaytambo|cusco':'https://12go.asia/es/travel/ollantaytambo/cusco',
+    'cusco|ollantaytambo':'https://12go.asia/es/travel/cusco/ollantaytambo',
+    'ollantaytambo|machu picchu':'https://12go.asia/es/travel/ollantaytambo/machu-picchu',
+    'machu picchu|ollantaytambo':'https://12go.asia/es/travel/machu-picchu/ollantaytambo',
+    // V196: both directions confirmed on the publisher's live route pages.
+    'cusco|machu picchu':'https://12go.asia/es/travel/cusco/machu-picchu',
+    'machu picchu|cusco':'https://12go.asia/es/travel/machu-picchu/cusco'
+  }),
+  bookaway: Object.freeze({
+    // V205: official publisher pages verified independently. Route pages do
+    // not imply availability on the itinerary date; preserve signed affiliate
+    // links and independent route/date matching in the existing resolver.
+    'barcelona|madrid':'https://www.bookaway.com/routes/spain/barcelona-to-madrid',
+    'madrid|paris':'https://www.bookaway.com/routes/france/madrid-to-paris',
+    'paris|barcelona':'https://www.bookaway.com/routes/spain/paris-to-barcelona',
+    'ollantaytambo|cusco':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-cusco',
+    'cusco|ollantaytambo':'https://www.bookaway.com/es/routes/peru/cusco-to-ollantaytambo',
+    'ollantaytambo|machu picchu':'https://www.bookaway.com/es/routes/peru/ollantaytambo-to-machu-picchu',
+    'cusco|machu picchu':'https://www.bookaway.com/es/routes/peru/cusco-to-machu-picchu',
+    'machu picchu|ollantaytambo':'https://www.bookaway.com/es/routes/peru/machu-picchu-to-ollantaytambo',
+    'machu picchu|cusco':'https://www.bookaway.com/routes/peru/machu-picchu-to-cusco'
+  })
+});
+// Match explicit city-center pickup labels to their actual base city ONLY
+// when that base is supplied by the current itinerary. Never translate an
+// arbitrary narrative destination into a commercial city or station.
+function publisherEndpoint(value,baseCity=''){
+  const raw=clean(value,160).trim();
+  const base=clean(baseCity,120).trim();
+  if(!base)return raw;
+  const key=normalizeKey(raw),cityKey=normalizeKey(base);
+  if(key===cityKey)return base;
+  if(/^(centro historico|historic center|city center|downtown|centro de|centre ville)\b/.test(key) &&
+     (key.endsWith(` de ${cityKey}`)||key.endsWith(` of ${cityKey}`)||key.endsWith(` ${cityKey}`)))return base;
+  return raw;
+}
+function publishedMarketKey(route,city=''){
+  const a=publisherEndpoint(route.origin,city),b=publisherEndpoint(route.destination,city);
+  return `${normalizeKey(a)}|${normalizeKey(b)}`;
+}
+// V179: Only publisher-confirmed URLs may be represented as route-specific links.
+// Configure provider route catalogues through server-side JSON environment vars:
+// ITBMO_12GO_VERIFIED_ROUTES / ITBMO_BOOKAWAY_VERIFIED_ROUTES.
+// Each maps normalized "origin|destination" to an OFFICIALLY CONFIRMED URL.
+function verifiedTransportUrl(provider,route,city=''){
+  const envName=provider==='12go'?'ITBMO_12GO_VERIFIED_ROUTES':'ITBMO_BOOKAWAY_VERIFIED_ROUTES';
+  let catalog={};
+  try{catalog=JSON.parse(process.env[envName]||'{}');}catch(_){catalog={};}
+  if(!catalog||typeof catalog!=='object'||Array.isArray(catalog))catalog={};
+  const literalKey=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
+  const canonicalKey=publishedMarketKey(route,city);
+  // Explicit partner overrides take precedence. No fuzzy matching or URL
+  // generation from itinerary prose: a route is specific only if listed.
+  const candidate=clean(catalog[literalKey]||catalog[canonicalKey]||
+    PUBLISHED_TRANSPORT_ROUTE_URLS[provider]?.[canonicalKey]||'',1500);
+  if(!candidate)return '';
+  try{
+    const url=new URL(candidate),hostname=url.hostname.toLowerCase();
+    if(url.protocol!=='https:' || (provider==='12go'
+      ? !['12go.asia','www.12go.asia'].includes(hostname)
+      : !['bookaway.com','www.bookaway.com'].includes(hostname)))return '';
+    if(provider==='12go'&&!/^\/(?:es|en)\/travel\/[^/]+\/[^/]+\/?$/.test(url.pathname))return '';
+    if(provider==='bookaway'&&!/^\/(?:[a-z]{2}\/)?routes\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname))return '';
+    return url.toString();
+  }catch(_){return '';}
+}
+
+// V187: publisher-evidenced route graph. Edges are confirmed publisher pages,
+// never guessed slugs. This registry is DATA, not a Cusco-specific algorithm.
+// Additional edges can be supplied through ITBMO_*_VERIFIED_ROUTES JSON.
+function v187RouteRegistry(provider){
+  const envName=provider==='12go'?'ITBMO_12GO_VERIFIED_ROUTES':'ITBMO_BOOKAWAY_VERIFIED_ROUTES';
+  let configured={};try{configured=JSON.parse(process.env[envName]||'{}');}catch(_){configured={};}
+  const entries={...(PUBLISHED_TRANSPORT_ROUTE_URLS[provider]||{}),...(configured&&typeof configured==='object'&&!Array.isArray(configured)?configured:{})};
+  const edges=[];
+  for(const [key,url] of Object.entries(entries)){
+    const parts=key.split('|');if(parts.length!==2||!parts[0]||!parts[1])continue;
+    const route={origin:parts[0],destination:parts[1]};
+    // URL must pass existing host/path checks before becoming an edge.
+    if(!verifiedTransportUrl(provider,route))continue;
+    edges.push({origin:parts[0],destination:parts[1],url:verifiedTransportUrl(provider,route)});
+  }
+  return edges;
+}
+function v187RouteKey(value,city=''){
+  const raw=publisherEndpoint(value,city);
+  return normalizeKey(raw).replace(/^(?:ciudadela de|santuario historico de|historical sanctuary of|historic sanctuary of)\s+/,'').replace(/\b(pueblo|town)\b/g,' ').replace(/\s+/g,' ').trim();
+}
+function v187VerifiedPaths(provider,origin,destination,city=''){
+  const start=v187RouteKey(origin,city),goal=v187RouteKey(destination,city);
+  if(!start||!goal||start===goal)return [];
+  const edges=v187RouteRegistry(provider);
+  const adjacency=new Map();
+  for(const edge of edges){const key=v187RouteKey(edge.origin);if(!adjacency.has(key))adjacency.set(key,[]);adjacency.get(key).push(edge);}
+  const queue=[{node:start,path:[],visited:new Set([start])}];const found=[];
+  while(queue.length&&found.length<2){
+    const state=queue.shift();if(state.path.length>=3)continue;
+    for(const edge of adjacency.get(state.node)||[]){
+      const next=v187RouteKey(edge.destination);if(state.visited.has(next))continue;
+      const path=[...state.path,edge];
+      if(next===goal){found.push(path);continue;}
+      queue.push({node:next,path,visited:new Set([...state.visited,next])});
+    }
+  }
+  return found.sort((a,b)=>a.length-b.length);
+}
+// Verified path is evidence of route publication, NOT date-specific inventory.
+function v187CommercialCandidates(provider,need,city){
+  const payload=parseResolvedRoutePayload(need?.source_route);
+  const pairs=[];
+  if(payload?.parent?.origin&&payload?.parent?.destination)pairs.push({origin:payload.parent.origin,destination:payload.parent.destination});
+  if(payload?.legs?.length)for(const leg of payload.legs){
+    const origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
+    const destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
+    if(origin&&destination)pairs.push({origin,destination});
+  }
+  if(!payload){
+    const parts=clean(need?.source_route,1000).split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).filter(Boolean);
+    if(parts.length===2)pairs.push({origin:parts[0],destination:parts[1]});
+  }
+  const out=[];const seen=new Set();
+  for(const pair of pairs){
+    const origin=publisherEndpoint(pair.origin,city),destination=publisherEndpoint(pair.destination,city);
+    if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||v187RouteKey(origin)===v187RouteKey(destination))continue;
+    // Only expand paths for independently verified publisher edges.
+    const paths=v187VerifiedPaths(provider,origin,destination,city);
+    if(!paths.length)continue;
+    const path=paths[0];
+    for(const [i,edge] of path.entries()){
+      const key=`${v187RouteKey(edge.origin)}|${v187RouteKey(edge.destination)}`;
+      if(seen.has(key))continue;seen.add(key);
+      out.push({origin:edge.origin,destination:edge.destination,index:i+1,date:need?.travel_date||'',mode:'alternative',resolution:'v187_publisher_graph',verified_url:edge.url,journey_origin:origin,journey_destination:destination,connection_count:path.length});
+    }
+  }
+  return out;
+}
+function localTransportMarket(route,need){
+  const values=[route.origin,route.destination];
+  // V183: A city-center pickup is not proof of local travel; regional legs often start there.
+  // Local walking/taxi-only journeys remain filtered by the mode rule below.
+  const label=normalizeKey(`${need?.transport||''} ${need?.source_activity||''}`);
+  return /\b(walk|walking|caminar|caminata|a pie|taxi local|local taxi)\b/.test(label) && need?.need_type!=='intercity_transport';
+}
+// V181: recover regional physical-leg visibility without treating a private-car
+// recommendation as evidence that a provider operates a scheduled service.
+function regionalPhysicalMarket({leg,need,index=0}){
+  const origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
+  const destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
+  if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
+  if(twelveGoAbstractAccessNode(origin)||twelveGoAbstractAccessNode(destination))return null;
+  if(localTransportMarket({origin,destination},need))return null;
+  return {origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode:'alternative',resolution:'physical_leg_unverified'};
+}
+// V182: Workspace sends the exact displayed physical legs separately as
+// transport_routes. Prior versions only consumed source_route on needs, which
+// may be absent or non-commerce-sealed for private/regionally planned legs.
+// This bridge preserves need_id so the UI can attach each partner CTA.
+function partnerWorkspaceRouteNeeds(needs=[],transportRoutes=[],city=''){
+  const base=Array.isArray(needs)?needs.filter(Boolean):[];
+  const byId=new Map(base.map(n=>[clean(n?.id,120),n]));
+  const extra=[];
+  for(const [i,raw] of (Array.isArray(transportRoutes)?transportRoutes:[]).slice(0,48).entries()){
+    const origin=clean(raw?.origin,120),destination=clean(raw?.destination,120);
+    const needId=clean(raw?.need_id,120);
+    if(!origin||!destination||normalizeKey(origin)===normalizeKey(destination))continue;
+    const original=byId.get(needId);
+    const needType=clean(original?.need_type||raw?.need_type,80)||'intercity_transport';
+    const mode=normalizeKey(`${original?.transport||''} ${raw?.mode||''}`);
+    if(needType==='transport_arrangement' && /\b(walk|walking|caminar|a pie|taxi local|local taxi)\b/.test(mode))continue;
+    const route={origin,destination};
+    if(localTransportMarket(route,{...original,need_type:needType}))continue;
+    const id=needId||`workspace-route:${i+1}`;
+    extra.push({...(original||{}),id,need_type:needType,city:clean(original?.city||city,160),travel_date:clean(raw?.travel_date||original?.travel_date,40),source_route:`${origin} → ${destination}`,transport:clean(raw?.mode||original?.transport,100),_workspace_physical:true});
+  }
+  return [...base,...extra];
+}
+// V225: offline eligibility is NOT route publication. Never show a provider-home
+// affiliate link as a route-specific result. Flight-only and airport legs are
+// excluded, including the explicit outbound and return journey boundaries.
+// V226: station access is not a commercial intercity market. Keep station
+// names in real sealed legs, but reject local access/shuttle/taxi legs.
+function v226StationAccess(need,route){
+  const text=normalizeKey(`${need?.entity_name||''} ${need?.source_activity||''} ${need?.transport||''}`);
+  const mode=normalizeKey(`${need?.transport||''} ${route?.mode||''}`);
+  const station=/\b(station|estacion|estacoes|gare|bahnhof|terminal|platform|and[eé]n|atocha|chamartin|hbf)\b/;
+  const local=/\b(taxi|uber|walk|walking|caminar|a pie|metro|subway|underground|local bus|bus local|shuttle|transfer|traslado|acceso|access|llegar a|reach|hacia la estacion|to the station)\b/;
+  if(station.test(text)&&local.test(text))return true;
+  if(station.test(normalizeKey(`${route?.origin||''} ${route?.destination||''}`))&&local.test(mode))return true;
+  return false;
+}
+// V269: a station named "City–Station" and "City centre" are the same
+// local market. This check is endpoint-based and provider-neutral; it does not
+// classify a station in one city to a station in another as local.
+function v269LocalStationCentre(origin='',destination=''){
+  const a=normalizeKey(origin),b=normalizeKey(destination);
+  const station=/\b(station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal|railway|train station)\b/;
+  const centre=/\b(centro|center|centre|downtown|historico|historic|old town|casco antiguo)\b/;
+  const stationCity=v=>{
+    if(!station.test(v))return '';
+    const prefix=v.match(/^(.+?)\s+(?:station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal)\b/);
+    const suffix=v.match(/^(?:station|estacion|stazione|estacao|gare|bahnhof|hbf|terminal)\s+(?:de|del|of|at)?\s*(.+)$/);
+    const candidate=(prefix?.[1]||suffix?.[1]||'').replace(/\b(?:de|del|of|the)\b/g,' ').trim();
+    return candidate.split(' ').filter(Boolean)[0]||'';
+  };
+  const centreCity=v=>{
+    if(!centre.test(v))return '';
+    return v.replace(/\b(?:centro|center|centre|downtown|historico|historic|old|town|casco|antiguo|city|de|del|of|the)\b/g,' ').trim().split(' ').filter(Boolean)[0]||'';
+  };
+  const matches=(st,ct)=>Boolean(station.test(st)&&centre.test(ct)&&stationCity(st)&&centreCity(ct)&&stationCity(st)===centreCity(ct));
+  // A named terminal may omit the word 'station' (e.g. City–Guiomar).
+  // Only treat a hyphenated place as access when the other endpoint explicitly
+  // identifies the same city's centre; never classify two terminals this way.
+  const hyphenCity=v=>v.match(/^([^–—-]+)[–—-][^–—-]+$/)?.[1]||'';
+  const implicit=(raw,ct)=>{
+    const city=normalizeKey(hyphenCity(String(raw||'')));
+    return Boolean(city&&centre.test(ct)&&centreCity(ct)===city);
+  };
+  return matches(a,b)||matches(b,a)||implicit(origin,b)||implicit(destination,a);
+}
+function v225GroundTransportNeed(need,route){
+  const mode=twelveGoCommercialMode(`${need?.transport||''} ${need?.transport_mode||''} ${route?.mode==='alternative'?'':route?.mode||''}`);
+  if(mode==='flight')return false;
+  if(v226StationAccess(need,route)||v269LocalStationCentre(route?.origin,route?.destination))return false;
+  // V268: a station-to-its-own-city-center access is local, even when a
+  // generic 'train' label hides the taxi/walk mode. Do not reject two stations
+  // in different cities or intercity journeys originating at a station.
+  const cleanStationCity=v=>normalizeKey(v).replace(/\b(estacion|station|stazione|estacao|gare|bahnhof|hbf|terminal|centro|center|centre|city|downtown|historico|historic|de|del|of|the)\b/g,' ').replace(/\s+/g,' ').trim();
+  const oa=normalizeKey(route?.origin||''),ob=normalizeKey(route?.destination||'');
+  const station=/\b(estacion|station|stazione|estacao|gare|bahnhof|hbf|terminal)\b/;
+  const center=/\b(centro|center|centre|downtown|historico|historic)\b/;
+  if(((station.test(oa)&&center.test(ob))||(station.test(ob)&&center.test(oa))) &&
+     cleanStationCity(oa)&&cleanStationCity(oa)===cleanStationCity(ob))return false;
+  const raw=normalizeKey(`${need?.transport||''} ${need?.source_activity||''}`);
+  if(/\b(plane|flight|airplane|aircraft|avion|vuelo|aereo|aeropuerto|airport)\b/.test(raw))return false;
+  const a=normalizeKey(route?.origin||''),b=normalizeKey(route?.destination||'');
+  if(/\b(airport|aeropuerto)\b/.test(`${a} ${b}`))return false;
+  return Boolean(a&&b&&a!==b);
+}
+// V225: a country must come from the trip's own destination metadata, not a
+// guessed place name. The link is an *unverified route search*, not inventory.
+function v225PublisherSearchCandidate(provider,route,need,city,destinations=[]){
+  if(!v225GroundTransportNeed(need,route))return '';
+  const country=bookawayCountryForRoute(route,need,city,destinations);
+  if(!country)return '';
+  const from=twelveGoSlug(route.origin).toLowerCase(),to=twelveGoSlug(route.destination).toLowerCase();
+  if(!from||!to||from===to)return '';
+  if(provider==='bookaway')return `https://www.bookaway.com/routes/${country}/${from}-to-${to}`;
+  // 12Go publisher uses /travel/{origin}/{destination} irrespective of country;
+  // a route URL can be attempted but must be labelled unverified.
+  if(provider==='12go')return `https://12go.asia/es/travel/${from}/${to}`;
+  return '';
+}
+function resolve12GoTransportOffers(city,uiLanguage,needs=[],destinations=[]){
+  const partner=virtualPartner('12go','12Go','transport'); const out=[]; const seen=new Set();
+  for(const need of (Array.isArray(needs)?needs:[])){
+    if(!['intercity_transport','transport_arrangement'].includes(need?.need_type))continue;
+    // V187: the chosen/recommended vehicle does not veto alternative providers.
+    const payload=parseResolvedRoutePayload(need?.source_route);
+    const candidates=v187CommercialCandidates('12go',need,city);
+    // Prefer the same physical commercial A→B legs rendered by Workspace.
+    // A parent label such as “Cusco → Machu Picchu area → Cusco” is editorial,
+    // not necessarily a bookable market. Resolve each real intercity leg first.
+    if(payload?.legs?.length){
+      payload.legs.forEach((leg,index)=>{
+        // 12Go stays independent from Omio. Ordinary legs still require the
+        // Route Resolver commerce seal. Older structured trips get one narrow
+        // bridge for abstract access nodes.
+        const market=twelveGoResolvedMarket({leg,city,need,index});
+        if(market)candidates.push(market);
+        else if(need?.need_type==='intercity_transport'){
+          const physical=regionalPhysicalMarket({leg,need,index});
+          if(physical)candidates.push(physical);
+        }
+      });
+    }else{
+      // Pre-V1 persisted needs have no encoded legs. Accept only a literal A→B
+      // source_route and apply the same abstract-access safety gate. This is what
+      // lets previously generated trips benefit from a newly added provider.
+      const legacy=twelveGoLegacyRouteMarket(need,city);
+      if(legacy)candidates.push(legacy);
+    }
+    // Never synthesize a 12Go market from editorial parent labels or narrative
+    // free text. Structured legs or an explicit legacy A→B source are required.
+    for(const route of candidates){
+      if(v269LocalStationCentre(route.origin,route.destination))continue;
+      if(!route.verified_url&&localTransportMarket(route,need))continue;
+      const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b||normalizeKey(a)===normalizeKey(b))continue;
+      const key=`${clean(need?.id,120)}|${v187RouteKey(route.origin,city)}|${v187RouteKey(route.destination,city)}`; if(seen.has(key))continue;
+      const locale=normalizeLanguage(uiLanguage)==='es'?'es':'en';
+      const verified=route.verified_url||verifiedTransportUrl('12go',route,city);
+      // No fabricated deep links for unverified private-car/regional markets.
+      // A generic affiliate landing page is explicitly a MANUAL search.
+      // V184: A slug is NOT evidence of a published 12Go route.
+      // Never turn editorial place names into /travel/A/B/ (404).
+      // V188: never emit a generic landing-page CTA as evidence of route existence.
+      if(!v225GroundTransportNeed(need,route))continue;
+      const inferred=verified?'':v225PublisherSearchCandidate('12go',route,need,city,destinations);
+      if(!verified&&!inferred)continue;
+      seen.add(key);
+      const direct=Boolean(verified);
+      const targetUrl=appendParams(verified||inferred,{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
+      const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:verified?'provider_verified_route':'unverified_route_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60),journey_origin:clean(route.journey_origin||'',120),journey_destination:clean(route.journey_destination||'',120)},titleEs:label,titleEn:label,descriptionEs:direct?'Busca opciones para este tramo en 12Go. Confirma disponibilidad con el proveedor.':`Buscar manualmente ${label} en 12Go. Ruta y disponibilidad NO verificadas.`,descriptionEn:direct?'Search this leg on 12Go; confirm availability with the provider.':`Manually search ${label} on 12Go. Route and availability NOT verified.`,confidence:direct?'medium':'low'});
+      if(offer)out.push(offer);
+    }
+  }
+  return out;
+}
+// V174: Bookaway uses exactly the same sealed physical A→B markets as 12Go.
+// Bookaway's documented /s/{country}/{origin}-to-{destination}/ path needs
+// an actual destination-country context. No country => affiliate home fallback,
+// NEVER a fabricated country or a demo route. Search availability is unverified.
+const BOOKAWAY_COUNTRY_CODES_BY_NAME = {"isla de la ascension":"AC","andorra":"AD","emiratos arabes unidos":"AE","afganistan":"AF","antigua y barbuda":"AG","anguila":"AI","albania":"AL","armenia":"AM","angola":"AO","antartida":"AQ","argentina":"AR","samoa americana":"AS","austria":"AT","australia":"AU","aruba":"AW","islas aland":"AX","azerbaiyan":"AZ","bosnia y herzegovina":"BA","barbados":"BB","banglades":"BD","belgica":"BE","burkina faso":"BF","bulgaria":"BG","barein":"BH","burundi":"BI","benin":"BJ","san bartolome":"BL","bermudas":"BM","brunei":"BN","bolivia":"BO","caribe neerlandes":"BQ","brasil":"BR","bahamas":"BS","butan":"BT","isla bouvet":"BV","botsuana":"BW","bielorrusia":"BY","belice":"BZ","canada":"CA","islas cocos":"CC","republica democratica del congo":"CD","republica centroafricana":"CF","congo":"CG","suiza":"CH","cote divoire":"CI","islas cook":"CK","chile":"CL","camerun":"CM","china":"CN","colombia":"CO","isla clipperton":"CP","costa rica":"CR","cuba":"CU","cabo verde":"CV","curazao":"CW","isla de navidad":"CX","chipre":"CY","chequia":"CZ","alemania":"DE","diego garcia":"DG","yibuti":"DJ","dinamarca":"DK","dominica":"DM","republica dominicana":"DO","argelia":"DZ","ceuta y melilla":"EA","ecuador":"EC","estonia":"EE","egipto":"EG","sahara occidental":"EH","eritrea":"ER","espana":"ES","etiopia":"ET","union europea":"EU","zona del euro":"EZ","finlandia":"FI","fiyi":"FJ","islas malvinas":"FK","micronesia":"FM","islas feroe":"FO","francia":"FR","gabon":"GA","reino unido":"GB","granada":"GD","georgia":"GE","guayana francesa":"GF","guernesey":"GG","ghana":"GH","gibraltar":"GI","groenlandia":"GL","gambia":"GM","guinea":"GN","guadalupe":"GP","guinea ecuatorial":"GQ","grecia":"GR","islas georgia del sur y sandwich del sur":"GS","guatemala":"GT","guam":"GU","guinea-bisau":"GW","guyana":"GY","rae de hong kong (china)":"HK","islas heard y mcdonald":"HM","honduras":"HN","croacia":"HR","haiti":"HT","hungria":"HU","canarias":"IC","indonesia":"ID","irlanda":"IE","israel":"IL","isla de man":"IM","india":"IN","territorio britanico del oceano indico":"IO","irak":"IQ","iran":"IR","islandia":"IS","italia":"IT","jersey":"JE","jamaica":"JM","jordania":"JO","japon":"JP","kenia":"KE","kirguistan":"KG","camboya":"KH","kiribati":"KI","comoras":"KM","san cristobal y nieves":"KN","corea del norte":"KP","corea del sur":"KR","kuwait":"KW","islas caiman":"KY","kazajistan":"KZ","laos":"LA","libano":"LB","santa lucia":"LC","liechtenstein":"LI","sri lanka":"LK","liberia":"LR","lesoto":"LS","lituania":"LT","luxemburgo":"LU","letonia":"LV","libia":"LY","marruecos":"MA","monaco":"MC","moldavia":"MD","montenegro":"ME","san martin":"MF","madagascar":"MG","islas marshall":"MH","macedonia del norte":"MK","mali":"ML","myanmar (birmania)":"MM","mongolia":"MN","rae de macao (china)":"MO","islas marianas del norte":"MP","martinica":"MQ","mauritania":"MR","montserrat":"MS","malta":"MT","mauricio":"MU","maldivas":"MV","malaui":"MW","mexico":"MX","malasia":"MY","mozambique":"MZ","namibia":"NA","nueva caledonia":"NC","niger":"NE","isla norfolk":"NF","nigeria":"NG","nicaragua":"NI","paises bajos":"NL","noruega":"NO","nepal":"NP","nauru":"NR","niue":"NU","nueva zelanda":"NZ","oman":"OM","panama":"PA","peru":"PE","polinesia francesa":"PF","papua nueva guinea":"PG","filipinas":"PH","pakistan":"PK","polonia":"PL","san pedro y miquelon":"PM","islas pitcairn":"PN","puerto rico":"PR","territorios palestinos":"PS","portugal":"PT","palaos":"PW","paraguay":"PY","catar":"QA","territorios alejados de oceania":"QO","reunion":"RE","rumania":"RO","serbia":"RS","rusia":"RU","ruanda":"RW","arabia saudi":"SA","islas salomon":"SB","seychelles":"SC","sudan":"SD","suecia":"SE","singapur":"SG","santa elena":"SH","eslovenia":"SI","svalbard y jan mayen":"SJ","eslovaquia":"SK","sierra leona":"SL","san marino":"SM","senegal":"SN","somalia":"SO","surinam":"SR","sudan del sur":"SS","santo tome y principe":"ST","el salvador":"SV","sint maarten":"SX","siria":"SY","esuatini":"SZ","tristan de acuna":"TA","islas turcas y caicos":"TC","chad":"TD","territorios australes franceses":"TF","togo":"TG","tailandia":"TH","tayikistan":"TJ","tokelau":"TK","timor-leste":"TL","turkmenistan":"TM","tunez":"TN","tonga":"TO","turquia":"TR","trinidad y tobago":"TT","tuvalu":"TV","taiwan":"TW","tanzania":"TZ","ucrania":"UA","uganda":"UG","islas menores alejadas de ee. uu.":"UM","naciones unidas":"UN","estados unidos":"US","uruguay":"UY","uzbekistan":"UZ","ciudad del vaticano":"VA","san vicente y las granadinas":"VC","venezuela":"VE","islas virgenes britanicas":"VG","islas virgenes de ee. uu.":"VI","vietnam":"VN","vanuatu":"VU","wallis y futuna":"WF","samoa":"WS","pseudoacentos":"XA","pseudobidi":"XB","kosovo":"XK","yemen":"YE","mayotte":"YT","sudafrica":"ZA","zambia":"ZM","zimbabue":"ZW","region desconocida":"ZZ","ascension island":"AC","united arab emirates":"AE","afghanistan":"AF","antigua & barbuda":"AG","anguilla":"AI","antarctica":"AQ","american samoa":"AS","aland islands":"AX","azerbaijan":"AZ","bosnia & herzegovina":"BA","bangladesh":"BD","belgium":"BE","bahrain":"BH","st. barthelemy":"BL","bermuda":"BM","caribbean netherlands":"BQ","brazil":"BR","bhutan":"BT","bouvet island":"BV","botswana":"BW","belarus":"BY","belize":"BZ","cocos (keeling) islands":"CC","congo - kinshasa":"CD","central african republic":"CF","congo - brazzaville":"CG","switzerland":"CH","cook islands":"CK","cameroon":"CM","clipperton island":"CP","sark":"CQ","cape verde":"CV","curacao":"CW","christmas island":"CX","cyprus":"CY","czechia":"CZ","germany":"DE","djibouti":"DJ","denmark":"DK","dominican republic":"DO","algeria":"DZ","ceuta & melilla":"EA","egypt":"EG","western sahara":"EH","spain":"ES","ethiopia":"ET","european union":"EU","eurozone":"EZ","finland":"FI","fiji":"FJ","falkland islands":"FK","faroe islands":"FO","france":"FR","united kingdom":"GB","grenada":"GD","french guiana":"GF","guernsey":"GG","greenland":"GL","guadeloupe":"GP","equatorial guinea":"GQ","greece":"GR","south georgia & south sandwich islands":"GS","guinea-bissau":"GW","hong kong sar china":"HK","heard & mcdonald islands":"HM","croatia":"HR","hungary":"HU","canary islands":"IC","ireland":"IE","isle of man":"IM","british indian ocean territory":"IO","iraq":"IQ","iceland":"IS","italy":"IT","jordan":"JO","japan":"JP","kenya":"KE","kyrgyzstan":"KG","cambodia":"KH","comoros":"KM","st. kitts & nevis":"KN","north korea":"KP","south korea":"KR","cayman islands":"KY","kazakhstan":"KZ","lebanon":"LB","st. lucia":"LC","lesotho":"LS","lithuania":"LT","luxembourg":"LU","latvia":"LV","libya":"LY","morocco":"MA","moldova":"MD","st. martin":"MF","marshall islands":"MH","north macedonia":"MK","myanmar (burma)":"MM","macao sar china":"MO","northern mariana islands":"MP","martinique":"MQ","mauritius":"MU","maldives":"MV","malawi":"MW","malaysia":"MY","new caledonia":"NC","norfolk island":"NF","netherlands":"NL","norway":"NO","new zealand":"NZ","french polynesia":"PF","papua new guinea":"PG","philippines":"PH","poland":"PL","st. pierre & miquelon":"PM","pitcairn islands":"PN","palestinian territories":"PS","palau":"PW","qatar":"QA","outlying oceania":"QO","romania":"RO","russia":"RU","rwanda":"RW","saudi arabia":"SA","solomon islands":"SB","sweden":"SE","singapore":"SG","st. helena":"SH","slovenia":"SI","svalbard & jan mayen":"SJ","slovakia":"SK","sierra leone":"SL","suriname":"SR","south sudan":"SS","sao tome & principe":"ST","syria":"SY","eswatini":"SZ","tristan da cunha":"TA","turks & caicos islands":"TC","french southern territories":"TF","thailand":"TH","tajikistan":"TJ","tunisia":"TN","turkiye":"TR","trinidad & tobago":"TT","ukraine":"UA","u.s. outlying islands":"UM","united nations":"UN","united states":"US","vatican city":"VA","st. vincent & grenadines":"VC","british virgin islands":"VG","u.s. virgin islands":"VI","wallis & futuna":"WF","pseudo-accents":"XA","pseudo-bidi":"XB","south africa":"ZA","zimbabwe":"ZW","unknown region":"ZZ"};
+function bookawayCountrySlug(countryCode='',countryName=''){
+  const nameKey=normalizeCountryKey(countryName);
+  const code=(clean(countryCode,8)||BOOKAWAY_COUNTRY_CODES_BY_NAME[nameKey]||'').toUpperCase();
+  const aliases={GB:'united-kingdom',US:'united-states',AE:'united-arab-emirates',KR:'south-korea',KP:'north-korea',CZ:'czech-republic',CI:'ivory-coast',CD:'democratic-republic-of-the-congo',CG:'republic-of-the-congo',TW:'taiwan',VN:'vietnam',TR:'turkey',LA:'laos',BO:'bolivia',TZ:'tanzania',RU:'russia'};
+  if(aliases[code])return aliases[code];
+  if(/^[A-Z]{2}$/.test(code)){
+    try{const name=new Intl.DisplayNames(['en'],{type:'region'}).of(code);
+      if(name&&name!==code)return twelveGoSlug(name).toLowerCase();
+    }catch(_){}
+  }
+  // Country strings are accepted only when already an English canonical name;
+  // a Spanish label such as "Croacia" must not silently become a false slug.
+  const name=clean(countryName,100);
+  if(/^[a-z -]+$/i.test(name)&&normalizeKey(name)===normalizeKey('peru'))return 'peru';
+  return '';
+}
+function bookawayCountryForRoute(route,need,city,destinations=[]){
+  const originKey=normalizeKey(route.origin),destKey=normalizeKey(route.destination),baseKey=normalizeKey(city);
+  const known=(Array.isArray(destinations)?destinations:[]).filter(Boolean);
+  const match=known.find(d=>normalizeKey(d.city)===originKey)||known.find(d=>normalizeKey(d.city)===destKey)||known.find(d=>normalizeKey(d.city)===baseKey);
+  // Explicit trip ownership metadata takes priority. Never infer geography
+  // from the text of a destination name or a made-up country lookup.
+  return bookawayCountrySlug(match?.country_code||need?.country_code||need?.countryCode||'',match?.country||need?.country||'');
+}
+// V178: Bookaway's geographic candidate is independent of the 12Go
+// commercial-mode classifier. This extracts ONLY explicit physical markets;
+// it never asserts that Bookaway actually sells a ticket on that route.
+function bookawayPhysicalMarket({leg,city,need,index=0}){
+  let origin=clean(leg?.commercial_origin_es||leg?.commercial_origin||leg?.origin,120);
+  let destination=clean(leg?.commercial_destination_es||leg?.commercial_destination||leg?.destination,120);
+  const base=clean(city||need?.city,120);
+  const abstractOrigin=twelveGoAbstractAccessNode(origin);
+  const abstractDestination=twelveGoAbstractAccessNode(destination);
+  if(!leg?.commerce_eligible && !abstractOrigin && !abstractDestination)return null;
+  if(abstractOrigin && !abstractDestination && twelveGoEndpointSane(base) && normalizeKey(base)!==normalizeKey(destination))origin=base;
+  else if(abstractDestination && !abstractOrigin && twelveGoEndpointSane(base) && normalizeKey(origin)!==normalizeKey(base))destination=base;
+  else if(abstractOrigin||abstractDestination)return null;
+  if(!twelveGoEndpointSane(origin)||!twelveGoEndpointSane(destination)||normalizeKey(origin)===normalizeKey(destination))return null;
+  return {origin,destination,date:need?.travel_date||'',index:Number(leg?.index||index+1),mode:twelveGoCommercialMode(leg?.mode)||'alternative',resolution:'bookaway_physical_market'};
+}
+function bookawayLegacyMarket(need={}){
+  // Only explicitly intercity historic A→B needs; never local taxis.
+  if(need?.need_type!=='intercity_transport' && !need?._workspace_physical)return null;
+  const raw=clean(need?.source_route,1000).trim();
+  if(!raw||raw.startsWith('ITBMO_ROUTE_V1|'))return null;
+  const parts=raw.split(/\s*(?:→|⇒|⟶|->|–>|—>)\s*/).map(v=>clean(v,160).trim()).filter(Boolean);
+  if(parts.length!==2||parts.some(t=>!twelveGoEndpointSane(t)||twelveGoAbstractAccessNode(t)))return null;
+  if(normalizeKey(parts[0])===normalizeKey(parts[1]))return null;
+  return {origin:parts[0],destination:parts[1],date:need?.travel_date||'',index:1,mode:'alternative',resolution:'bookaway_legacy_intercity'};
+}
+function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]){
+  const partner=virtualPartner('bookaway','Bookaway','transport');const out=[];const seen=new Set();
+  for(const need of (Array.isArray(needs)?needs:[])){
+    if(!['intercity_transport','transport_arrangement'].includes(need?.need_type))continue;
+    // V187: the chosen/recommended vehicle does not veto alternative providers.
+    const payload=parseResolvedRoutePayload(need?.source_route);const candidates=v187CommercialCandidates('bookaway',need,city);
+    if(payload?.legs?.length)payload.legs.forEach((leg,index)=>{
+      const route=bookawayPhysicalMarket({leg,city,need,index})||
+        regionalPhysicalMarket({leg,need,index});
+      if(route)candidates.push(route);
+    });
+    else{const route=bookawayLegacyMarket(need);if(route)candidates.push(route);}
+    for(const route of candidates){
+      if(v269LocalStationCentre(route.origin,route.destination))continue;
+      if(!route.verified_url&&localTransportMarket(route,need))continue;
+      const key=`${clean(need?.id,120)}|${v187RouteKey(route.origin,city)}|${v187RouteKey(route.destination,city)}`;
+      if(seen.has(key))continue;
+      // Bookaway's documented deep-link scheme requires an EXISTING Bookaway
+      // route page. Country + slug alone does not establish route existence.
+      const verified=route.verified_url||verifiedTransportUrl('bookaway',route,city);
+      // V188: verified publisher routes only; generic home searches are not commercial matches.
+      if(!v225GroundTransportNeed(need,route))continue;
+      // V270: Until Bookaway provides a route feed/API, mirror 12Go's
+      // explicitly unverified route-search behavior. Country must be grounded
+      // in the trip metadata; physical legs and station/local gates above stay
+      // mandatory. Never imply inventory or confirmed route publication.
+      const inferred=verified?'':v225PublisherSearchCandidate('bookaway',route,need,city,destinations);
+      if(!verified&&!inferred)continue;
+      seen.add(key);
+      const targetUrl=appendParams(verified||inferred,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+      const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
+      const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
+        resolutionType:verified?'provider_verified_route':'unverified_route_search',confidence:verified?'high':'low',travelDate:route.date||'',
+        routeSegment:{index:Number(route.index||1),mode:route.mode,commercial_origin:route.origin,commercial_destination:route.destination,market_resolution:clean(route.resolution||'',60),journey_origin:clean(route.journey_origin||'',120),journey_destination:clean(route.journey_destination||'',120)},
+        titleEs:`Bookaway · ${label}`,titleEn:`Bookaway · ${label}`,
+        descriptionEs:verified?'Consulta este trayecto en Bookaway; confirma horarios y disponibilidad.':`Buscar manualmente ${label} en Bookaway. Ruta y disponibilidad NO verificadas.`,
+        descriptionEn:verified?'Check this route on Bookaway; confirm schedules and availability.':`Manually search ${label} on Bookaway. Route and availability NOT verified.`});
+      if(offer)out.push(offer);
+    }
+  }
+  return out;
+}
+// V177: This adapter consumes an explicit, date-scoped rental decision from
+// Workspace. It does NOT infer a rental from arbitrary intercity transfers.
+function resolveDiscoverCarsOffers(city,needs=[]){
+  const partner=virtualPartner('discovercars','DiscoverCars','car_rental');const out=[];
+  for(const need of (Array.isArray(needs)?needs:[])){
+    const rental=need?.derived_by==='workspace_rental_plan' ||
+      (need?.need_type==='transport_arrangement'&&/rental car|car rental|vehiculo rentado|vehículo alquilado|coche de alquiler|auto de alquiler|carro de alquiler/i.test(`${need?.entity_name||''} ${need?.source_activity||''} ${need?.transport||''}`));
+    if(!rental)continue;
+    const selected=Boolean(need?.rental_user_selected);
+    const days=Array.isArray(need?.rental_scope_days)?need.rental_scope_days.filter(x=>Number.isInteger(x)&&x>0):[];
+    const scope=days.length?` · ${days.join(', ')}`:'';
+    // DiscoverCars search-field parameters have NOT been verified for this
+    // affiliate account. Preserve attribution; do not fabricate pickup dates.
+    const targetUrl=appendParams('https://www.discovercars.com/',{a_aid:DISCOVERCARS_AID,data1:'itbmo',data2:campaignPart(city||'workspace')});
+    const offer=signedVirtualOffer({partner,targetUrl,placement:'city_car_rental',need,city,
+      resolutionType:'affiliate_rental_comparison',confidence:selected?'high':'medium',
+      travelDate:need?.rental_pickup_date||'',
+      titleEs:`Comparar vehículos en ${city}${scope}`,titleEn:`Compare rental cars in ${city}${scope}`,
+      descriptionEs:selected?'Compara vehículos para los días que elegiste. Completa fechas, recogida y devolución en el proveedor.':'Compara alquiler para los días regionales indicados; revisa conducción, seguros y devolución. Fechas y disponibilidad se confirman con el proveedor.',
+      descriptionEn:selected?'Compare vehicles for your selected days. Enter dates, pickup and return with the provider.':'Compare rentals for the indicated regional days; check driving conditions, insurance and return logistics. Confirm dates and availability with the provider.'});
+    if(offer)out.push(offer);
+  }
+  return out;
+}
+function resolveRiseShieldTripOffer(){
+  const partner=virtualPartner('riseandshield','Rise & Shield','travel_insurance');
+  const targetUrl=appendParams('https://riseandshield.com/',{ref:RISE_SHIELD_REF,tm_source:'itbmo'});
+  return signedVirtualOffer({partner,targetUrl,placement:'trip_insurance',need:{id:'trip-insurance',need_type:'travel_insurance',entity_name:'Travel insurance'},resolutionType:'verified_trip_insurance',titleEs:'Seguro para tu viaje',titleEn:'Travel insurance for your trip',descriptionEs:'Explora una opción de protección para todo el viaje. Cobertura, elegibilidad y precio final se confirman directamente con el proveedor.',descriptionEn:'Explore a protection option for your whole trip. Coverage, eligibility and final price are confirmed directly with the provider.',confidence:'high'});
+}
+
 function rankOffers(offers) {
-  const resolution = { workspace_feed_route: 43, workspace_canonical_route: 42, context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
+  const resolution = { workspace_feed_route: 43, workspace_canonical_route: 42, context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_route_search: 37, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
   return [...offers].sort((a, b) => {
     const ra = resolution[a?.resolution_type] || 0;
@@ -917,6 +1475,8 @@ export async function resolveTripOffers({ session_token, trip_id }) {
   ]);
   if (holafly) offers.push(holafly);
   if (airalo) offers.push(airalo);
+  const insurance=resolveRiseShieldTripOffer();
+  if(insurance) offers.push(insurance);
   return { session, offers: rankOffers(offers) };
 }
 
@@ -937,6 +1497,16 @@ export async function resolveCityOffers({
   const safeCity = clean(city || safeNeeds.find(Boolean)?.city, 160);
   const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
   const safeTripLanguage = normalizeLanguage(trip_language);
+  // Existing owned-trip data source (Supabase), not a live Bookaway request.
+  // Failure isolates to Bookaway country resolution; other partners are untouched.
+  let bookawayDestinations=[];
+  try{
+    if(trip_id&&session.user_id){
+      const rows=await supabaseFetch(`/trips?select=destinations&id=eq.${encodeURIComponent(trip_id)}&user_id=eq.${encodeURIComponent(session.user_id)}&limit=1`);
+      bookawayDestinations=(Array.isArray(rows?.[0]?.destinations)?rows[0].destinations:[]).map(d=>({city:clean(d?.city,160),country:clean(d?.country,120),country_code:destinationCountryCode(d)}));
+    }
+  }catch(err){console.warn('[ITBMO BOOKAWAY COUNTRY CONTEXT]',err?.message||err);}
+
 
   // Partner adapters are isolated. One provider failure must not blank valid
   // offers from another provider; especially, experience-partner errors cannot
@@ -944,14 +1514,18 @@ export async function resolveCityOffers({
   const resolved = await Promise.allSettled([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
-    resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[])
+    resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[]),
+    Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity),bookawayDestinations)),
+    Promise.resolve(resolveBookawayTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity),bookawayDestinations)),
+    Promise.resolve(resolveDiscoverCarsOffers(safeCity,safeNeeds))
   ]);
-  const labels=['viator','getyourguide','omio'];
+  const labels=['viator','getyourguide','omio','12go','bookaway','discovercars'];
   const buckets=resolved.map((result,index)=>{
     if(result.status==='fulfilled')return Array.isArray(result.value)?result.value:[];
     console.warn(`[ITBMO PARTNER ISOLATION] ${labels[index]}`,result.reason?.message||result.reason);
     return [];
   });
+  console.info('[ITBMO V187 PROVIDER ROUTES]',{city:safeCity,needs:safeNeeds.length,transport_routes:Array.isArray(transport_routes)?transport_routes.length:0,providers:Object.fromEntries(labels.map((label,index)=>[label,buckets[index].length]))});
   return { session, offers: rankOffers(buckets.flat()) };
 }
 
@@ -990,24 +1564,37 @@ export async function registerPartnerClick({ session_token, trip_id, offer_id, o
   }
 
   const clickId = crypto.randomUUID();
-  await supabaseFetch('/partner_clicks', {
-    method: 'POST',
-    body: JSON.stringify({
-      click_id: clickId,
-      partner_id: resolved.partner_id,
-      offer_id: resolved.offer_id,
-      user_id: session?.user_id || null,
-      session_id: session?.id || null,
-      trip_id: trip_id || null,
+  // V158: click telemetry must never block a verified affiliate navigation.
+  // Virtual adapters (Rise & Shield / 12Go / DiscoverCars) intentionally do not
+  // require a travel_partners DB row, so partner_id/offer_id can be null. Older
+  // partner_clicks schemas may reject those null FKs. The signed URL and required
+  // attribution have already been verified above; therefore logging is best-effort.
+  try {
+    await supabaseFetch('/partner_clicks', {
+      method: 'POST',
+      body: JSON.stringify({
+        click_id: clickId,
+        partner_id: resolved.partner_id,
+        offer_id: resolved.offer_id,
+        user_id: session?.user_id || null,
+        session_id: session?.id || null,
+        trip_id: trip_id || null,
+        placement: clean(resolved.placement || placement, 80),
+        city: clean(resolved.city, 160) || null,
+        need_type: clean(resolved.need_type, 80) || null,
+        entity_name: clean(resolved.entity_name, 180) || null,
+        travel_date: clean(resolved.travel_date, 40) || null,
+        target_url: clean(resolved.url, 1500),
+        resolution_type: clean(resolved.resolution_type, 40) || null
+      })
+    });
+  } catch (error) {
+    console.error('ITBMO partner click telemetry failed; navigation preserved', {
+      partner: resolved.partner_slug || '',
       placement: clean(resolved.placement || placement, 80),
-      city: clean(resolved.city, 160) || null,
-      need_type: clean(resolved.need_type, 80) || null,
-      entity_name: clean(resolved.entity_name, 180) || null,
-      travel_date: clean(resolved.travel_date, 40) || null,
-      target_url: clean(resolved.url, 1500),
-      resolution_type: clean(resolved.resolution_type, 40) || null
-    })
-  });
+      code: error?.message || 'PARTNER_CLICK_TELEMETRY_FAILED'
+    });
+  }
 
   return {
     ok: true,

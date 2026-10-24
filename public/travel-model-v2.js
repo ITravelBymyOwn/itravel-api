@@ -94,10 +94,11 @@
     return out;
   }
   function _timeSelect(field,value='',label=''){
-    const [hh='',mm='00']=String(value||'').split(':');
-    const hours=['',...Array.from({length:24},(_,i)=>String(i).padStart(2,'0'))];
-    const mins=['00','15','30','45'];
-    return `<div class="route-v2-time" data-time-field="${field}"><span>${esc(label)}</span><div><select data-time-hour="${field}">${hours.map(h=>`<option value="${h}" ${h===hh?'selected':''}>${h||'--'}</option>`).join('')}</select><b>:</b><select data-time-minute="${field}">${mins.map(m=>`<option value="${m}" ${m===mm?'selected':''}>${m}</option>`).join('')}</select></div></div>`;
+    const current=String(value||'');
+    const options=Array.from({length:96},(_,i)=>`${String(Math.floor(i/4)).padStart(2,'0')}:${String((i%4)*15).padStart(2,'0')}`);
+    if(/^([01]\d|2[0-3]):[0-5]\d$/.test(current)&&!options.includes(current))options.push(current);
+    options.sort();
+    return `<div class="route-v2-time" data-time-field="${field}"><span>${esc(label)}</span><div><select data-time-value="${field}" aria-label="${esc(label)}"><option value="">--:--</option>${options.map(v=>`<option value="${v}" ${v===current?'selected':''}>${v}</option>`).join('')}</select></div></div>`;
   }
   function _routeTransportOptions(selected=''){
     return [
@@ -120,12 +121,14 @@
     return Math.max(0,Math.round((dateKey(departureISO)-dateKey(arrivalISO))/86400000));
   }
   function _setPlannerTimeGroup(group,value='',disabled=false){
-    if(!group) return;
-    const match=/^(\d{2}):(\d{2})$/.exec(String(value||''));
-    const hour=group.querySelector('.time-hour'), minute=group.querySelector('.time-minute'), hidden=group.querySelector('input[type="hidden"]');
-    if(hour){ hour.value=match?.[1]||''; hour.disabled=Boolean(disabled); }
-    if(minute){ minute.value=['15','30','45'].includes(match?.[2])?match[2]:''; minute.disabled=Boolean(disabled); }
-    if(hidden) hidden.value=match?`${match[1]}:${match[2]}`:'';
+    if(!group)return;
+    const select=group.querySelector('.time-hhmm'),hidden=group.querySelector('input[type="hidden"]');
+    const current=String(value||'');
+    if(select){
+      if(current&&!Array.from(select.options).some(o=>o.value===current)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(current))select.add(new Option(current,current));
+      select.value=current;select.disabled=Boolean(disabled);
+    }
+    if(hidden)hidden.value=current;
     group.classList.toggle('route-v2-time-locked',Boolean(disabled));
   }
   function syncPlannerAvailability(row){
@@ -354,7 +357,7 @@
       ui.body.querySelector('[data-field="transportMode"]')?.addEventListener('change',e=>{seg.transportMode=e.target.value||'';render();});
       ui.body.querySelector('[data-field="nextTransportMode"]')?.addEventListener('change',e=>{seg.nextTransportMode=e.target.value||'';});
       ui.body.querySelector('[data-field="returnTransportMode"]')?.addEventListener('change',e=>{seg.returnTransportMode=e.target.value||'';});
-      ui.body.querySelectorAll('[data-time-field]').forEach(group=>{const field=group.dataset.timeField;const sync=()=>{const h=group.querySelector(`[data-time-hour="${field}"]`)?.value||'',m=group.querySelector(`[data-time-minute="${field}"]`)?.value||'00';seg[field]=h?`${h}:${m}`:'';};group.querySelectorAll('select').forEach(x=>x.onchange=()=>{sync();if(field==='returnArrivalTime')seg.resumeTime=seg.returnArrivalTime;render();});});
+      ui.body.querySelectorAll('[data-time-field]').forEach(group=>{const field=group.dataset.timeField;const sync=()=>{seg[field]=group.querySelector(`[data-time-value="${field}"]`)?.value||'';};group.querySelectorAll('select').forEach(x=>x.onchange=()=>{sync();if(field==='returnArrivalTime')seg.resumeTime=seg.returnArrivalTime;render();});});
       ui.body.querySelectorAll('input[name="route-disposition"]').forEach(r=>r.onchange=()=>{if(!r.checked)return;seg.disposition=r.value;if(r.value==='roundtrip'){seg.returnDepartureDate=seg.arrivalDate;seg.nights=0;}render();});
       ui.body.querySelector('.route-v2-cancel')?.addEventListener('click',ui.close);
       ui.body.querySelector('.route-v2-continue')?.addEventListener('click',()=>{
@@ -441,8 +444,7 @@
       if(!day || !(rowRoute(row).segments||[]).length) return;
       const group=select.closest('.time-selector');
       const field=group?.dataset.timeType;
-      const h=group?.querySelector('.time-hour')?.value||'', m=group?.querySelector('.time-minute')?.value||'00';
-      const value=h?`${h}:${m}`:'';
+      const value=group?.querySelector('.time-hhmm')?.value||'';
       if(field==='start') day.dataset.routeV2OriginalStart=value;
       if(field==='end') day.dataset.routeV2OriginalEnd=value;
       setTimeout(()=>syncPlannerAvailability(row),0);
@@ -512,6 +514,12 @@
     });
   }
 
+  function effectiveStoryDayTrips(st,stays){
+    const key=x=>norm(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const independent=new Set((stays||[]).map(s=>key(s?.place)).filter(Boolean));
+    return (st?.dayTrips||[]).filter(dt=>!independent.has(key(dt?.place)));
+  }
+
   function compileTripStoryContinuous(destination,story,model){
     const stays=(story?.stays||[]).filter(x=>x&&x.startDate&&norm(x.place));
     if(!stays.length) return null;
@@ -539,7 +547,7 @@
       const arrivalUserFixed=Boolean(st.arrivalTime && String(st.timeStatus||'').toLowerCase()!=='estimated' && !st.arrival_route_estimated);
       movements.push({id:`story_move_${st.id||i}`,origin:prev.place,destination:st.place,departureDate:st.departureDate||st.startDate,arrivalDate:st.arrivalDate||st.startDate,departureTime:st.departureTime||'',arrivalTime:st.arrivalTime||'',transportMode:st.transportMode||'other',timePrecision:(st.departureTime&&st.arrivalTime)?(arrivalUserFixed?'exact':'estimated'):'unknown',source:departureUserFixed?(arrivalUserFixed?'USER_FIXED':'MIXED_AUTHORITY'):'ROUTE_ESTIMATED',departure_source:departureUserFixed?'USER_FIXED':'ROUTE_ESTIMATED',arrival_source:arrivalUserFixed?'USER_FIXED':'ROUTE_ESTIMATED',transport_source:st.transportStatus==='route_estimated'?'ROUTE_ESTIMATED':'USER_FIXED',departure_user_fixed:departureUserFixed,arrival_user_fixed:arrivalUserFixed,routeResolution:st.routeResolution||null,disposition:'continue',nights:Number(st.days||1)});
     }
-    stays.forEach(st=>(st.dayTrips||[]).forEach((dt,j)=>{if(!norm(dt.place))return;const date=addDays(st.startDate,Math.max(0,Number(dt.day||1)-1));movements.push({id:`story_daytrip_${dt.id||j}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound?.departureTime||'',arrivalTime:dt.outbound?.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return?.departureTime||'',returnArrivalDate:date,returnArrivalTime:dt.return?.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound?.transportMode||'other',returnTransportMode:dt.return?.transportMode||dt.outbound?.transportMode||'other',timePrecision:(dt.outbound?.departureTime&&dt.outbound?.arrivalTime&&dt.return?.departureTime&&dt.return?.arrivalTime)?(dt.outbound?.timeStatus==='estimated'?'estimated':'exact'):'unknown',source:dt.outbound?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',routeResolution:dt.routeResolution||null,disposition:'roundtrip'});}));
+    stays.forEach(st=>effectiveStoryDayTrips(st,stays).forEach((dt,j)=>{if(!norm(dt.place))return;const date=addDays(st.startDate,Math.max(0,Number(dt.day||1)-1));movements.push({id:`story_daytrip_${dt.id||j}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound?.departureTime||'',arrivalTime:dt.outbound?.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return?.departureTime||'',returnArrivalDate:date,returnArrivalTime:dt.return?.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound?.transportMode||'other',returnTransportMode:dt.return?.transportMode||dt.outbound?.transportMode||'other',timePrecision:(dt.outbound?.departureTime&&dt.outbound?.arrivalTime&&dt.return?.departureTime&&dt.return?.arrivalTime)?(dt.outbound?.timeStatus==='estimated'?'estimated':'exact'):'unknown',source:dt.outbound?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',routeResolution:dt.routeResolution||null,disposition:'roundtrip'});}));
     dayContexts.forEach(ctx=>{
       const dayMoves=movements.filter(m=>m.departureDate===ctx.date||m.returnDepartureDate===ctx.date).sort((a,b)=>(a.departureTime||'99:99').localeCompare(b.departureTime||'99:99'));
       let cursor=ctx._dayStart,location=ctx.start_location;
@@ -550,7 +558,7 @@
           ctx.fixed_transfers.push({transfer_id:`${m.id}:out`,direction:m.disposition==='roundtrip'?'daytrip_out':'main',user_fixed:Boolean(m.departure_user_fixed ?? (m.disposition!=='roundtrip' ? true : m.source!=='ROUTE_ESTIMATED')),origin:m.origin,destination:m.destination,departure:m.departureTime||null,arrival:m.arrivalTime||null,date:m.departureDate,time_precision:m.timePrecision||'unknown',source:m.source||'USER_FIXED',departure_source:m.departure_source||((m.disposition!=='roundtrip')?'USER_FIXED':m.source||'USER_FIXED'),arrival_source:m.arrival_source||m.source||'USER_FIXED',transport_source:m.transport_source||m.source||'USER_FIXED',departure_user_fixed:Boolean(m.departure_user_fixed ?? (m.disposition!=='roundtrip' ? true : m.source!=='ROUTE_ESTIMATED')),arrival_user_fixed:Boolean(m.arrival_user_fixed),route_estimated:Boolean(m.arrival_source==='ROUTE_ESTIMATED'||m.transport_source==='ROUTE_ESTIMATED'||m.source==='ROUTE_ESTIMATED'),route_resolution:m.routeResolution||null,mode:m.transportMode||null});
           if(exact)ctx.location_windows.push({location:`${m.origin} → ${m.destination}`,start:m.departureTime,end:m.arrivalTime,type:'fixed_transfer',transfer_id:`${m.id}:out`,user_fixed:true});
           ctx.hard_route_constraints.push(`${m.origin} → ${m.destination}${m.departureTime?` ${m.departureTime}`:''}${m.arrivalTime?`–${m.arrivalTime}`:''}`);
-          if(exact){cursor=timeShift(m.arrivalTime,transferArrivalMinutes(m.transportMode));location=m.destination;}
+          if(exact){cursor=m.arrivalTime;location=m.destination;} // V283: arrivalTime is READY TO EXPLORE (user or resolved), never physical arrival.
           else {ctx.flexible_movement=true;location=m.destination;}
           if(m.disposition!=='roundtrip'){
             ctx.end_location=m.destination;ctx.overnight_base=m.destination;
@@ -587,6 +595,19 @@
       });
       if(!dayMoves.length){ctx.location_windows.push({location:ctx.start_location,start:ctx._dayStart,end:ctx._dayEnd,type:'plannable',flexible_start:!ctx._dayStart,flexible_end:!ctx._dayEnd,open_end:!ctx._dayEnd});}
       else if(cursor&&!ctx.flexible_movement&&(!ctx._dayEnd||cursor<ctx._dayEnd)){ctx.location_windows.push({location,start:cursor,end:ctx._dayEnd||null,type:'plannable',flexible_end:!ctx._dayEnd,open_end:!ctx._dayEnd});}
+      // V271 MAIN planning windows: do not drop regional corridor stops merely
+      // because they are not declared as separate day trips. Preserve V270's
+      // transit-only rule: a stop explicitly flagged as transit is logistics.
+      const transitOnlyLocation=(location,date)=>{
+        const visits=stays.filter(st=>norm(st.place).toLowerCase()===norm(location).toLowerCase() && date>=st.startDate && date<=endOf(st));
+        // A regional excursion may explicitly visit a corridor location even
+        // when a separate logistical stay with the same name is transit-only.
+        const excursionVisit=stays.some(st=>!(st.transitOnly===true || st.transitOnly==='true') &&
+          effectiveStoryDayTrips(st,stays).some(dt=>norm(dt.place).toLowerCase()===norm(location).toLowerCase() &&
+          addDays(st.startDate,Math.max(0,Number(dt.day||1)-1))===date));
+        return !excursionVisit && visits.length>0 && visits.every(st=>st.transitOnly===true || st.transitOnly==='true');
+      };
+      ctx.location_windows=ctx.location_windows.filter(w=>w.type==='fixed_transfer' || !transitOnlyLocation(w.location,ctx.date));
       delete ctx._owner;delete ctx._dayStart;delete ctx._dayEnd;
     });
     return {schema_version:VERSION,parent_destination:destination.city,day_contexts:dayContexts,segments:movements,main_destination_transitions:[],trip_story_compiled:true};
@@ -698,6 +719,9 @@
       // Day Trips remain part of the route/timeline and generation context, but
       // they must never become independent preference cards.
       model.trip_story.stays.forEach(st=>{
+        // Transit-only stops are movement context, not places to personalize.
+        // Keep them in trip_story for routing and generation.
+        if(st?.transitOnly===true || st?.transitOnly==='true') return;
         add(st.place,{
           type:'stay',
           country:st.country||'',
@@ -723,7 +747,7 @@
         // later adds that place as a MAIN destination.
         if(isLastDayArrival && !returnsToBase) return;
         // Round-trip excursions are route context, not independent preference destinations.
-        if(seg.disposition==='roundtrip') return;
+        if(seg.disposition==='roundtrip' || seg.transitOnly===true || seg.transitOnly==='true' || Number(seg.nights)===0) return;
         add(seg.destination,{type:'stay',country:dest.country,nights:Number(seg.nights||1),routeArrivalTransport:seg.transportMode||''});
       });
     });
