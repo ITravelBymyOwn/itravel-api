@@ -10000,50 +10000,6 @@ IMPORTANT IDENTITY RULE: planning_unit is the MAIN destination block, not the ph
   return {rows,contract};
 }
 
-// V294 · Read-only global quality observability. Never mutate canonical rows,
-// regenerate healthy stays, or override TIE selections based on fuzzy matches.
-// The same evaluator is usable by offline regression fixtures.
-function _v294QualityObservations_(rows=[],units=[]){
-  const ordered=[...(rows||[])].sort((a,b)=>Number(a?.day||0)-Number(b?.day||0)||(_hhmmToMinutes_(a?.start)??0)-(_hhmmToMinutes_(b?.start)??0));
-  const experiences=[];
-  for(const row of ordered){
-    if(!row||_isUtilityRow_(row)||_isPureTransportRow_(row))continue;
-    const poi=_poiKeyFromRow_(row);
-    if(!poi||String(poi).trim().length<5)continue;
-    const activity=_canonicalText_(row.activity||'');
-    const semantic=String(row?.commerce_context?.semantic_type||'');
-    experiences.push({day:Number(row.day||0),poi:String(poi),activity,semantic,selected:Boolean(row._tie_selected_anchor),row});
-  }
-  const repeats=[];
-  for(let i=0;i<experiences.length;i++){
-    const current=experiences[i];
-    for(let j=0;j<i;j++){
-      const prior=experiences[j];
-      if(prior.day===current.day||!_arePoiAliases_(prior.poi,current.poi))continue;
-      // Place reuse alone is not a duplicate: a different experience can be valuable.
-      // Flag identical activity only, and leave the final decision to review.
-      if(!current.activity||current.activity!==prior.activity||current.semantic!==prior.semantic)continue;
-      repeats.push({first_day:prior.day,repeat_day:current.day,poi:current.poi,activity:current.row.activity||'',severity:'review'});
-      break;
-    }
-  }
-  const anchors=[];
-  const seen=new Set();
-  for(const unit of units||[]){
-    const inventory=unit?.tie_structure?.experience_inventory||[];
-    for(const item of inventory){
-      const day=Number(item?.owner_day||0),name=String(item?.experience||'').trim();
-      if(!item?.selected||!day||!name||!(unit.days||[]).some(d=>Number(d)===day))continue;
-      const id=day+'|'+_canonicalText_(name);
-      if(seen.has(id))continue;
-      seen.add(id);
-      const matching=experiences.filter(e=>e.day===day&&(_arePoiAliases_(name,e.poi)||_arePoiAliases_(name,e.row.activity||'')));
-      anchors.push({day,experience:name,matched:matching.length>0,verification_required:Boolean(item.verification_required),unit_id:unit.id||null});
-    }
-  }
-  return {schema:'v294_observability_only',experience_rows:experiences.length,possible_repeats:repeats,selected_anchors:anchors.length,unmatched_selected_anchors:anchors.filter(a=>!a.matched),matched_selected_anchors:anchors.filter(a=>a.matched).length};
-}
-
 function _v3DedupeMergedStayRows_(rows=[]){
   const seen=new Set(),out=[];
   for(const row of (rows||[])){
@@ -10256,9 +10212,6 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     console.info(`[ITBMO V3 MERGE HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:blockingErrors}),blockingErrors);
     console.info('[ITBMO V266 CROSS-STAY ADVISORY] trip',_v266CrossStayAdvisories_(rows));
     console.info('[ITBMO V276 QUALITY ADVISORY] trip',_v274QualityAdvisories_(rows,generated.contract));
-    // V294: observe TIE execution and possible cross-day repeats; never block publication.
-    try{console.info('[ITBMO V294 GLOBAL EXPERIENCE QUALITY]',_v294QualityObservations_(rows,generated.units||[]));}
-    catch(qualityError){console.warn('[ITBMO V294 QUALITY OBSERVATION UNAVAILABLE]',String(qualityError?.message||qualityError));}
     _v3LogAuditDetails_('MERGED TRIP HARD AUDIT','trip','all-stays',blockingErrors);
     if(blockingErrors.length){
       const error=new Error(`V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE:trip`);
