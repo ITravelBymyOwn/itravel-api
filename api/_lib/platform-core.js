@@ -104,12 +104,12 @@ export function buildTravelGraph(trip){
   return {schema_version:'travel-graph-v1',trip_id:trip.id,generated_at:new Date().toISOString(),source_updated_at:trip.updated_at||trip.generated_at||null,stays,days,activities,segments};
 }
 
-export function navigationLinks({origin,destination,mode='transit'}){
+export function navigationLinks({origin,destination,mode='best'}){
   const from=cleanText(origin,240),to=cleanText(destination,240);
   if(!to)return {};
-  const allowedMode=['driving','walking','bicycling','transit'].includes(mode)?mode:'transit';
-  const google=new URL('https://www.google.com/maps/dir/');google.searchParams.set('api','1');if(from)google.searchParams.set('origin',from);google.searchParams.set('destination',to);google.searchParams.set('travelmode',allowedMode);
-  const waze=new URL('https://www.waze.com/ul');waze.searchParams.set('q',to);waze.searchParams.set('navigate','yes');
+  const allowedMode=['driving','walking','bicycling','transit'].includes(mode)?mode:'';
+  const google=new URL('https://www.google.com/maps/dir/');google.searchParams.set('api','1');if(from)google.searchParams.set('origin',from);google.searchParams.set('destination',to);if(allowedMode)google.searchParams.set('travelmode',allowedMode);google.searchParams.set('dir_action','navigate');google.searchParams.set('utm_source','itbmo');google.searchParams.set('utm_campaign','directions_request');
+  const waze=new URL('https://waze.com/ul');waze.searchParams.set('q',to);waze.searchParams.set('navigate','yes');waze.searchParams.set('utm_source','itbmo');
   return {google_maps:google.toString(),waze:waze.toString()};
 }
 
