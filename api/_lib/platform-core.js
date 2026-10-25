@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
+export { supabaseFetch };
+
 export const PLATFORM_FLAGS = Object.freeze([
   'platform_foundation_enabled','social_links_enabled','communication_hub_enabled',
   'whatsapp_support_enabled','web_chat_enabled','user_feedback_enabled',
