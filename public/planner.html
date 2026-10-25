@@ -1190,15 +1190,6 @@
     })();
   </script>
 
-  <!-- ExcelJS (required for styled, editable XLSX export) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-
-  <!-- jsPDF (required for PDF export) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-<!-- jsPDF AutoTable (required for tables) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-
 <!-- Focus bridge: same Planner iframe asks the parent Home to enter immersive mode.
      It does not alter Planner state, payment, ITBMO, Info Chat or generation logic. -->
 <script>
@@ -1232,9 +1223,9 @@
   })();
 </script>
 
-<!-- Tu JS del planner (después de los dos de arriba) -->
+<!-- Core Planner. Export libraries are loaded on demand by planner.js. -->
 <script src="./travel-model-v2.js?v=285"></script>
-<script src="./planner.js?v=294"></script>
+<script src="./planner.js?v=295.4.2"></script>
 <script src="./assets/js/itbmo-platform.js?v=295.1"></script>
  
 </body>
