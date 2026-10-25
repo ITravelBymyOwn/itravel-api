@@ -11,7 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=6.0">
+  <link rel="stylesheet" href="./assets/css/itbmo-platform.css?v=295">
   <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2.3">
+  <script src="./assets/js/itbmo-foundation.js?v=1.0"></script>
 </head>
 <body class="legal-page support-page">
   <a class="skip-link" href="#support-content">Ir al contenido</a>
@@ -65,6 +67,7 @@
             <h2>support@itravelbymyown.com</h2>
             <p>Problemas de acceso, Planner, Mis Viajes, Trip Workspace, Para tu viaje, preferencias, generación, descarga, Info Chat, Reset o pagos.</p>
             <a class="button button--primary" href="mailto:support@itravelbymyown.com?subject=ITBMO%20Support">Escribir a soporte</a>
+            <div data-itbmo-support-channels></div>
           </article>
 
           <article class="support-card glass-panel" id="contact">
@@ -101,7 +104,7 @@
             <div><b>03</b><span>Ciudad(es) del viaje, si ocurrió en Mis Viajes / Trip Workspace / Para tu viaje y momento aproximado del incidente.</span></div>
             <div><b>04</b><span>Captura de pantalla si ayuda a explicar el problema.</span></div>
             <div><b>05</b><span>Si fue un pago: fecha, importe y referencia de PayPal disponible.</span></div>
-            <div><b>06</b><span>Si falló un archivo: indica cuál no apareció (PDF, CSV o comprobante), el dispositivo utilizado y si probaste el botón individual de respaldo.</span></div>
+            <div><b>06</b><span>Si falló un archivo: indica cuál no apareció (PDF, Excel editable (XLSX) o comprobante), el dispositivo utilizado y si probaste el botón individual de respaldo.</span></div>
           </div>
           <div class="legal-callout legal-callout--privacy">
             <span>No envíes</span>
@@ -143,7 +146,7 @@
             <div class="eyebrow glass-pill">Descargas</div>
             <h2>¿No aparecieron todos tus documentos?</h2>
             <p>
-              Al finalizar una generación, ITBMO prepara el itinerario en PDF, el CSV compatible con Excel y el comprobante
+              Al finalizar una generación, ITBMO prepara el itinerario en PDF, el Excel editable (XLSX) y el comprobante
               de pago en PDF. En computadoras puedes descargarlos; en dispositivos móviles, ITBMO intentará abrir o compartir
               los archivos mediante las opciones disponibles en el navegador y el sistema. Si alguno no aparece, utiliza los
               botones individuales que permanecen disponibles debajo del itinerario antes de cerrar o recargar la página.
@@ -175,9 +178,10 @@
         <div class="footer-column"><strong>Ayuda</strong><a aria-current="page" href="./support-contact.html">Soporte &amp; Contacto</a></div>
         <div class="footer-column"><strong>Legal</strong><a href="./privacy-cookies.html">Política de privacidad</a><a href="./terms.html">Términos de servicio</a><a href="./privacy-cookies.html">Política de cookies</a><a href="./ads-affiliates.html">Afiliados y publicidad</a></div>
       </div>
-      <div class="site-footer__bottom"><p>© 2026 I Travel By My Own. Todos los derechos reservados.</p><p>Operado desde Costa Rica.</p></div>
+      <div class="site-footer__bottom"><p>© 2026 I Travel By My Own. Todos los derechos reservados.</p><p>Operado desde Costa Rica.</p><div data-itbmo-social-links></div></div>
     </div>
   </footer>
   <script src="./assets/js/itbmo-site.js?v=6.0"></script>
+  <script src="./assets/js/itbmo-platform.js?v=295"></script>
 </body>
 </html>
