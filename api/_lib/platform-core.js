@@ -25,16 +25,29 @@ export function safeHttpsUrl(value=''){
 
 export async function featureFlags(){
   const fallback={
-    platform_foundation_enabled:true,social_links_enabled:true,communication_hub_enabled:true,
-    whatsapp_support_enabled:false,web_chat_enabled:false,user_feedback_enabled:true,
-    travel_graph_enabled:true,mobility_engine_enabled:true,live_location_enabled:true,
+    platform_foundation_enabled:false,social_links_enabled:false,communication_hub_enabled:false,
+    whatsapp_support_enabled:false,web_chat_enabled:false,user_feedback_enabled:false,
+    travel_graph_enabled:false,mobility_engine_enabled:false,live_location_enabled:false,
     live_context_enabled:false,weather_intelligence_enabled:false,nearby_intelligence_enabled:false,
-    dynamic_itinerary_enabled:false,companion_enabled:true
+    dynamic_itinerary_enabled:false,companion_enabled:false
   };
   try{
     const rows=await supabaseFetch(`/feature_flags?select=key,enabled&key=in.(${PLATFORM_FLAGS.join(',')})`);
     for(const row of rows||[])if(PLATFORM_FLAGS.includes(row?.key))fallback[row.key]=Boolean(row.enabled);
   }catch(_){ }
+  // Preview deployments deliberately expose the reviewable, provider-neutral UX.
+  // Production remains controlled exclusively by Supabase flags. Live provider
+  // context, WhatsApp, web chat and itinerary mutation are never overridden.
+  if(process.env.VERCEL_ENV==='preview'||boolEnv('ITBMO_PLATFORM_PREVIEW',false)){
+    Object.assign(fallback,{
+      platform_foundation_enabled:true,
+      user_feedback_enabled:true,
+      travel_graph_enabled:true,
+      mobility_engine_enabled:true,
+      live_location_enabled:true,
+      companion_enabled:true
+    });
+  }
   return fallback;
 }
 
