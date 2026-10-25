@@ -468,6 +468,7 @@ async function handleStatus(res, body, session) {
     findPaidPayment(trip.id, session.user_id),
     findConsumedPromoEntitlement(trip.id, session.user_id)
   ]);
+  const promoCode = promoEntitlement ? await promoCodeForRedemption(promoEntitlement) : null;
   const adminBypass = isAdminTestBypass(session.user_id);
   const authorized = Boolean(payment) || Boolean(promoEntitlement) || adminBypass;
   const infoUsed = authorized
@@ -482,7 +483,10 @@ async function handleStatus(res, body, session) {
     promotion_entitlement: promoEntitlement ? {
       id: promoEntitlement.id,
       promo_code_id: promoEntitlement.promo_code_id,
+      code: promoCode?.code ? String(promoCode.code).toUpperCase() : null,
       discount_amount: promoEntitlement.discount_amount,
+      final_amount: promoEntitlement.final_amount,
+      currency: promoEntitlement.currency || COMMERCE.currency,
       consumed_at: promoEntitlement.consumed_at
     } : null,
     info_chat_authorized: authorized,
