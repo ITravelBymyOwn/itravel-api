@@ -431,14 +431,22 @@
 
   document.querySelectorAll('[data-planner-open]').forEach((trigger) => {
     trigger.addEventListener('click', (event) => {
-      event.preventDefault();
       if (typeof setMobileMenu === 'function') setMobileMenu(false);
 
       /* Phase 4: Planner is a standalone product surface.
-         Home no longer opens the embedded focus window. */
+         Links use their native named-window navigation; button launchers
+         restore the V295.3 independent Planner window behavior. */
       const pageLang = document.documentElement.lang?.toLowerCase().startsWith('es') ? 'es' : 'en';
       window.ITBMOFoundation?.track('planner_open',{placement:'home_cta',language:pageLang});
-      window.location.assign(`./planner.html?lang=${pageLang}`);
+      const plannerUrl=`./planner.html?lang=${pageLang}`;
+      if(trigger.tagName==='A'){
+        trigger.href=plannerUrl;
+        trigger.target='itbmo-planner';
+        return;
+      }
+      event.preventDefault();
+      const plannerWindow=window.open(plannerUrl,'itbmo-planner');
+      if(plannerWindow)plannerWindow.focus();
     });
   });
 
@@ -517,7 +525,8 @@
       exitExampleFocus({ immediate:true, restoreScroll:false });
       const pageLang = document.documentElement.lang?.toLowerCase().startsWith('es') ? 'es' : 'en';
       window.ITBMOFoundation?.track('planner_open',{placement:'example_cta',language:pageLang});
-      window.location.assign(`./planner.html?lang=${pageLang}`);
+      const plannerWindow=window.open(`./planner.html?lang=${pageLang}`,'itbmo-planner');
+      if(plannerWindow)plannerWindow.focus();
     });
   });
 
