@@ -4,8 +4,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
-const MAX_GENERATION_RUNS = 2;
-const MAX_DAYS_PER_DESTINATION = 10;
+// A paid trip remains recoverable until it is generated or explicitly archived.
+// The count records attempts; it must never invalidate the paid entitlement.
+const MAX_GENERATION_RUNS = null;
+const MAX_DAYS_PER_DESTINATION = 10; // Legacy single-destination limit
+const MAX_TRIP_STORY_DAYS = 30; // Continuous Trip Story limit; validated per physical stay
 
 const ITBMO_ADMIN_TEST_BYPASS =
   String(process.env.ITBMO_ADMIN_TEST_BYPASS || "false").toLowerCase() === "true";
@@ -156,7 +159,7 @@ function validDateOrNull(value) {
   return value;
 }
 
-function hasDestinationOverDayLimit(destinations) {
+function hasDestinationOverDayLimit(destinations, maxDays = MAX_DAYS_PER_DESTINATION) {
   if (!Array.isArray(destinations)) return false;
 
   return destinations.some(destination => {
@@ -165,8 +168,74 @@ function hasDestinationOverDayLimit(destinations) {
     }
 
     const days = Number(destination.days);
-    return Number.isFinite(days) && days > MAX_DAYS_PER_DESTINATION;
+    return Number.isFinite(days) && days > maxDays;
   });
+}
+
+function tripStoryFromBody(body = {}) {
+  const plannerInput = body?.planner_input;
+  if (!plannerInput || typeof plannerInput !== "object" || Array.isArray(plannerInput)) return null;
+  const model = plannerInput.travel_model_v2 || plannerInput.travelModelV2;
+  const story = model?.trip_story || model?.tripStory;
+  return story && typeof story === "object" && Array.isArray(story.stays) && story.stays.length
+    ? story
+    : null;
+}
+
+// V218: enforce aggregate effective itinerary days on the server, not only per stay.
+function tripStoryEffectiveDays(story) {
+  const dates = new Set();
+  for (const stay of (story?.stays || [])) {
+    if (stay?.transitOnly) continue;
+    const days = Number(stay?.days || 0);
+    if (!Number.isInteger(days) || days < 1 || days > MAX_TRIP_STORY_DAYS) continue;
+    const start = String(stay?.startDate || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) continue;
+    const base = new Date(`${start}T12:00:00Z`);
+    if (!Number.isFinite(base.getTime())) continue;
+    for (let i = 0; i < days; i++) {
+      const window = stay?.perDay?.[i];
+      if (window && !window.start && !window.end) continue;
+      const from = window?.start || '09:00', to = window?.end || '20:00';
+      if (from >= to) continue;
+      const date = new Date(base.getTime() + i * 86400000).toISOString().slice(0,10);
+      dates.add(date);
+    }
+  }
+  return dates.size;
+}
+
+function tripStoryDayLimitError(body = {}) {
+  const story = tripStoryFromBody(body);
+  if (!story) return null;
+
+  const invalidStay = story.stays.find(stay => {
+    const days = Number(stay?.days || 0);
+    return !Number.isInteger(days) || days < 1 || days > MAX_TRIP_STORY_DAYS;
+  });
+  if (invalidStay) return `A Trip Story stay cannot exceed ${MAX_TRIP_STORY_DAYS} days`;
+  const effectiveDays = tripStoryEffectiveDays(story);
+  if (effectiveDays > MAX_TRIP_STORY_DAYS) return `A Trip Story cannot exceed ${MAX_TRIP_STORY_DAYS} effective itinerary days (${effectiveDays} requested)`;
+
+  return null;
+}
+
+function destinationLimitError(body = {}) {
+  const storyError = tripStoryDayLimitError(body);
+  if (storyError) return storyError;
+
+  // Trip Story persists one compatibility planning unit spanning the continuous
+  // journey. Its aggregate day count may legitimately exceed the old 10-day
+  // single-destination limit; physical stays are validated above instead.
+  if (tripStoryFromBody(body)) {
+    // V219: the compatibility destination is a calendar envelope, not billable
+    // itinerary days. The authoritative effective-day check ran above.
+    return null;
+  }
+
+  return hasDestinationOverDayLimit(body.destinations, MAX_DAYS_PER_DESTINATION)
+    ? `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
+    : null;
 }
 
 function normalizeString(value, maxLength = 500) {
@@ -195,10 +264,11 @@ async function handleCreate(res, body, session) {
     });
   }
 
-  if (hasDestinationOverDayLimit(destinations)) {
+  const destinationLimitMessage = destinationLimitError({ ...body, destinations });
+  if (destinationLimitMessage) {
     return res.status(400).json({
       ok: false,
-      error: `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
+      error: destinationLimitMessage
     });
   }
 
@@ -461,10 +531,11 @@ async function handleUpdate(res, body, session) {
       });
     }
 
-    if (hasDestinationOverDayLimit(body.destinations)) {
+    const destinationLimitMessage = destinationLimitError(body);
+    if (destinationLimitMessage) {
       return res.status(400).json({
         ok: false,
-        error: `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
+        error: destinationLimitMessage
       });
     }
 
@@ -706,14 +777,6 @@ async function handleGenerationBegin(res, body, session) {
 
   const previousRuns = Math.max(0, Number(trip.generation_count || 0));
   const newRun = trip.status !== "generating";
-  if (newRun && previousRuns >= MAX_GENERATION_RUNS) {
-    return res.status(409).json({
-      ok:false,
-      code:"GENERATION_RECOVERY_EXHAUSTED",
-      error:"Automatic generation recovery limit reached"
-    });
-  }
-
   const nextRuns = newRun ? previousRuns + 1 : Math.max(1, previousRuns);
   const completed = Array.isArray(checkpoint.completed_cities)
     ? checkpoint.completed_cities.map(String)
@@ -730,6 +793,7 @@ async function handleGenerationBegin(res, body, session) {
 
   const nextCheckpoint = {
     ...checkpoint,
+    run_token:newRun || !checkpoint.run_token ? crypto.randomUUID() : checkpoint.run_token,
     schema_version:1,
     run_status:"generating",
     completed_cities:completed,
@@ -781,6 +845,20 @@ async function handleGenerationCheckpoint(res, body, session) {
     return res.status(409).json({ ok:false, code:"GENERATION_ALREADY_COMPLETED", error:"Generation already completed" });
   }
 
+  // V243: each paid generation has an independent server-issued identity.
+  // Reject stale tabs, old queued checkpoints and writes against a completed run.
+  const serverRunToken=String(generationCheckpoint(trip.itinerary_data).run_token || '');
+  const incomingRunToken=String(body.run_token || checkpoint.run_token || '');
+  if (!serverRunToken || incomingRunToken !== serverRunToken) {
+    return res.status(409).json({ok:false,code:'GENERATION_RUN_MISMATCH',error:'Generation run identity mismatch'});
+  }
+  if (trip.status === 'generated') {
+    return res.status(409).json({ok:false,code:'GENERATION_ALREADY_COMPLETED',error:'Generation already completed'});
+  }
+  if (trip.status !== 'generating' && trip.status !== 'failed') {
+    return res.status(409).json({ok:false,code:'GENERATION_STATE_CONFLICT',error:'Generation is not active'});
+  }
+
   const destinations = Array.isArray(trip.destinations) ? trip.destinations : [];
   const expectedCities = destinations.map(x => String(x?.city || "").trim()).filter(Boolean);
   const completedCities = Array.isArray(checkpoint.completed_cities)
@@ -804,12 +882,17 @@ async function handleGenerationCheckpoint(res, body, session) {
     ...(status === "generated" ? { completed_at:now, last_error:null } : {})
   };
 
-  const updated = await patchOwnedTrip(tripId, session.user_id, {
-    status,
-    itinerary_data:persistedCheckpoint,
-    ...(status === "generated" ? { generated_at:now } : {})
-  });
-
+  const updatedRows = await supabaseFetch(
+    `/trips?id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(session.user_id)}&status=in.(generating,failed)&itinerary_data->>run_token=eq.${encodeURIComponent(serverRunToken)}`,
+    {method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({
+      status,
+      itinerary_data:persistedCheckpoint,
+      ...(status === 'generated' ? {generated_at:now} : {})
+    })}
+  );
+  const updated = Array.isArray(updatedRows) ? updatedRows[0] || null : null;
+  if (!updated) return res.status(409).json({ok:false,code:'GENERATION_RUN_MISMATCH',error:'Generation changed while saving checkpoint'});
+  // V243 checkpoint committed under matching active run.
   return res.status(200).json({
     ok:true,
     action:"generation_checkpoint",
@@ -913,13 +996,16 @@ async function handleInfoChatCheckpoint(res, body, session) {
 
 
 async function handleList(res, body, session) {
-  const requestedLimit = Number(body.limit || 12);
-  const limit = Math.max(1, Math.min(30, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 12));
+  const requestedLimit = Number(body.limit ?? 30);
+  const limit = Math.max(1, Math.min(30, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 30));
+  // V217: bounded pages rather than an overall history cap.
+  const requestedOffset = Number(body.offset ?? 0);
+  const offset = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0 ? requestedOffset : 0;
 
   const rows = await supabaseFetch(
     `/trips?select=id,trip_name,status,destinations,planner_input,itinerary_data,generation_count,` +
     `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
-    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=${limit}`,
+    `status=in.(saved,generating,failed,generated)&order=updated_at.desc,id.desc&limit=${limit}&offset=${offset}`,
     { method:"GET" }
   );
 
@@ -934,15 +1020,22 @@ async function handleRecoverable(res, session) {
   const rows = await supabaseFetch(
     `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
     `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
-    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=10`,
+    // V272: include paid saved checkpoints, but prioritize actively interrupted
+    // generations and never recover generated/archived trips.
+    `status=in.(saved,generating,failed)&order=updated_at.desc&limit=100`,
     { method:"GET" }
   );
 
   const candidates = Array.isArray(rows) ? rows : [];
+  // A recent saved draft must not hide an actual failed/in-progress generation.
+  const priority = {generating:0, failed:0, saved:1};
+  candidates.sort((a,b) => (priority[a?.status] ?? 2) - (priority[b?.status] ?? 2));
   for (const trip of candidates) {
     const plannerInput = generationCheckpoint(trip?.planner_input);
     if (plannerInput.auto_recovery_disabled === true) continue;
-
+    // V281: a paid saved trip is recoverable even if Route Resolver failed
+    // before generation_begin (no run_token / generation_count yet).
+    // Entitlement is verified server-side below, not inferred from status.
     if (trip?.id && await hasGenerationEntitlement(trip.id, session.user_id)) {
       return res.status(200).json({ ok:true, action:"recoverable", trip });
     }
