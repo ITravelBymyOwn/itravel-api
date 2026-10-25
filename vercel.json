@@ -1,20 +1,13 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/platform-config.js", "use": "@vercel/node" },
-    { "src": "api/feedback.js", "use": "@vercel/node" },
-    { "src": "api/travel-intelligence.js", "use": "@vercel/node" },
-    { "src": "api/itinerary-changes.js", "use": "@vercel/node" },
+    { "src": "api/platform.js", "use": "@vercel/node" },
     {
       "src": "api/chat.js",
       "use": "@vercel/node"
     },
     {
       "src": "api/info-public.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/supabase-test.js",
       "use": "@vercel/node"
     },
     {
@@ -65,10 +58,10 @@
     }
   ],
   "routes": [
-    { "src": "/api/platform-config", "dest": "/api/platform-config.js" },
-    { "src": "/api/feedback", "dest": "/api/feedback.js" },
-    { "src": "/api/travel-intelligence", "dest": "/api/travel-intelligence.js" },
-    { "src": "/api/itinerary-changes", "dest": "/api/itinerary-changes.js" },
+    { "src": "/api/platform-config", "dest": "/api/platform.js?endpoint=platform-config" },
+    { "src": "/api/feedback", "dest": "/api/platform.js?endpoint=feedback" },
+    { "src": "/api/travel-intelligence", "dest": "/api/platform.js?endpoint=travel-intelligence" },
+    { "src": "/api/itinerary-changes", "dest": "/api/platform.js?endpoint=itinerary-changes" },
     {
       "src": "/api/chat",
       "dest": "/api/chat.js"
@@ -77,10 +70,7 @@
       "src": "/api/info-public",
       "dest": "/api/info-public.js"
     },
-    {
-      "src": "/api/supabase-test",
-      "dest": "/api/supabase-test.js"
-    },
+    { "src": "/api/supabase-test", "dest": "/api/platform.js?endpoint=supabase-test" },
     {
       "src": "/api/user",
       "dest": "/api/user.js"
