@@ -438,9 +438,7 @@
          Home no longer opens the embedded focus window. */
       const pageLang = document.documentElement.lang?.toLowerCase().startsWith('es') ? 'es' : 'en';
       window.ITBMOFoundation?.track('planner_open',{placement:'home_cta',language:pageLang});
-      const plannerWindow=window.open(`./planner.html?lang=${pageLang}`,'itbmo-planner');
-      if(plannerWindow) plannerWindow.focus();
-      else window.location.href=`./planner.html?lang=${pageLang}`;
+      window.location.assign(`./planner.html?lang=${pageLang}`);
     });
   });
 
@@ -519,9 +517,7 @@
       exitExampleFocus({ immediate:true, restoreScroll:false });
       const pageLang = document.documentElement.lang?.toLowerCase().startsWith('es') ? 'es' : 'en';
       window.ITBMOFoundation?.track('planner_open',{placement:'example_cta',language:pageLang});
-      const plannerWindow=window.open(`./planner.html?lang=${pageLang}`,'itbmo-planner');
-      if(plannerWindow) plannerWindow.focus();
-      else window.location.href=`./planner.html?lang=${pageLang}`;
+      window.location.assign(`./planner.html?lang=${pageLang}`);
     });
   });
 
