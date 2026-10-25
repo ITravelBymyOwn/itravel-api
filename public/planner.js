@@ -23,7 +23,7 @@
 
 
 const ITBMO_RUNTIME_BUILD='V271';
-const ITBMO_RUNTIME_ASSET='planner.js?v=286';
+const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.2';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -105,6 +105,61 @@ const ITBMO_PLANNER_OPEN_HANDOFF_KEY = 'itbmo_planner_open_handoff_v1';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
+
+/* ---------- Fast standalone surfaces ----------
+   Keep Planner startup focused on trip creation. Export engines are fetched
+   only when a document is requested, while the Workspace is warmed quietly
+   after the Planner becomes idle. */
+const ITBMO_LAZY_SCRIPT_PROMISES=new Map();
+function _itbmoLoadScriptOnce_(src,isReady){
+  if(isReady?.())return Promise.resolve();
+  if(ITBMO_LAZY_SCRIPT_PROMISES.has(src))return ITBMO_LAZY_SCRIPT_PROMISES.get(src);
+  const promise=new Promise((resolve,reject)=>{
+    const existing=[...document.scripts].find(script=>script.src===new URL(src,document.baseURI).href);
+    const done=()=>isReady?.()?resolve():reject(new Error(`ASSET_NOT_READY:${src}`));
+    if(existing){existing.addEventListener('load',done,{once:true});existing.addEventListener('error',()=>reject(new Error(`ASSET_LOAD_FAILED:${src}`)),{once:true});return;}
+    const script=document.createElement('script');
+    script.src=src;script.async=true;script.dataset.itbmoLazyAsset='export';
+    script.addEventListener('load',done,{once:true});
+    script.addEventListener('error',()=>{script.remove();reject(new Error(`ASSET_LOAD_FAILED:${src}`));},{once:true});
+    document.head.appendChild(script);
+  }).catch(error=>{ITBMO_LAZY_SCRIPT_PROMISES.delete(src);throw error;});
+  ITBMO_LAZY_SCRIPT_PROMISES.set(src,promise);
+  return promise;
+}
+async function _itbmoEnsureExcelExport_(){
+  await _itbmoLoadScriptOnce_('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',()=>Boolean(window.ExcelJS?.Workbook));
+}
+async function _itbmoEnsurePdfExport_(){
+  await _itbmoLoadScriptOnce_('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',()=>Boolean(window.jspdf?.jsPDF));
+  await _itbmoLoadScriptOnce_('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js',()=>Boolean(window.jspdf?.jsPDF?.API?.autoTable));
+}
+function _itbmoWarmWorkspace_(){
+  const lang=document.documentElement.lang?.toLowerCase().startsWith('en')?'en':'es';
+  const assets=[
+    [`./trip-workspace.html?lang=${lang}`,'document'],
+    ['./trip-workspace.css?v=230','style'],
+    ['./assets/css/itbmo-platform.css?v=295.3','style'],
+    ['./assets/js/itbmo-foundation.js?v=1.0','script'],
+    ['./trip-workspace.js?v=295.4','script'],
+    ['./assets/js/itbmo-platform.js?v=295.1','script'],
+    ['./assets/js/itbmo-feedback.js?v=295.3','script'],
+    ['./assets/js/itbmo-companion.js?v=295.2','script'],
+    ['https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js','script'],
+    ['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js','script'],
+    ['https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js','script']
+  ];
+  assets.forEach(([href,as])=>{
+    if(document.head.querySelector(`link[data-itbmo-warmup][href="${href}"]`))return;
+    const link=document.createElement('link');link.rel='prefetch';link.href=href;link.as=as;link.dataset.itbmoWarmup='workspace';document.head.appendChild(link);
+  });
+}
+function _itbmoScheduleWorkspaceWarmup_(){
+  if('requestIdleCallback' in window)window.requestIdleCallback(_itbmoWarmWorkspace_,{timeout:1800});
+  else window.setTimeout(_itbmoWarmWorkspace_,500);
+}
+if(document.readyState==='complete')_itbmoScheduleWorkspaceWarmup_();
+else window.addEventListener('load',_itbmoScheduleWorkspaceWarmup_,{once:true});
 
 let currentUser = null;
 let currentTripId = null;
@@ -12897,6 +12952,10 @@ async function exportItineraryToXLSX(options={}){
   const blocks=_exportPhysicalDestinationBlocks_();
   const es=_plannerOutputLang_()==='es';
   if(!blocks.length){alert(es?'No hay itinerarios generados todavía para exportar.':'There are no generated itineraries to export yet.');throw new Error('NO_ITINERARY_FOR_XLSX');}
+  try{await _itbmoEnsureExcelExport_();}catch(_){
+    alert(es?'No se pudo cargar el generador de Excel. Revisa tu conexión e inténtalo nuevamente.':'The Excel generator could not be loaded. Check your connection and try again.');
+    throw new Error('EXCELJS_UNAVAILABLE');
+  }
   if(!window.ExcelJS?.Workbook){
     alert(es?'No se pudo cargar el generador de Excel. Revisa tu conexión e inténtalo nuevamente.':'The Excel generator could not be loaded. Check your connection and try again.');
     throw new Error('EXCELJS_UNAVAILABLE');
@@ -13092,9 +13151,10 @@ function _v121PdfApplyAuroraNotes_(days=[],es=true){
   return auroraRoots;
 }
 async function exportItineraryToPDF(options={}){
-  if(!window.jspdf?.jsPDF){alert('jsPDF no está disponible.');return;}
   const blocks=_exportPhysicalDestinationBlocks_();
   if(!blocks.length){alert(getLang()==='es'?'No hay itinerarios para exportar.':'There is no itinerary to export.');return;}
+  try{await _itbmoEnsurePdfExport_();}catch(_){alert(getLang()==='es'?'No se pudo cargar el generador de PDF. Revisa tu conexión e inténtalo nuevamente.':'The PDF generator could not be loaded. Check your connection and try again.');return;}
+  if(!window.jspdf?.jsPDF){alert(getLang()==='es'?'No se pudo cargar el generador de PDF.':'The PDF generator could not be loaded.');return;}
   const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:'portrait',unit:'pt',format:'a4'}),es=_plannerOutputLang_()==='es';
   _itbmoPdfRegisterFonts_(doc);
   const logo=await _itbmoPdfLogoDataUrl_();
@@ -13513,6 +13573,7 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
 
   const c = copy[lang] || copy.en;
 
+  try{await _itbmoEnsurePdfExport_();}catch(_){alert(c.prep);return false;}
   if(!window.jspdf?.jsPDF){
     alert(c.prep);
     return false;
