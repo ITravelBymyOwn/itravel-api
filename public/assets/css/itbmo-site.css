@@ -3018,3 +3018,16 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
 .journey-continuum__whole strong{display:block;margin:.2rem 0;color:var(--ink);font-size:.94rem}
 .journey-continuum__whole p{margin:0;color:var(--text);font-size:.76rem}
 @media(max-width:900px){.journey-continuum__grid{grid-template-columns:1fr}.journey-continuum__card{min-height:0}.journey-continuum__icon{margin-bottom:1.7rem}}
+
+/* V150 - Home sample mirrors the current one-day-per-page PDF card layout. */
+.pdf-sample-card{padding:0;overflow:hidden}
+.pdf-sample-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1.15rem 1.2rem .8rem}
+.pdf-sample-head>div>strong{display:block;margin:.28rem 0 .12rem;color:var(--ink-2);font-size:1.35rem}
+.pdf-sample-head>div>small{color:#708699;font-weight:650}
+.pdf-sample-alert{display:flex;justify-content:space-between;gap:1rem;padding:.68rem 1.2rem;border-top:5px solid #17b8c7;color:#87542f;font-size:.7rem;font-weight:850;letter-spacing:.035em}
+.pdf-sample-alert span{color:#138392}
+.pdf-sample-grid{display:grid;grid-template-columns:1fr 1fr;gap:.45rem 1rem;padding:.3rem 1.2rem 1.2rem}
+.pdf-sample-stop{position:relative;padding:.75rem .8rem .72rem;border-radius:12px;background:#f2f8fb;border-left:4px solid #168de2}
+.pdf-sample-stop--move{background:#eaf8fa;border-left-color:#18b7c5}.pdf-sample-stop--meal{background:#fff3ea;border-left-color:#f08b50}
+.pdf-sample-stop b,.pdf-sample-stop strong,.pdf-sample-stop small,.pdf-sample-stop em{display:block}.pdf-sample-time{color:#0786cc;font-size:.78rem}.pdf-sample-stop strong{margin:.12rem 0;color:#173652;font-size:.82rem;line-height:1.18}.pdf-sample-stop small{color:#61788b;font-size:.67rem}.pdf-sample-stop em{margin:.16rem 0;color:#167d88;font-size:.7rem;font-style:normal;font-weight:800}.pdf-sample-stop p{margin:.15rem 0 0;color:#5b7182;font-size:.67rem;line-height:1.32}
+@media(max-width:760px){.pdf-sample-grid{grid-template-columns:1fr}.pdf-sample-alert{flex-direction:column}.pdf-sample-head>div>strong{font-size:1.08rem}}
