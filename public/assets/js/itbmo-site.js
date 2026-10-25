@@ -31,6 +31,38 @@
   };
 
   /* =========================================================
+     STANDALONE SURFACE WARMUP
+     ---------------------------------------------------------
+     The embedded Planner is intentionally gone. Once Home is fully usable,
+     warm only the standalone Planner's essential static files at low browser
+     priority. Nothing is executed here and no Planner/API state is created.
+  ========================================================= */
+  function warmStandalonePlanner(){
+    const pageLang=document.documentElement.lang?.toLowerCase().startsWith('es')?'es':'en';
+    const assets=[
+      [`./planner.html?lang=${pageLang}`,'document'],
+      ['./planner.css?v=282','style'],
+      ['./assets/css/itbmo-platform.css?v=295.1','style'],
+      ['./assets/js/itbmo-foundation.js?v=1.0','script'],
+      ['./travel-model-v2.js?v=285','script'],
+      ['./planner.js?v=295.4.2','script'],
+      ['./assets/js/itbmo-platform.js?v=295.1','script']
+    ];
+    assets.forEach(([href,as])=>{
+      if(document.head.querySelector(`link[data-itbmo-warmup][href="${href}"]`))return;
+      const link=document.createElement('link');
+      link.rel='prefetch';link.href=href;link.as=as;link.dataset.itbmoWarmup='planner';
+      document.head.appendChild(link);
+    });
+  }
+  const schedulePlannerWarmup=()=>{
+    if('requestIdleCallback' in window)window.requestIdleCallback(warmStandalonePlanner,{timeout:1400});
+    else window.setTimeout(warmStandalonePlanner,350);
+  };
+  if(document.readyState==='complete')schedulePlannerWarmup();
+  else window.addEventListener('load',schedulePlannerWarmup,{once:true});
+
+  /* =========================================================
      FAQ
   ========================================================= */
   document.querySelectorAll('.faq-item > button').forEach((button) => {
