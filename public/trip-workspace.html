@@ -6,7 +6,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#f7fbfc" />
   <title>ITBMO · Tu viaje</title>
-  <link rel="stylesheet" href="./trip-workspace.css?v=23" />
+  <link rel="stylesheet" href="./trip-workspace.css?v=230" />
+  <link rel="stylesheet" href="./assets/css/itbmo-platform.css?v=295" />
   <script src="./assets/js/itbmo-foundation.js?v=1.0"></script>
 </head>
 <body>
@@ -33,10 +34,6 @@
   </section>
   <div class="tw-shell">
     <header class="tw-topbar">
-      <div class="tw-top-actions">
-        <button id="tw-back-planner" class="tw-back" type="button" aria-label="Volver al Planner"><span>←</span><b id="tw-back-label">Volver al Planner</b></button>
-        <button id="tw-my-trips" class="tw-my-trips" type="button" aria-label="Mis Viajes"><span>✦</span><b id="tw-my-trips-label">Mis Viajes</b></button>
-      </div>
       <a class="tw-brand" href="./preview-home.html?lang=es" aria-label="I Travel By My Own">
         <span class="tw-brand-mark">✦</span><span><b>I Travel</b><small>By My Own</small></span>
       </a>
@@ -61,6 +58,7 @@
           </aside>
         </div>
         <div id="tw-city-grid" class="tw-city-grid"></div>
+        <section id="tw-feedback" class="tw-feedback" hidden aria-live="polite"></section>
         <section id="tw-trip-wide" class="tw-trip-wide">
           <div class="tw-trip-wide__head">
             <span class="tw-trip-wide-icon">✦</span>
@@ -100,6 +98,7 @@
           </div>
         </div>
         <nav id="tw-days" class="tw-days" aria-label="Días del itinerario"></nav>
+        <section id="tw-companion" class="tw-companion" hidden aria-live="polite"></section>
         <div id="tw-content" class="tw-content"></div>
       </section>
 
@@ -113,10 +112,13 @@
       </button>
 
       <section id="tw-empty" class="tw-empty" hidden>
-        <span class="tw-empty-mark">✦</span><h1>No pudimos cargar este viaje.</h1><p>Vuelve al Planner para abrirlo nuevamente.</p><button id="tw-empty-back" type="button">Volver al Planner</button>
+        <span class="tw-empty-mark">✦</span><h1>No pudimos cargar este viaje.</h1><p>Abre el Planner que ya tienes abierto para seleccionar nuevamente el viaje.</p>
       </section>
     </main>
   </div>
-  <script src="./trip-workspace.js?v=24"></script>
+  <script src="./assets/js/itbmo-platform.js?v=295"></script>
+  <script src="./trip-workspace.js?v=278"></script>
+  <script src="./assets/js/itbmo-feedback.js?v=295"></script>
+  <script src="./assets/js/itbmo-companion.js?v=295"></script>
 </body>
 </html>
