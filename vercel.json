@@ -1,6 +1,10 @@
 {
   "version": 2,
   "builds": [
+    { "src": "api/platform-config.js", "use": "@vercel/node" },
+    { "src": "api/feedback.js", "use": "@vercel/node" },
+    { "src": "api/travel-intelligence.js", "use": "@vercel/node" },
+    { "src": "api/itinerary-changes.js", "use": "@vercel/node" },
     {
       "src": "api/chat.js",
       "use": "@vercel/node"
@@ -47,7 +51,13 @@
     },
     {
       "src": "api/partners.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "api/data/omio-es.csv.gz",
+          "api/data/omio-en.csv.gz"
+        ]
+      }
     },
     {
       "src": "public/**/*",
@@ -55,6 +65,10 @@
     }
   ],
   "routes": [
+    { "src": "/api/platform-config", "dest": "/api/platform-config.js" },
+    { "src": "/api/feedback", "dest": "/api/feedback.js" },
+    { "src": "/api/travel-intelligence", "dest": "/api/travel-intelligence.js" },
+    { "src": "/api/itinerary-changes", "dest": "/api/itinerary-changes.js" },
     {
       "src": "/api/chat",
       "dest": "/api/chat.js"
@@ -102,6 +116,10 @@
     {
       "src": "/api/partners",
       "dest": "/api/partners.js"
+    },
+    {
+      "src": "/api/email",
+      "dest": "/api/user.js"
     },
     {
       "src": "/(.*)",
