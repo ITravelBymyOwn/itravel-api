@@ -1,6 +1,6 @@
 import { authenticatedTrip, buildTravelGraph, cleanText, featureFlags, liveGateway, navigationLinks } from './_lib/platform-core.js';
 
-const MODES=new Set(['driving','walking','bicycling','transit']);
+const MODES=new Set(['best','driving','walking','bicycling','transit']);
 const coordinate=value=>{const n=Number(value);return Number.isFinite(n)&&n>=-180&&n<=180?n:null};
 
 export default async function handler(req,res){
@@ -16,7 +16,7 @@ export default async function handler(req,res){
     }
     if(action==='route'){
       if(!flags.mobility_engine_enabled)return res.status(404).json({ok:false,code:'FEATURE_DISABLED'});
-      const origin=cleanText(body.origin,240),destination=cleanText(body.destination,240),mode=MODES.has(body.mode)?body.mode:'transit';
+      const origin=cleanText(body.origin,240),destination=cleanText(body.destination,240),mode=MODES.has(body.mode)?body.mode:'best';
       if(!destination)return res.status(400).json({ok:false,code:'DESTINATION_REQUIRED'});
       const links=navigationLinks({origin,destination,mode});
       let live={available:false,code:'LIVE_CONTEXT_DISABLED'};
