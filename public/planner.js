@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V295.4.4';
-const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.4';
+const ITBMO_RUNTIME_BUILD='V295.4.5';
+const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.5';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -90,6 +90,7 @@ trackITBMOEvent('planner_open');
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
 const ITBMO_GUEST_SESSION_KEY = 'itbmo_guest_session_token';
 const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
+const ITBMO_ACTIVE_TRIP_TAB_KEY = 'itbmo_active_trip_id_tab_v2';
 const ITBMO_USER_CACHE_KEY = 'itbmo_user_cache_v1';
 const ITBMO_AUTH_SYNC_KEY = 'itbmo_auth_sync_v1';
 const ITBMO_AUTH_OWNER_KEY = 'itbmo_auth_owner_v1';
@@ -911,8 +912,68 @@ function clearSessionToken({broadcast=true}={}){
   clearCachedUser();
   if(broadcast) broadcastAuthState('signed_out');
 }
-function getStoredActiveTripId(){ try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }catch(_){ return ''; } }
-function storeActiveTripId(tripId){ try{ if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId)); else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY); }catch(_){ } }
+function getStoredActiveTripId(){
+  try{
+    const tabRaw=String(sessionStorage.getItem(ITBMO_ACTIVE_TRIP_TAB_KEY) || '').trim();
+    const legacyRaw=String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim();
+    const currentTabId=plannerTabId();
+    const hasOtherLivePlanner=Object.entries(pruneSurfacePresence()).some(([id,entry])=>id!==currentTabId && entry?.type==='planner');
+    // A tab-scoped pointer owns normal reload recovery. The durable fallback is
+    // accepted only when no other live Planner could own it (closed-tab recovery),
+    // plus one-time support for the UUID-only V295.4.4 format.
+    const allowDurableFallback=legacyRaw && (!legacyRaw.startsWith('{') || !hasOtherLivePlanner);
+    const raw=tabRaw || (allowDurableFallback ? legacyRaw : '');
+    if(!raw) return '';
+    try{
+      const pointer=JSON.parse(raw);
+      if(!pointer || typeof pointer!=='object' || Array.isArray(pointer)) return '';
+      const tripId=String(pointer.trip_id || '').trim();
+      const pointerUserId=String(pointer.user_id || '').trim();
+      const activeUserId=String(currentUser?.id || '').trim();
+      if(pointerUserId && activeUserId && pointerUserId!==activeUserId){
+        sessionStorage.removeItem(ITBMO_ACTIVE_TRIP_TAB_KEY);
+        return '';
+      }
+      return tripId;
+    }catch(_){
+      // One-time compatibility with the legacy UUID-only pointer. Ownership and
+      // recoverability are still revalidated by /api/trip before any hydration.
+      return raw;
+    }
+  }catch(_){ return ''; }
+}
+function storeActiveTripId(tripId){
+  try{
+    if(!tripId){
+      const tabRaw=String(sessionStorage.getItem(ITBMO_ACTIVE_TRIP_TAB_KEY) || '').trim();
+      const durableRaw=String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim();
+      const pointerTripId=raw=>{
+        if(!raw) return '';
+        try{return String(JSON.parse(raw)?.trip_id || '').trim();}catch(_){return raw;}
+      };
+      const tabTripId=pointerTripId(tabRaw);
+      const durableTripId=pointerTripId(durableRaw);
+      const currentTabId=plannerTabId();
+      const hasOtherLivePlanner=Object.entries(pruneSurfacePresence()).some(([id,entry])=>id!==currentTabId && entry?.type==='planner');
+      sessionStorage.removeItem(ITBMO_ACTIVE_TRIP_TAB_KEY);
+      // Clearing one Planner must never erase another tab's durable fallback.
+      if((tabTripId && tabTripId===durableTripId) || (!tabTripId && !hasOtherLivePlanner)){
+        localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY);
+      }
+      return;
+    }
+    const pointer=JSON.stringify({
+      schema_version:2,
+      trip_id:String(tripId),
+      user_id:String(currentUser?.id || ''),
+      updated_at:new Date().toISOString()
+    });
+    sessionStorage.setItem(ITBMO_ACTIVE_TRIP_TAB_KEY,pointer);
+    // Retain the latest pointer only as a non-automatic diagnostic/migration aid;
+    // automatic V295.4.5 recovery reads the tab-scoped record above.
+    localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,pointer);
+  }catch(_){ }
+}
 
 function validAccountEmail(email){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()); }
 function validAccountPassword(password){ return typeof password === 'string' && password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password); }
@@ -11389,6 +11450,23 @@ async function runPaidGeneration({manualRetry=false}={}){
   if(manualRetry) _resumeAstraGenerationMetricsForRecovery_(); else _resetAstraGenerationMetrics_();
 
   try{
+    // V295.4.5: establish server-side trip identity before Route Resolver performs
+    // any expensive work. Historical/terminal rows are detached immediately and
+    // can never reach automatic generation through a stale browser pointer.
+    showWOW(true,getLang()==='es'?'Verificando tu viaje antes de iniciar…':'Checking your trip before starting…');
+    const token=getStoredSessionToken();
+    const preflight=await tripApi({
+      action:'generation_preflight',
+      session_token:token,
+      trip_id:currentTripId
+    });
+    _assertGenerationRunActive_(runEpoch);
+    if(preflight?.already_completed || preflight?.can_begin===false){
+      const conflict=new Error('Este viaje ya figura como generado en el servidor. No se mostrarán documentos anteriores como resultado de esta generación.');
+      conflict.code='GENERATION_ALREADY_COMPLETED';
+      throw conflict;
+    }
+
     // V72: never erase a terminal-success marker before we know the server has opened a genuinely new run.
     // A transient Route Resolver failure must not resurrect an already completed trip.
     showWOW(true,getLang()==='es'?'✨ ITBMO está resolviendo la logística de tu recorrido…':'✨ ITBMO is resolving your trip logistics…');
@@ -11396,7 +11474,6 @@ async function runPaidGeneration({manualRetry=false}={}){
     try{const pendingStory=_travelV2()?.state?.tripStory;if(pendingStory?.stays?.length)_tripStorySaveDraft_(JSON.parse(JSON.stringify(pendingStory)));}catch(e){console.warn('[ITBMO V279 RECOVERY] local route snapshot unavailable',e);}
     await _resolveTripStoryRoutesBeforeGeneration_();
     _assertGenerationRunActive_(runEpoch);
-    const token=getStoredSessionToken();
     const begin=await tripApi({
       action:'generation_begin',
       session_token:token,
@@ -11834,11 +11911,54 @@ function _plannerOwnsAutomaticGenerationRecovery_(){
 }
 
 let paidGenerationRecoveryDiscoveryRunning=false;
+const ITBMO_RECOVERABLE_POST_PAYMENT_PHASES=new Set(['preferences','preferences_confirmed','collecting_hotels','collecting_language','generation_requested']);
+function _automaticRecoveryAssessment_(trip,serverRecovery){
+  if(!trip?.id) return {eligible:false,reason:'TRIP_MISSING'};
+  const status=String(trip.status || '').trim().toLowerCase();
+  const plannerInput=trip.planner_input && typeof trip.planner_input==='object' && !Array.isArray(trip.planner_input) ? trip.planner_input : {};
+  const checkpoint=trip.itinerary_data && typeof trip.itinerary_data==='object' && !Array.isArray(trip.itinerary_data) ? trip.itinerary_data : {};
+  const runStatus=String(checkpoint.run_status || '').trim().toLowerCase();
+  const terminalArchived=status==='archived' || runStatus==='archived' || Boolean(checkpoint.archived_at);
+  const terminalGenerated=status==='generated' || Boolean(trip.generated_at) || ['generated','completed'].includes(runStatus) || checkpoint.completed===true || checkpoint.generation_completed===true || Boolean(checkpoint.completed_at);
+  if(terminalArchived) return {eligible:false,terminal:true,reason:'TRIP_ARCHIVED'};
+  if(terminalGenerated) return {eligible:false,terminal:true,reason:'TRIP_ALREADY_COMPLETED'};
+  if(plannerInput.auto_recovery_disabled===true) return {eligible:false,reason:'AUTO_RECOVERY_DISABLED'};
+
+  let localEligible=false;
+  let reason='STATUS_NOT_RECOVERABLE';
+  if(status==='saved'){
+    const progress=plannerInput.post_payment_progress && typeof plannerInput.post_payment_progress==='object' && !Array.isArray(plannerInput.post_payment_progress) ? plannerInput.post_payment_progress : {};
+    const phase=String(progress.phase || '').trim().toLowerCase();
+    localEligible=ITBMO_RECOVERABLE_POST_PAYMENT_PHASES.has(phase);
+    reason=localEligible?'POST_PAYMENT_INTERRUPTED':'SAVED_WITHOUT_POST_PAYMENT_PROGRESS';
+  }else if(status==='generating' || status==='failed'){
+    localEligible=Boolean(String(checkpoint.run_token || '').trim()) && Math.max(0,Number(trip.generation_count || 0))>=1;
+    reason=localEligible?'GENERATION_INTERRUPTED':'GENERATION_IDENTITY_MISSING';
+  }
+
+  if(serverRecovery && serverRecovery.eligible!==true){
+    return {eligible:false,reason:String(serverRecovery.reason || reason)};
+  }
+  return {eligible:localEligible,reason};
+}
+function _detachInvalidAutomaticRecovery_(trip,reason=''){
+  const tripId=String(trip?.id || getStoredActiveTripId() || '').trim();
+  storeActiveTripId(null);
+  _clearPostPaymentProgressLocal_(tripId);
+  _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
+  console.info('[ITBMO V295.4.5 RECOVERY IDENTITY] automatic recovery detached',{trip_id:tripId||null,reason:String(reason||'NOT_RECOVERABLE')});
+}
 async function restorePaidGenerationIfNeeded(interruptedTripId){
   if(!_plannerOwnsAutomaticGenerationRecovery_()) return;
-  // Explicit new journeys must never revive a previous payment/generation.
-  // Explicit new-mode stays blank unless this browser holds an interrupted paid trip.
-  if(new URLSearchParams(window.location.search).get('mode')==='new' && !interruptedTripId && !getStoredActiveTripId()) return;
+  // A Home launch explicitly requests an independent clean Planner. Consume the
+  // marker once so subsequent reloads in this same tab can recover its own trip.
+  const startupUrl=new URL(window.location.href);
+  if(startupUrl.searchParams.get('mode')==='new'){
+    try{sessionStorage.removeItem(ITBMO_ACTIVE_TRIP_TAB_KEY);}catch(_){ }
+    startupUrl.searchParams.delete('mode');
+    try{history.replaceState(history.state,'',startupUrl.toString());}catch(_){ }
+    return;
+  }
   if(generationResetInProgress || paidGenerationRunning || paidGenerationRecoveryDiscoveryRunning || !currentUser || !getStoredSessionToken()) return;
   paidGenerationRecoveryDiscoveryRunning=true;
   const restoreEpoch=generationRunEpoch;
@@ -11848,57 +11968,68 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
     // interrupted generation on the server. Completed/saved trips are NEVER hydrated.
     const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
     const tripId=requestedTripId || String(interruptedTripId || getStoredActiveTripId() || '').trim();
+    // V295.4.5 contract: a clean/new tab has no recovery identity and must remain
+    // clean. Server history is available through My Trips, never as an unsolicited
+    // automatic Planner hydration.
+    if(!tripId) return;
     let trip=null;
+    let recovery=null;
+    let explicitPointerResolved=false;
     if(tripId){
       try{
-        const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
+        const data=await tripApi({action:'get',session_token:token,trip_id:tripId,recovery_check:true});
         trip=data?.trip || null;
+        recovery=data?.recovery || null;
+        explicitPointerResolved=Boolean(trip);
       }catch(err){
         if(err?.status===404) storeActiveTripId(null);
         else throw err;
       }
     }
-    // A terminal active pointer belongs to My Trips. It must end automatic
-    // recovery instead of causing discovery of an unrelated historical draft.
-    if(trip && ['generated','archived'].includes(String(trip.status||''))){
-      storeActiveTripId(null);
-      _clearPostPaymentProgressLocal_(trip.id);
-      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
-      return;
-    }
-    if(!trip){
-      // V272: discover eligible unfinished paid trips; completed trips remain terminal.
-      const data=await tripApi({action:'recoverable',session_token:token});
-      trip=data?.trip || null;
+    // An explicit pointer is authoritative only when both client and server agree
+    // that it represents this account's real interrupted post-payment flow.
+    if(explicitPointerResolved){
+      const assessment=_automaticRecoveryAssessment_(trip,recovery);
+      if(!assessment.eligible){
+        _detachInvalidAutomaticRecovery_(trip,assessment.reason);
+        return;
+      }
     }
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
-    if(!trip || !['saved','generating','failed'].includes(trip.status)) return;
-    // A paid saved trip is a recoverable pre-generation state, not a completed trip.
-    storeActiveTripId(String(trip.id));
-
-    // V86 RECOVERY CONTRACT:
-    // Login/new Planner = blank. Completed/saved route creation is never restored.
-    // The ONLY automatic hydration allowed here is a paid generation retry.
-    if(trip.status==='generated'){
-      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:true});
+    if(!trip) return;
+    const assessment=_automaticRecoveryAssessment_(trip,recovery);
+    if(!assessment.eligible){
+      _detachInvalidAutomaticRecovery_(trip,assessment.reason);
       return;
     }
-
-    // generating / failed: preserve the paid-generation recovery path.
-    if(!_hydrateGenerationTrip_(trip)) return;
 
     let paymentStatus=null;
     try{
-      paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+      paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:trip.id});
       applyInfoChatStatus(paymentStatus);
-    }catch(_){ }
-    if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch || currentTripId!==trip.id) return;
+    }catch(err){
+      // A transient entitlement-status failure must keep the Planner clean and the
+      // valid pointer intact so a later reload can retry safely.
+      console.warn('[GENERATION RESTORE ENTITLEMENT]',err);
+      return;
+    }
+    if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
 
     if(!paymentStatus?.paid && !paymentStatus?.admin_bypass && !paymentStatus?.info_chat_authorized){
       paymentGateSatisfiedTripId=null;
       setPostPaymentTripConfigurationLocked(false);
+      _detachInvalidAutomaticRecovery_(trip,'GENERATION_PAYMENT_REQUIRED');
       return;
     }
+
+    // Only after state and entitlement validation may historical server data enter
+    // the visible Planner. This is the critical V295.4.5 identity boundary.
+    storeActiveTripId(String(trip.id));
+    if(!_hydrateGenerationTrip_(trip)){
+      _detachInvalidAutomaticRecovery_(trip,'TRIP_HYDRATION_INVALID');
+      return;
+    }
+    if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch || currentTripId!==trip.id) return;
 
     // Positive server entitlement is the only restore-time authority for the lock.
     paymentGateSatisfiedTripId=currentTripId;
