@@ -34,33 +34,44 @@
      STANDALONE SURFACE WARMUP
      ---------------------------------------------------------
      The embedded Planner is intentionally gone. Once Home is fully usable,
-     warm only the standalone Planner's essential static files at low browser
-     priority. Nothing is executed here and no Planner/API state is created.
+     deterministically download the standalone Planner's essential static files
+     into the HTTP cache. Nothing is executed and no Planner/API state is created.
   ========================================================= */
+  const plannerWarmupRequests=new Map();
+  function warmStaticAsset(href){
+    if(plannerWarmupRequests.has(href))return plannerWarmupRequests.get(href);
+    const request=fetch(href,{method:'GET',credentials:'same-origin',cache:'force-cache'})
+      .then(response=>{
+        if(!response.ok)throw new Error(`WARMUP_HTTP_${response.status}`);
+        return response.arrayBuffer();
+      })
+      .catch(()=>null);
+    plannerWarmupRequests.set(href,request);
+    return request;
+  }
   function warmStandalonePlanner(){
     const pageLang=document.documentElement.lang?.toLowerCase().startsWith('es')?'es':'en';
     const assets=[
-      [`./planner.html?lang=${pageLang}`,'document'],
-      ['./planner.css?v=282','style'],
-      ['./assets/css/itbmo-platform.css?v=295.1','style'],
-      ['./assets/js/itbmo-foundation.js?v=1.0','script'],
-      ['./travel-model-v2.js?v=285','script'],
-      ['./planner.js?v=295.4.2','script'],
-      ['./assets/js/itbmo-platform.js?v=295.1','script']
+      `./planner.html?lang=${pageLang}`,
+      './planner.css?v=282',
+      './assets/css/itbmo-platform.css?v=295.1',
+      './assets/js/itbmo-foundation.js?v=1.0',
+      './travel-model-v2.js?v=285',
+      './planner.js?v=295.4.3',
+      './assets/js/itbmo-platform.js?v=295.2'
     ];
-    assets.forEach(([href,as])=>{
-      if(document.head.querySelector(`link[data-itbmo-warmup][href="${href}"]`))return;
-      const link=document.createElement('link');
-      link.rel='prefetch';link.href=href;link.as=as;link.dataset.itbmoWarmup='planner';
-      document.head.appendChild(link);
-    });
+    return Promise.allSettled(assets.map(warmStaticAsset));
   }
   const schedulePlannerWarmup=()=>{
-    if('requestIdleCallback' in window)window.requestIdleCallback(warmStandalonePlanner,{timeout:1400});
-    else window.setTimeout(warmStandalonePlanner,350);
+    window.setTimeout(warmStandalonePlanner,80);
   };
   if(document.readyState==='complete')schedulePlannerWarmup();
   else window.addEventListener('load',schedulePlannerWarmup,{once:true});
+  document.querySelectorAll('[data-planner-open]').forEach(link=>{
+    link.addEventListener('pointerenter',warmStandalonePlanner,{once:true,passive:true});
+    link.addEventListener('focus',warmStandalonePlanner,{once:true});
+    link.addEventListener('touchstart',warmStandalonePlanner,{once:true,passive:true});
+  });
 
   /* =========================================================
      FAQ
