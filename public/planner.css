@@ -9294,3 +9294,52 @@ body.itbmo-builder-closed-clean #account-box.is-auth-dialog-open{display:block!i
 .guided-personalization-overlay #guided-info-chat-open:hover{filter:brightness(1.07);transform:translateY(-1px)}
 .guided-personalization-overlay #guided-info-chat-open:focus-visible{outline:3px solid #ffc75d;outline-offset:3px}
 @media(max-width:800px){.guided-personalization-overlay #guided-info-chat-open{width:100%;max-width:300px}}
+
+/* =========================================================
+   ITBMO V295.4.4 · ACCOUNT EMAIL CONFIRMATION UX
+   The form is replaced after success so delayed mail cannot lead to an
+   accidental duplicate submission. No resend control is intentionally shown.
+========================================================= */
+#account-box .account-confirmation-notice{
+  display:grid;grid-template-columns:36px minmax(0,1fr);align-items:center;gap:11px;
+  width:100%;margin:10px 0 14px;padding:12px 14px;
+  border:1px solid rgba(14,164,122,.20);border-radius:15px;
+  background:linear-gradient(135deg,rgba(14,164,122,.075),rgba(10,159,187,.055));color:#31566b;
+}
+#account-box .account-confirmation-notice__icon{
+  width:36px;height:36px;display:grid;place-items:center;border-radius:12px;background:#fff;color:#08785c;
+  box-shadow:0 7px 18px rgba(14,164,122,.13);font-size:1rem;
+}
+#account-box .account-confirmation-notice p{margin:0;font-size:.82rem;line-height:1.5;}
+#account-box .account-confirmation-card{
+  width:min(100%,820px);margin:18px auto 4px;padding:26px;
+  border:1px solid rgba(14,164,122,.22);border-radius:22px;
+  background:radial-gradient(circle at 100% 0,rgba(35,175,195,.13),transparent 42%),linear-gradient(150deg,#f3fcf8 0%,#fff 62%);
+  box-shadow:0 18px 42px rgba(16,44,71,.08);grid-template-columns:62px minmax(0,1fr);align-items:start;gap:18px;
+}
+#account-box .account-confirmation-card[style*="display: block"]{display:grid!important;}
+#account-box .account-confirmation-card__icon{
+  width:62px;height:62px;display:grid;place-items:center;border-radius:19px;
+  background:linear-gradient(135deg,#08785c,#0a9fbb);color:#fff;
+  box-shadow:0 12px 26px rgba(14,164,122,.22);font-size:1.5rem;
+}
+#account-box .account-confirmation-card__copy small{
+  display:block;margin:2px 0 6px;color:#08785c;font-size:.69rem;font-weight:900;letter-spacing:.12em;
+}
+#account-box .account-confirmation-card__copy h4{
+  margin:0 0 8px;color:#102c47;font-size:clamp(1.25rem,2.8vw,1.6rem);line-height:1.15;letter-spacing:-.025em;
+}
+#account-box .account-confirmation-card__copy p{margin:0;color:#587083;font-size:.9rem;line-height:1.58;}
+#account-box .account-confirmation-card__email{
+  display:inline-flex;max-width:100%;margin-top:12px!important;padding:8px 12px;border-radius:999px;
+  background:#fff;color:#08785c!important;font-weight:800;overflow-wrap:anywhere;
+  box-shadow:inset 0 0 0 1px rgba(14,164,122,.18);
+}
+#account-box .account-confirmation-card__email:empty{display:none;}
+#account-box .account-confirmation-card__next{margin-top:12px!important;font-weight:650;}
+#account-box #account-confirmation-login{min-height:48px;margin-top:18px;padding-inline:20px;border-radius:14px;}
+@media(max-width:620px){
+  #account-box .account-confirmation-card{grid-template-columns:1fr;gap:14px;padding:21px 18px;}
+  #account-box .account-confirmation-card__icon{width:52px;height:52px;border-radius:16px;}
+  #account-box #account-confirmation-login{width:100%;}
+}
