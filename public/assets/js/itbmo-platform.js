@@ -18,8 +18,32 @@
     x:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h4.7l4.2 5.6L17.8 3H20l-6.1 7.2L20.5 21h-4.7l-4.6-6.2L5.9 21H3.6l6.6-7.8L4 3Zm3.6 1.8 9.1 14.4h1.8L9.4 4.8H7.6Z"/></svg>',
     pinterest:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.6 19.3c-.1-1.7 0-3.7.4-5.5l1.3-5.3s-.3-.8-.3-2c0-1.9 1.1-3.3 2.5-3.3 1.2 0 1.8.9 1.8 2 0 1.2-.8 2.9-1.1 4.5-.3 1.3.7 2.4 2 2.4 2.4 0 4.2-2.5 4.2-6.1 0-3.2-2.3-5.4-5.6-5.4-3.8 0-6 2.8-6 5.8 0 1.1.4 2.4 1 3 .1.1.1.2.1.4l-.4 1.5c-.1.5-.5.6-.9.4-1.7-.8-2.7-3.2-2.7-5.1 0-4.1 3-7.9 8.7-7.9 4.6 0 8.1 3.3 8.1 7.6 0 4.5-2.9 8.2-6.8 8.2-1.3 0-2.6-.7-3-1.5l-.8 3.1c-.3 1.1-1.1 2.5-1.6 3.4.9.3 1.8.5 2.7.5A10 10 0 0 0 12 2Z"/></svg>'
   };
+  const CONFIG_CACHE_KEY='itbmo_platform_config_v1';
+  const CONFIG_CACHE_TTL_MS=5*60*1000;
   let configPromise;
-  const load=()=>configPromise||(configPromise=fetch('/api/platform-config',{headers:{Accept:'application/json'}}).then(r=>r.ok?r.json():null).catch(()=>null));
+  function readCachedConfig(){
+    try{
+      const cached=JSON.parse(localStorage.getItem(CONFIG_CACHE_KEY)||'null');
+      if(!cached?.value||Date.now()-Number(cached.saved_at||0)>CONFIG_CACHE_TTL_MS)return null;
+      return cached.value;
+    }catch(_){return null;}
+  }
+  function fetchConfig(){
+    return fetch('/api/platform-config',{headers:{Accept:'application/json'},cache:'default'})
+      .then(r=>r.ok?r.json():null)
+      .then(value=>{
+        if(value)try{localStorage.setItem(CONFIG_CACHE_KEY,JSON.stringify({saved_at:Date.now(),value}));}catch(_){}
+        return value;
+      })
+      .catch(()=>null);
+  }
+  const load=()=>{
+    if(configPromise)return configPromise;
+    const cached=readCachedConfig();
+    if(cached){configPromise=Promise.resolve(cached);window.setTimeout(fetchConfig,0);return configPromise;}
+    configPromise=fetchConfig();
+    return configPromise;
+  };
   const track=(name,properties={})=>window.ITBMOFoundation?.track?.(name,properties);
   function socialBlock(accounts,lang){
     const wrap=document.createElement('div');
