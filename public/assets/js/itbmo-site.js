@@ -53,11 +53,11 @@
     const pageLang=document.documentElement.lang?.toLowerCase().startsWith('es')?'es':'en';
     const assets=[
       `./planner.html?lang=${pageLang}`,
-      './planner.css?v=282',
+      './planner.css?v=295.4.4',
       './assets/css/itbmo-platform.css?v=295.1',
       './assets/js/itbmo-foundation.js?v=1.0',
       './travel-model-v2.js?v=285',
-      './planner.js?v=295.4.3',
+      './planner.js?v=295.4.4',
       './assets/js/itbmo-platform.js?v=295.2'
     ];
     return Promise.allSettled(assets.map(warmStaticAsset));
