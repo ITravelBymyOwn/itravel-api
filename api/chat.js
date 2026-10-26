@@ -2373,7 +2373,7 @@ export default async function handler(req, res) {
       const tiePrompt = `${buildTieSystemPrompt()}\n\nAUTHORITATIVE TIE REQUEST:\n${JSON.stringify(request)}`;
       const raw = await callStructured(
         [{role:"system",content:tiePrompt},{role:"user",content:"Return the validated strategic structure JSON only."}],
-        0.12, 5200, 90000, plannerUsage, PLANNER_MODEL, "medium"
+        0.12, 9000, 120000, plannerUsage, PLANNER_MODEL, "medium"
       );
       let parsed = cleanToJSON(raw);
       let validation = validateTiePlan(parsed, request);
@@ -2381,7 +2381,7 @@ export default async function handler(req, res) {
       if (!validation.ok) {
         const repair = await callStructured(
           [{role:"system",content:`${tiePrompt}\n\nSTRUCTURAL VALIDATION ERRORS:\n${JSON.stringify(validation.errors)}\nRepair only these structural defects. Preserve strong experience choices. JSON only.`}],
-          0.08, 5200, 90000, plannerUsage, REPAIR_MODEL, "low"
+          0.08, 9000, 120000, plannerUsage, REPAIR_MODEL, "low"
         );
         parsed = cleanToJSON(repair);
         validation = validateTiePlan(parsed, request);
