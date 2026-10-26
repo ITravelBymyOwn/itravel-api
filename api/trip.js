@@ -1032,7 +1032,16 @@ async function handleRecoverable(res, session) {
   candidates.sort((a,b) => (priority[a?.status] ?? 2) - (priority[b?.status] ?? 2));
   for (const trip of candidates) {
     const plannerInput = generationCheckpoint(trip?.planner_input);
+    const itineraryCheckpoint = generationCheckpoint(trip?.itinerary_data);
     if (plannerInput.auto_recovery_disabled === true) continue;
+    // Defensive terminal guard: an older write must never make a completed trip
+    // recoverable merely because its status column remained saved/failed/generating.
+    if (
+      trip?.generated_at ||
+      String(itineraryCheckpoint.run_status || "").toLowerCase() === "generated" ||
+      itineraryCheckpoint.completed === true ||
+      itineraryCheckpoint.generation_completed === true
+    ) continue;
     // V281: a paid saved trip is recoverable even if Route Resolver failed
     // before generation_begin (no run_token / generation_count yet).
     // Entitlement is verified server-side below, not inferred from status.
