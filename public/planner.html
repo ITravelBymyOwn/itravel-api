@@ -6,7 +6,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=282" />
+  <link rel="stylesheet" href="./planner.css?v=295.4.4" />
   <link rel="stylesheet" href="./assets/css/itbmo-platform.css?v=295.1" />
 
   <!-- Tipografía -->
@@ -242,6 +242,11 @@
               <span id="account-marketing-copy">Send me travel inspiration, recommendations and special offers from ITBMO.</span>
             </label>
 
+            <div class="account-confirmation-notice" role="note">
+              <span class="account-confirmation-notice__icon" aria-hidden="true">✉</span>
+              <p id="account-confirmation-before">After creating your account, we will email you a confirmation link. It may take a few minutes to arrive, so there is no need to register again.</p>
+            </div>
+
             <button class="btn primary w-100" id="account-register-submit" type="button">Create account</button>
             <button class="btn ghost w-100" id="account-upgrade-cancel" type="button" style="display:none; margin-top:.55rem;">Cancel</button>
           </div>
@@ -319,6 +324,18 @@
 
           <div id="account-message" class="account-message" aria-live="polite"></div>
         </form>
+
+        <div id="account-confirmation-panel" class="account-confirmation-card" style="display:none;" role="status" aria-live="polite">
+          <span class="account-confirmation-card__icon" aria-hidden="true">✉</span>
+          <div class="account-confirmation-card__copy">
+            <small id="account-confirmation-eyebrow">ONE LAST STEP</small>
+            <h4 id="account-confirmation-title">Check your email</h4>
+            <p id="account-confirmation-body">We sent a confirmation link. Delivery may take a few minutes. Check Spam or Promotions too, and do not create the account again while it arrives.</p>
+            <p id="account-confirmation-email" class="account-confirmation-card__email"></p>
+            <p id="account-confirmation-next" class="account-confirmation-card__next">Once you confirm your email, return to ITBMO and sign in.</p>
+            <button class="btn primary" id="account-confirmation-login" type="button">I've confirmed my email</button>
+          </div>
+        </div>
 
         <div id="account-authenticated" class="account-authenticated account-authenticated--premium" style="display:none;">
           <div class="account-authenticated-copy">
@@ -1225,7 +1242,7 @@
 
 <!-- Core Planner. Export libraries are loaded on demand by planner.js. -->
 <script src="./travel-model-v2.js?v=285"></script>
-<script src="./planner.js?v=295.4.3"></script>
+<script src="./planner.js?v=295.4.4"></script>
 <script src="./assets/js/itbmo-platform.js?v=295.2"></script>
  
 </body>
