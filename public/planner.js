@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V271';
-const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.2';
+const ITBMO_RUNTIME_BUILD='V295.4.3';
+const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.3';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -137,26 +137,26 @@ async function _itbmoEnsurePdfExport_(){
 function _itbmoWarmWorkspace_(){
   const lang=document.documentElement.lang?.toLowerCase().startsWith('en')?'en':'es';
   const assets=[
-    [`./trip-workspace.html?lang=${lang}`,'document'],
-    ['./trip-workspace.css?v=230','style'],
-    ['./assets/css/itbmo-platform.css?v=295.3','style'],
-    ['./assets/js/itbmo-foundation.js?v=1.0','script'],
-    ['./trip-workspace.js?v=295.4','script'],
-    ['./assets/js/itbmo-platform.js?v=295.1','script'],
-    ['./assets/js/itbmo-feedback.js?v=295.3','script'],
-    ['./assets/js/itbmo-companion.js?v=295.2','script'],
-    ['https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js','script'],
-    ['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js','script'],
-    ['https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js','script']
+    `./trip-workspace.html?lang=${lang}`,
+    './trip-workspace.css?v=230',
+    './assets/css/itbmo-platform.css?v=295.3',
+    './assets/js/itbmo-foundation.js?v=1.0',
+    './trip-workspace.js?v=295.4',
+    './assets/js/itbmo-platform.js?v=295.2',
+    './assets/js/itbmo-feedback.js?v=295.3',
+    './assets/js/itbmo-companion.js?v=295.2'
   ];
-  assets.forEach(([href,as])=>{
-    if(document.head.querySelector(`link[data-itbmo-warmup][href="${href}"]`))return;
-    const link=document.createElement('link');link.rel='prefetch';link.href=href;link.as=as;link.dataset.itbmoWarmup='workspace';document.head.appendChild(link);
+  if(!_itbmoWarmWorkspace_.requests)_itbmoWarmWorkspace_.requests=new Map();
+  assets.forEach(href=>{
+    if(_itbmoWarmWorkspace_.requests.has(href))return;
+    const request=fetch(href,{method:'GET',credentials:'same-origin',cache:'force-cache'})
+      .then(response=>response.ok?response.arrayBuffer():null)
+      .catch(()=>null);
+    _itbmoWarmWorkspace_.requests.set(href,request);
   });
 }
 function _itbmoScheduleWorkspaceWarmup_(){
-  if('requestIdleCallback' in window)window.requestIdleCallback(_itbmoWarmWorkspace_,{timeout:1800});
-  else window.setTimeout(_itbmoWarmWorkspace_,500);
+  window.setTimeout(_itbmoWarmWorkspace_,120);
 }
 if(document.readyState==='complete')_itbmoScheduleWorkspaceWarmup_();
 else window.addEventListener('load',_itbmoScheduleWorkspaceWarmup_,{once:true});
@@ -1489,6 +1489,7 @@ function enterFreshPlannerAfterAuth(){
   renderAuthState();
   // Neutral authenticated landing: show only the primary planning CTA.
   // Keep saved trips, payment entitlements and route drafts untouched.
+  document.body.classList.remove('itbmo-generated-clean');
   document.body.classList.add('itbmo-builder-closed-clean');
 }
 
@@ -9035,7 +9036,11 @@ async function _tieCallStructure_(request){
     const res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'tie_structure',tie_request:request})});
     const data=await res.json();
     if(data?.usage)_captureExactUsage_(data);
-    if(!res.ok||!data?.ok||!data?.plan)throw new Error(data?.error?.code||`TIE_HTTP_${res.status}`);
+    if(!res.ok||!data?.ok||!data?.plan){
+      const failure=new Error(data?.error?.code||`TIE_HTTP_${res.status}`);
+      failure.details=data?.error?.details||null;
+      throw failure;
+    }
     const validation=_tieValidateBrowser_(data.plan,request);
     if(!validation.ok)throw new Error(`TIE_BROWSER_VALIDATION:${validation.errors.join(',')}`);
     const value={plan:data.plan,fingerprint,duration_ms:Math.round(performance.now()-started)};
@@ -10927,6 +10932,16 @@ function _hydrateGenerationTrip_(trip){
 }
 
 function _showGenerationRetry_(reason=''){
+  if(/GENERATION_ALREADY_COMPLETED|GENERATION_ARCHIVED/i.test(String(reason||''))){
+    // A terminal/historical trip is not an interrupted generation. Detach its
+    // stale browser pointer and return to the clean new-trip surface. Generated
+    // documents remain available exclusively through My Trips.
+    clearPlannerUIForLogout();
+    renderAuthState();
+    _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
+    console.info('[ITBMO RECOVERY] terminal trip detached from automatic recovery');
+    return;
+  }
   // Recovery is the only visible action after a failed paid generation.
   document.querySelector('#guided-personalization-overlay')?.remove();
   document.body.classList.remove('guided-preferences-open');
@@ -11085,6 +11100,9 @@ function _showCleanPlannerLanding_({clearRouteDraft=false,enableReset=false}={})
     $resetBtn.disabled=!enableReset;
     $resetBtn.setAttribute('aria-disabled',String(!enableReset));
   }
+  const generated=hasGeneratedItineraryRows();
+  document.body.classList.toggle('itbmo-builder-closed-clean',!generated);
+  document.body.classList.toggle('itbmo-generated-clean',generated);
 }
 
 function _applyGeneratedUIState({showModal=false}={}){
@@ -11353,9 +11371,13 @@ async function runPaidGeneration({manualRetry=false}={}){
       $preferencesGenerateV2.classList.remove('is-generated');
     }
     _pauseAstraGenerationMetrics_();
-    if(['GENERATION_ALREADY_COMPLETED','GENERATION_RUN_MISMATCH','GENERATION_ARCHIVED'].includes(err?.code)){
+    if(['GENERATION_ALREADY_COMPLETED','GENERATION_ARCHIVED'].includes(err?.code)){
       showWOW(false);
       console.error('[ITBMO V243 GENERATION IDENTITY] Historical/completed trip rejected; no previous exports published', {trip_id:currentTripId,code:err.code});
+      _showGenerationRetry_(recoveryReason);
+    }else if(err?.code==='GENERATION_RUN_MISMATCH'){
+      showWOW(false);
+      console.error('[ITBMO V243 GENERATION IDENTITY] Active generation ownership changed; retry remains available', {trip_id:currentTripId,code:err.code});
       _showGenerationRetry_(recoveryReason);
     }else{
       _showGenerationRetry_(recoveryReason);
@@ -11603,12 +11625,14 @@ function _plannerOwnsAutomaticGenerationRecovery_(){
   return /(?:^|\/)planner\.html$/i.test(String(window.location.pathname||''));
 }
 
+let paidGenerationRecoveryDiscoveryRunning=false;
 async function restorePaidGenerationIfNeeded(interruptedTripId){
   if(!_plannerOwnsAutomaticGenerationRecovery_()) return;
   // Explicit new journeys must never revive a previous payment/generation.
   // Explicit new-mode stays blank unless this browser holds an interrupted paid trip.
   if(new URLSearchParams(window.location.search).get('mode')==='new' && !interruptedTripId && !getStoredActiveTripId()) return;
-  if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
+  if(generationResetInProgress || paidGenerationRunning || paidGenerationRecoveryDiscoveryRunning || !currentUser || !getStoredSessionToken()) return;
+  paidGenerationRecoveryDiscoveryRunning=true;
   const restoreEpoch=generationRunEpoch;
   try{
     const token=getStoredSessionToken();
@@ -11626,7 +11650,15 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
         else throw err;
       }
     }
-    if(!trip || !['saved','generating','failed'].includes(trip.status)){
+    // A terminal active pointer belongs to My Trips. It must end automatic
+    // recovery instead of causing discovery of an unrelated historical draft.
+    if(trip && ['generated','archived'].includes(String(trip.status||''))){
+      storeActiveTripId(null);
+      _clearPostPaymentProgressLocal_(trip.id);
+      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
+      return;
+    }
+    if(!trip){
       // V272: discover eligible unfinished paid trips; completed trips remain terminal.
       const data=await tripApi({action:'recoverable',session_token:token});
       trip=data?.trip || null;
@@ -11693,6 +11725,8 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
     }
   }catch(err){
     console.warn('[GENERATION RESTORE]',err);
+  }finally{
+    paidGenerationRecoveryDiscoveryRunning=false;
   }
 }
 
@@ -14207,15 +14241,10 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     applyAuthPlannerGate(Boolean(authReady&&currentUser&&getStoredSessionToken()));
     updateSaveAvailability();
 
-    // UX: enfocar primer input de ciudad
-    const firstCity = qs('.city-row .city');
-    if (firstCity) firstCity.focus();
-    scheduleAstraCoach(
-      currentUser ? 'travelers' : 'account',
-      currentUser ? '#travelers-box' : '#account-box',
-      360,
-      {force:true}
-    );
+    // A reset returns to the same clean shell as a fresh authenticated entry.
+    // Route inputs remain inside the guided journey overlay and never leak as
+    // empty compatibility forms on the Planner canvas.
+    _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
     generationResetInProgress = false;
   });
 
@@ -16124,6 +16153,7 @@ function _tripStoryResetRoute_(story){
 let _tripStoryBuilderSession_=null;
 function openTripStoryBuilder(){
   document.body.classList.remove('itbmo-builder-closed-clean');
+  document.body.classList.remove('itbmo-generated-clean');
   // V95: opening/restoring the full builder always owns the route UI. Remove any
   // orphan launcher restored by planner boot before creating or restoring it.
   document.querySelectorAll('.trip-story-minimized-fab').forEach(x=>x.remove());
