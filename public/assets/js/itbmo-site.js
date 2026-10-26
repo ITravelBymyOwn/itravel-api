@@ -57,7 +57,7 @@
       './assets/css/itbmo-platform.css?v=295.1',
       './assets/js/itbmo-foundation.js?v=1.0',
       './travel-model-v2.js?v=285',
-      './planner.js?v=295.4.4',
+      './planner.js?v=295.4.5',
       './assets/js/itbmo-platform.js?v=295.2'
     ];
     return Promise.allSettled(assets.map(warmStaticAsset));
@@ -450,7 +450,8 @@
 
   /* =========================================================
      PRODUCT LAUNCH ACTIONS
-     Navbar, Hero, final CTA and footer all open the SAME Planner iframe.
+     Every Create trip action opens an independent clean Planner tab. This keeps
+     any generation already running in another tab alive and untouched.
   ========================================================= */
   function getLauncherRect(trigger) {
     if (!trigger?.getBoundingClientRect) return null;
@@ -476,19 +477,19 @@
     trigger.addEventListener('click', (event) => {
       if (typeof setMobileMenu === 'function') setMobileMenu(false);
 
-      /* Phase 4: Planner is a standalone product surface.
-         Links use their native named-window navigation; button launchers
-         restore the V295.3 independent Planner window behavior. */
+      /* V295.4.5: never reuse a named Planner window. Reusing it could navigate
+         away from an in-flight generation and transfer the wrong recovery pointer. */
       const pageLang = document.documentElement.lang?.toLowerCase().startsWith('es') ? 'es' : 'en';
       window.ITBMOFoundation?.track('planner_open',{placement:'home_cta',language:pageLang});
-      const plannerUrl=`./planner.html?lang=${pageLang}`;
+      const plannerUrl=`./planner.html?lang=${pageLang}&mode=new`;
       if(trigger.tagName==='A'){
         trigger.href=plannerUrl;
-        trigger.target='itbmo-planner';
+        trigger.target='_blank';
+        trigger.rel='noopener';
         return;
       }
       event.preventDefault();
-      const plannerWindow=window.open(plannerUrl,'itbmo-planner');
+      const plannerWindow=window.open(plannerUrl,'_blank','noopener');
       if(plannerWindow)plannerWindow.focus();
     });
   });
@@ -568,7 +569,7 @@
       exitExampleFocus({ immediate:true, restoreScroll:false });
       const pageLang = document.documentElement.lang?.toLowerCase().startsWith('es') ? 'es' : 'en';
       window.ITBMOFoundation?.track('planner_open',{placement:'example_cta',language:pageLang});
-      const plannerWindow=window.open(`./planner.html?lang=${pageLang}`,'itbmo-planner');
+      const plannerWindow=window.open(`./planner.html?lang=${pageLang}&mode=new`,'_blank','noopener');
       if(plannerWindow)plannerWindow.focus();
     });
   });
