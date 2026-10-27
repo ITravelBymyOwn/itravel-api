@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V295.4.5';
-const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.5';
+const ITBMO_RUNTIME_BUILD='V295.4.6';
+const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.6';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -674,7 +674,7 @@ const AUTH_COPY = {
     title:'Tu cuenta ITBMO', subtitle:'Crea una cuenta, inicia sesión o continúa como invitado.',
     subtitleGuest:'Estás usando ITBMO como invitado.', subtitlePending:'Confirma tu correo para activar tu cuenta.', subtitleRegistered:'Tu cuenta está activa.',
     register:'Crear cuenta', login:'Iniciar sesión', guest:'Continuar como invitado',
-    name:'Nombre', email:'Email', password:'Contraseña', passwordConfirm:'Confirmar contraseña',
+    name:'Nombre', email:'Email', password:'Contraseña', passwordConfirm:'Confirmar contraseña', showPassword:'Mostrar contraseña', hidePassword:'Ocultar contraseña',
     create:'Crear cuenta', signIn:'Iniciar sesión', forgot:'¿Olvidaste tu contraseña?',
     guestContinue:'Continuar como invitado', forgotTitle:'Restablecer contraseña', sendReset:'Enviar enlace de recuperación',
     backToLogin:'Volver a iniciar sesión', newPassword:'Nueva contraseña', newPasswordConfirm:'Confirmar nueva contraseña', updatePassword:'Actualizar contraseña',
@@ -705,7 +705,7 @@ const AUTH_COPY = {
     title:'Your ITBMO account', subtitle:'Create an account, sign in, or continue as a guest.',
     subtitleGuest:'You are using ITBMO as a guest.', subtitlePending:'Confirm your email to activate your account.', subtitleRegistered:'Your account is active.',
     register:'Create account', login:'Sign in', guest:'Continue as guest',
-    name:'Name', email:'Email', password:'Password', passwordConfirm:'Confirm password',
+    name:'Name', email:'Email', password:'Password', passwordConfirm:'Confirm password', showPassword:'Show password', hidePassword:'Hide password',
     create:'Create account', signIn:'Sign in', forgot:'Forgot your password?',
     guestContinue:'Continue as guest', forgotTitle:'Reset password', sendReset:'Send reset link',
     backToLogin:'Back to sign in', newPassword:'New password', newPasswordConfirm:'Confirm new password', updatePassword:'Update password',
@@ -1097,6 +1097,7 @@ function applyAuthPlannerGate(unlocked){
 }
 
 function closeAccountDialog(){
+  resetAccountPasswordVisibility();
   const box=qs('#account-box');
   if(box){ box.classList.remove('is-auth-dialog-open'); box.setAttribute('aria-hidden','true'); }
   if($accountModalBackdrop){ $accountModalBackdrop.hidden=true; $accountModalBackdrop.classList.remove('is-open'); }
@@ -1128,6 +1129,7 @@ function showAccountMode(mode){
   }
   if(mode!=='register')signupConfirmationView=false;
 
+  resetAccountPasswordVisibility();
   const panels = { register:$accountRegisterPanel, login:$accountLoginPanel, guest:$accountGuestPanel, forgot:$accountForgotPanel, reset:$accountResetPanel };
   Object.entries(panels).forEach(([key,panel])=>{ if(panel) panel.style.display = key === mode ? 'block' : 'none'; });
   if($accountConfirmationPanel)$accountConfirmationPanel.style.display='none';
@@ -1293,7 +1295,63 @@ function applyAuthLanguage(){
   updateSignupConfirmationCopy();
   setLegalLanguage('#account-legal-copy','#account-terms-link','#account-privacy-link');
   setLegalLanguage('#account-guest-legal-copy','#account-guest-terms-link','#account-guest-privacy-link');
+  syncAccountPasswordToggleLabels();
   renderAuthState();
+}
+
+function syncAccountPasswordToggle(button){
+  if(!button) return;
+  const input=qs(`#${button.dataset.passwordToggle || ''}`);
+  if(!input) return;
+  const visible=input.type==='text';
+  const label=authCopy(visible?'hidePassword':'showPassword');
+  button.classList.toggle('is-password-visible',visible);
+  button.setAttribute('aria-pressed',String(visible));
+  button.setAttribute('aria-label',label);
+  button.title=label;
+}
+
+function syncAccountPasswordToggleLabels(){
+  qsa('[data-password-toggle]').forEach(syncAccountPasswordToggle);
+}
+
+function resetAccountPasswordVisibility(){
+  qsa('[data-password-toggle]').forEach(button=>{
+    const input=qs(`#${button.dataset.passwordToggle || ''}`);
+    if(input && input.type!=='password') input.type='password';
+    syncAccountPasswordToggle(button);
+  });
+}
+
+function toggleAccountPassword(button){
+  const input=qs(`#${button?.dataset?.passwordToggle || ''}`);
+  if(!input) return;
+  const start=input.selectionStart;
+  const end=input.selectionEnd;
+  input.type=input.type==='password'?'text':'password';
+  syncAccountPasswordToggle(button);
+  try{
+    input.focus({preventScroll:true});
+    if(Number.isInteger(start) && Number.isInteger(end)) input.setSelectionRange(start,end);
+  }catch(_){ }
+}
+
+function submitVisibleAccountPanelOnEnter(event){
+  if(event.key!=='Enter' || event.isComposing || event.repeat) return;
+  const target=event.target;
+  if(!(target instanceof HTMLInputElement) || target.type==='checkbox' || target.type==='button') return;
+  const actions=[
+    [$accountRegisterPanel,$accountRegisterSubmit],
+    [$accountLoginPanel,$accountLoginSubmit],
+    [$accountGuestPanel,$accountGuestSubmit],
+    [$accountForgotPanel,$accountForgotSubmit],
+    [$accountResetPanel,$accountResetSubmit]
+  ];
+  const match=actions.find(([panel])=>panel && panel.contains(target) && panel.style.display!=='none' && !panel.hidden);
+  if(!match) return;
+  event.preventDefault();
+  const button=match[1];
+  if(button && !button.disabled) button.click();
 }
 
 async function postUserAction(payload){
@@ -1688,6 +1746,8 @@ function bindAccountListeners(){
   $accountGuestSubmit?.addEventListener('click',continueAsGuest);
   $accountForgotSubmit?.addEventListener('click',sendForgotPassword);
   $accountResetSubmit?.addEventListener('click',resetITBMOPassword);
+  qsa('[data-password-toggle]').forEach(button=>button.addEventListener('click',()=>toggleAccountPassword(button)));
+  $accountGuest?.addEventListener('keydown',submitVisibleAccountPanelOnEnter);
   $accountConfirmationLogin?.addEventListener('click',async()=>{
     if(currentUser?.registration_pending){
       await refreshPendingVerification();
