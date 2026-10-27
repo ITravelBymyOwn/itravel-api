@@ -895,7 +895,8 @@ input.end.invalid{
   gap:.75rem;
 }
 
-.account-form-grid label{
+.account-form-grid label,
+.account-form-grid > .account-form-field{
   display:flex;
   min-width:0;
   flex-direction:column;
@@ -909,6 +910,91 @@ input.end.invalid{
   font-size:.76rem;
   font-weight:500;
   line-height:1.35;
+}
+
+.account-form-label{
+  color:inherit;
+}
+
+.account-password-control{
+  position:relative;
+  width:100%;
+  min-width:0;
+}
+
+.account-password-control input{
+  padding-right:3.4rem!important;
+}
+
+.account-password-toggle{
+  position:absolute;
+  top:50%;
+  right:.35rem;
+  display:grid;
+  place-items:center;
+  width:40px;
+  height:40px;
+  padding:0;
+  transform:translateY(-50%);
+  color:#315f7c;
+  background:transparent;
+  border:0;
+  border-radius:11px;
+  cursor:pointer;
+  transition:color .2s ease,background .2s ease,box-shadow .2s ease;
+}
+
+.account-password-toggle:hover{
+  color:var(--blue);
+  background:rgba(8,119,249,.07);
+}
+
+.account-password-toggle:focus-visible{
+  outline:none;
+  color:var(--blue);
+  background:rgba(8,119,249,.08);
+  box-shadow:0 0 0 3px rgba(8,119,249,.14);
+}
+
+.account-password-eye{
+  position:relative;
+  display:block;
+  width:20px;
+  height:13px;
+  box-sizing:border-box;
+  border:2px solid currentColor;
+  border-radius:55% / 65%;
+}
+
+.account-password-eye::before{
+  content:"";
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:5px;
+  height:5px;
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  background:currentColor;
+}
+
+.account-password-eye::after{
+  content:"";
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:25px;
+  height:2px;
+  opacity:0;
+  transform:translate(-50%,-50%) rotate(-43deg);
+  border-radius:999px;
+  background:currentColor;
+  box-shadow:0 -2px 0 rgba(255,255,255,.94),0 2px 0 rgba(255,255,255,.94);
+  transition:opacity .16s ease;
+}
+
+.account-password-toggle.is-password-visible .account-password-eye::after{
+  opacity:1;
 }
 
 .account-check{
