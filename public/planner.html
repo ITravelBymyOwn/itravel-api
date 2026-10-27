@@ -6,7 +6,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=295.4.4" />
+  <link rel="stylesheet" href="./planner.css?v=295.4.6" />
   <link rel="stylesheet" href="./assets/css/itbmo-platform.css?v=295.1" />
 
   <!-- Tipografía -->
@@ -215,16 +215,26 @@
                 <small id="account-upgrade-email-hint" class="account-upgrade-email-hint" style="display:none;">You may keep your guest email or use a different email for your account.</small>
               </label>
 
-              <label>
-                <span id="label-password">Password</span>
-                <input id="account-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-password" for="account-password">Password</label>
+                <div class="account-password-control">
+                  <input id="account-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-password" aria-controls="account-password" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
                 <small id="password-hint">Minimum 8 characters, including uppercase, lowercase and a number.</small>
-              </label>
+              </div>
 
-              <label>
-                <span id="label-password-confirm">Confirm password</span>
-                <input id="account-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
-              </label>
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-password-confirm" for="account-password-confirm">Confirm password</label>
+                <div class="account-password-control">
+                  <input id="account-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-password-confirm" aria-controls="account-password-confirm" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <label class="account-check">
@@ -258,10 +268,15 @@
                 <input id="account-login-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
               </label>
 
-              <label>
-                <span id="label-login-password">Password</span>
-                <input id="account-login-password" type="password" maxlength="128" autocomplete="current-password" />
-              </label>
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-login-password" for="account-login-password">Password</label>
+                <div class="account-password-control">
+                  <input id="account-login-password" type="password" maxlength="128" autocomplete="current-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-login-password" aria-controls="account-login-password" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <button class="btn primary w-100" id="account-login-submit" type="button">Sign in</button>
@@ -308,15 +323,25 @@
 
           <div id="account-reset-panel" class="account-panel" style="display:none;">
             <div class="account-form-grid">
-              <label>
-                <span id="label-reset-password">New password</span>
-                <input id="account-reset-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
-              </label>
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-reset-password" for="account-reset-password">New password</label>
+                <div class="account-password-control">
+                  <input id="account-reset-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-reset-password" aria-controls="account-reset-password" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
 
-              <label>
-                <span id="label-reset-password-confirm">Confirm new password</span>
-                <input id="account-reset-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
-              </label>
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-reset-password-confirm" for="account-reset-password-confirm">Confirm new password</label>
+                <div class="account-password-control">
+                  <input id="account-reset-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-reset-password-confirm" aria-controls="account-reset-password-confirm" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <button class="btn primary w-100" id="account-reset-submit" type="button">Update password</button>
@@ -1242,7 +1267,7 @@
 
 <!-- Core Planner. Export libraries are loaded on demand by planner.js. -->
 <script src="./travel-model-v2.js?v=285"></script>
-<script src="./planner.js?v=295.4.5"></script>
+<script src="./planner.js?v=295.4.6"></script>
 <script src="./assets/js/itbmo-platform.js?v=295.2"></script>
  
 </body>
