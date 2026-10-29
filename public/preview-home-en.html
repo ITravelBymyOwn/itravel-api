@@ -57,6 +57,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=6.0">
+  <link rel="stylesheet" href="./assets/css/itbmo-platform.css?v=295.1">
   <script src="./assets/js/itbmo-foundation.js?v=1.0"></script>
 </head>
 
@@ -85,7 +86,7 @@
         <a href="#top" data-scroll-top>Home</a>
         <a href="#how-it-works">How it works</a>
         <a href="#what-you-get" data-example-open>View example</a>
-        <a href="#planner" data-planner-open>Create a trip</a>
+        <a href="./planner.html?lang=en&amp;mode=new" target="_blank" rel="noopener" data-planner-open>Create a trip</a>
         <a href="#faq">FAQ</a>
         <a href="./support-contact-en.html">Support</a>
       </nav>
@@ -122,7 +123,7 @@
     <a href="#top" data-scroll-top>Home <span>↗</span></a>
     <a href="#how-it-works">How it works <span>↗</span></a>
     <a href="#what-you-get" data-example-open>See example <span>↗</span></a>
-    <a href="#planner" data-planner-open>Create a trip <span>↗</span></a>
+    <a href="./planner.html?lang=en&amp;mode=new" target="_blank" rel="noopener" data-planner-open>Create a trip <span>↗</span></a>
     <a href="#faq">FAQ <span>↗</span></a>
     <a href="./support-contact-en.html">Support <span>↗</span></a>
     <div class="mobile-nav__foot">
@@ -606,73 +607,6 @@ geographical logic, route optimization, and adaptation to the context you provid
     </section>
 
     <!-- =========================================================
-         PLANNER
-    ========================================================== -->
-    <section class="planner-section planner-section--focus-only" id="planner" aria-labelledby="planner-heading">
-      <div class="page-shell page-shell--wide">
-
-        <div class="section-heading section-heading--center">
-          <div class="eyebrow glass-pill">Your Planner starts here</div>
-          <h2 id="planner-heading">Build your trip <span>with ITBMO.</span></h2>
-          <p>
-            <strong>This is your Planner.</strong> Enter your travelers, destinations, and preferences here.
-
-One purchase allows you to generate <strong>one itinerary</strong> of up to <strong>30 effective trip days</strong>;
-
-payment will only appear when you choose to start generating that itinerary.
-          </p>
-        </div>
-
-        <div
-          class="planner-frame glass-frame"
-          data-planner-focus-frame
-          aria-label="ITBMO Planner"
-        >
-          <div class="planner-focus-toolbar" aria-hidden="true">
-            <button class="planner-focus-back" type="button" data-planner-focus-back>
-              <span class="planner-focus-back__icon" aria-hidden="true">←</span>
-              <span>Back to ITBMO</span>
-            </button>
-
-            <div class="planner-focus-brand" aria-hidden="true">
-              <span class="planner-focus-brand__spark">✦</span>
-              <span>
-                <strong>ITBMO Planner</strong>
-                <small>Your trip, distraction-free</small>
-              </span>
-            </div>
-
-            <div class="planner-focus-chip" aria-hidden="true">
-              1 generation · up to 30 effective trip days
-            </div>
-          </div>
-
-          <div class="planner-frame__top">
-            <div class="planner-frame__status">
-              <span class="status-dot"></span>
-              YOUR ITBMO PLANNER
-            </div>
-            <div class="planner-frame__hint">1 generation · up to 30 effective trip days</div>
-          </div>
-
-          <iframe
-            id="itbmo-planner"
-            class="planner-iframe"
-            title="ITBMO Trip Planner"
-            src="./planner.html?lang=en&v=85&surface=home-embed"
-            loading="eager"
-            referrerpolicy="no-referrer"
-            scrolling="auto"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-          ></iframe>
-        </div>
-
-        <div class="planner-focus-backdrop" data-planner-focus-backdrop hidden aria-hidden="true"></div>
-
-      </div>
-    </section>
-
-    <!-- =========================================================
          ADSENSE SLOT 01 · estructura lista, preview controlado por JS
     ========================================================== -->
     <section class="ad-zone" data-ad-slot="home-01" hidden>
@@ -1041,7 +975,7 @@ Use it as a base and adjust it to your own pace, bookings, and preferences.
           <span class="promo-badge promo-badge--dark"><b>SAVE 63%</b></span>
         </div>
 
-        <a class="button button--white button--large" href="#planner" data-planner-open>
+        <a class="button button--white button--large" href="./planner.html?lang=en&amp;mode=new" target="_blank" rel="noopener" data-planner-open>
           Start my trip with ITBMO <span>→</span>
         </a>
       </div>
@@ -1065,7 +999,7 @@ Use it as a base and adjust it to your own pace, bookings, and preferences.
 
         <div class="footer-column">
           <strong>Trips</strong>
-          <a href="#planner" data-planner-open>Create a trip</a>
+          <a href="./planner.html?lang=en&amp;mode=new" target="_blank" rel="noopener" data-planner-open>Create a trip</a>
         </div>
 
         <div class="footer-column">
@@ -1084,6 +1018,7 @@ Use it as a base and adjust it to your own pace, bookings, and preferences.
       </div>
 
       <div class="site-footer__bottom">
+        <div data-itbmo-social-links></div>
         <p>© 2026 I Travel By My Own. All rights reserved.</p>
         <p>Designed for travelers worldwide.</p>
       </div>
@@ -1091,7 +1026,8 @@ Use it as a base and adjust it to your own pace, bookings, and preferences.
     </div>
   </footer>
 
-  <script src="./assets/js/itbmo-site.js?v=6.0"></script>
+  <script src="./assets/js/itbmo-site.js?v=6.5"></script>
+  <script src="./assets/js/itbmo-platform.js?v=295.2"></script>
   <script>
     (() => {
       const initPhotography = () => {

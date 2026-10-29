@@ -37,7 +37,11 @@ export const FOUNDATION_EVENT_NAMES = new Set([
   'info_chat_question',
   'start_chat',
   'promo_code_applied',
-  'promo_code_consumed'
+  'promo_code_consumed','social_link_clicked','support_channel_opened','support_channel_unavailable',
+  'feedback_prompt_viewed','feedback_started','feedback_dismissed','feedback_submitted',
+  'mobility_route_prepared','live_location_granted','live_location_denied',
+  'travel_graph_requested','live_context_requested','itinerary_change_proposed',
+  'itinerary_change_approved','itinerary_change_rejected'
 ]);
 
 const ALLOWED_EVENT_PROPERTIES = new Set([
@@ -73,7 +77,7 @@ const ALLOWED_EVENT_PROPERTIES = new Set([
   'need_type',
   'entity_name',
   'resolution_type',
-  'travel_date'
+  'travel_date','feedback_type','rating','capability','provider','action','proposal_status'
 ]);
 
 export function sanitizeEventName(value = '') {

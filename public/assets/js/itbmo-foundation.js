@@ -23,14 +23,20 @@
     'generation_completed','itinerary_generated','workspace_opened','city_workspace_opened',
     'partner_offer_view','partner_offer_click','affiliate_click','trip_shared','trip_reopened',
     'new_trip_started','new_planning_started','export_pdf','export_csv','export_receipt',
-    'info_chat_question','start_chat','promo_code_applied','promo_code_consumed'
+    'info_chat_question','start_chat','promo_code_applied','promo_code_consumed',
+    'social_link_clicked','support_channel_opened','support_channel_unavailable',
+    'feedback_prompt_viewed','feedback_started','feedback_dismissed','feedback_submitted',
+    'mobility_route_prepared','live_location_granted','live_location_denied',
+    'travel_graph_requested','live_context_requested','itinerary_change_proposed',
+    'itinerary_change_approved','itinerary_change_rejected'
   ]);
   const SAFE_PARAM_KEYS=new Set([
     'language','city_count','days_total','payment_provider','currency','generation_mode',
     'partner','partner_name','placement','destination','queries_used','queries_remaining',
     'file_type','error_stage','campaign_id','campaign_key','channel','source','medium',
     'content','creator','referral','landing_page','first_touch_source','last_touch_source',
-    'promotion_code','promo_type','discount_amount','partner_slug','need_type','entity_name','resolution_type','travel_date'
+    'promotion_code','promo_type','discount_amount','partner_slug','need_type','entity_name','resolution_type','travel_date',
+    'feedback_type','rating','capability','provider','action','proposal_status'
   ]);
 
   function uuid(){

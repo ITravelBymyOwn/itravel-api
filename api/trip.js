@@ -113,6 +113,10 @@ async function getOwnedTripForGeneration(tripId, userId) {
 
 async function hasGenerationEntitlement(tripId, userId) {
   if (generationAdminBypass(userId)) return true;
+  return hasStoredGenerationEntitlement(tripId, userId);
+}
+
+async function hasStoredGenerationEntitlement(tripId, userId) {
   const rows = await supabaseFetch(
     `/payments?select=id&trip_id=eq.${encodeURIComponent(tripId)}&` +
     `user_id=eq.${encodeURIComponent(userId)}&status=eq.paid&limit=1`,
@@ -132,6 +136,72 @@ function generationCheckpoint(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
+}
+
+const RECOVERABLE_POST_PAYMENT_PHASES = new Set([
+  "preferences",
+  "preferences_confirmed",
+  "collecting_hotels",
+  "collecting_language",
+  "generation_requested"
+]);
+
+export function tripTerminalState(trip) {
+  const status = String(trip?.status || "").trim().toLowerCase();
+  const checkpoint = generationCheckpoint(trip?.itinerary_data);
+  const runStatus = String(checkpoint.run_status || "").trim().toLowerCase();
+
+  if (status === "archived" || runStatus === "archived" || checkpoint.archived_at) {
+    return { terminal:true, kind:"archived", reason:"TRIP_ARCHIVED" };
+  }
+
+  if (
+    status === "generated" ||
+    Boolean(trip?.generated_at) ||
+    ["generated", "completed"].includes(runStatus) ||
+    checkpoint.completed === true ||
+    checkpoint.generation_completed === true ||
+    Boolean(checkpoint.completed_at)
+  ) {
+    return { terminal:true, kind:"generated", reason:"TRIP_ALREADY_COMPLETED" };
+  }
+
+  return { terminal:false, kind:null, reason:null };
+}
+
+export function automaticRecoveryState(trip) {
+  if (!trip?.id) return { eligible:false, reason:"TRIP_MISSING" };
+
+  const terminal = tripTerminalState(trip);
+  if (terminal.terminal) return { eligible:false, reason:terminal.reason, terminal };
+
+  const status = String(trip.status || "").trim().toLowerCase();
+  const plannerInput = generationCheckpoint(trip.planner_input);
+  const checkpoint = generationCheckpoint(trip.itinerary_data);
+
+  if (plannerInput.auto_recovery_disabled === true) {
+    return { eligible:false, reason:"AUTO_RECOVERY_DISABLED" };
+  }
+
+  if (status === "saved") {
+    const progress = generationCheckpoint(plannerInput.post_payment_progress);
+    const phase = String(progress.phase || "").trim().toLowerCase();
+    if (!RECOVERABLE_POST_PAYMENT_PHASES.has(phase)) {
+      return { eligible:false, reason:"SAVED_WITHOUT_POST_PAYMENT_PROGRESS" };
+    }
+    return { eligible:true, reason:"POST_PAYMENT_INTERRUPTED", phase };
+  }
+
+  if (status === "generating" || status === "failed") {
+    const runToken = String(checkpoint.run_token || "").trim();
+    const generationCount = Math.max(0, Number(trip.generation_count || 0));
+    if (!runToken || generationCount < 1) {
+      return { eligible:false, reason:"GENERATION_IDENTITY_MISSING" };
+    }
+    return { eligible:true, reason:"GENERATION_INTERRUPTED", run_token:runToken };
+  }
+
+  return { eligible:false, reason:"STATUS_NOT_RECOVERABLE" };
 }
 
 async function patchOwnedTrip(tripId, userId, patch) {
@@ -653,37 +723,25 @@ async function handleGet(res, body, session) {
     });
   }
 
+  let recovery;
+  if (body.recovery_check === true) {
+    const state = automaticRecoveryState(trip);
+    let entitled = false;
+    if (state.eligible) entitled = await hasGenerationEntitlement(trip.id, session.user_id);
+    recovery = {
+      ...state,
+      eligible:Boolean(state.eligible && entitled),
+      entitlement_verified:Boolean(entitled),
+      reason:state.eligible && !entitled ? "GENERATION_PAYMENT_REQUIRED" : state.reason
+    };
+  }
+
   return res.status(200).json({
     ok: true,
     action: "get",
-    trip
+    trip,
+    ...(recovery ? {recovery} : {})
   });
-}
-
-async function disableAutoRecoveryForUser(userId) {
-  const rows = await supabaseFetch(
-    `/trips?select=id,status,planner_input&user_id=eq.${encodeURIComponent(userId)}&` +
-    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=100`,
-    { method:"GET" }
-  );
-
-  const candidates = Array.isArray(rows) ? rows : [];
-  const now = new Date().toISOString();
-
-  for (const candidate of candidates) {
-    const plannerInput = generationCheckpoint(candidate?.planner_input);
-    if (plannerInput.auto_recovery_disabled === true) continue;
-
-    await patchOwnedTrip(candidate.id, userId, {
-      planner_input:{
-        ...plannerInput,
-        auto_recovery_disabled:true,
-        auto_recovery_disabled_at:now
-      }
-    });
-  }
-
-  return candidates.length;
 }
 
 async function handleArchive(res, body, session) {
@@ -694,18 +752,13 @@ async function handleArchive(res, body, session) {
     return res.status(400).json({ ok:false, error:"Trip ID is required" });
   }
 
-  let disabledRecoveryCount = 0;
-  if (preventAutoRecovery) {
-    disabledRecoveryCount = await disableAutoRecoveryForUser(session.user_id);
-  }
-
   if (!tripId) {
     return res.status(200).json({
       ok:true,
       action:"archive",
       trip:null,
-      auto_recovery_disabled:true,
-      disabled_recovery_count:disabledRecoveryCount
+      auto_recovery_disabled:false,
+      disabled_recovery_count:0
     });
   }
 
@@ -714,20 +767,38 @@ async function handleArchive(res, body, session) {
     return res.status(404).json({ ok:false, error:"Trip not found" });
   }
 
+  const now = new Date().toISOString();
+  const plannerInput = generationCheckpoint(trip.planner_input);
+
   if (trip.status === "archived") {
+    const updated = preventAutoRecovery && plannerInput.auto_recovery_disabled !== true
+      ? await patchOwnedTrip(tripId, session.user_id, {
+          planner_input:{
+            ...plannerInput,
+            auto_recovery_disabled:true,
+            auto_recovery_disabled_at:now
+          }
+        })
+      : trip;
     return res.status(200).json({
       ok:true,
       action:"archive",
-      trip,
+      trip:updated,
       auto_recovery_disabled:preventAutoRecovery,
-      disabled_recovery_count:disabledRecoveryCount
+      disabled_recovery_count:preventAutoRecovery ? 1 : 0
     });
   }
 
-  const now = new Date().toISOString();
   const checkpoint = generationCheckpoint(trip.itinerary_data);
   const updated = await patchOwnedTrip(tripId, session.user_id, {
     status:"archived",
+    ...(preventAutoRecovery ? {
+      planner_input:{
+        ...plannerInput,
+        auto_recovery_disabled:true,
+        auto_recovery_disabled_at:now
+      }
+    } : {}),
     itinerary_data:{
       ...checkpoint,
       run_status:"archived",
@@ -741,7 +812,47 @@ async function handleArchive(res, body, session) {
     action:"archive",
     trip:updated,
     auto_recovery_disabled:preventAutoRecovery,
-    disabled_recovery_count:disabledRecoveryCount
+    disabled_recovery_count:preventAutoRecovery ? 1 : 0
+  });
+}
+
+async function handleGenerationPreflight(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+
+  const terminal = tripTerminalState(trip);
+  if (terminal.kind === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
+  }
+  if (terminal.kind === "generated") {
+    return res.status(200).json({
+      ok:true,
+      action:"generation_preflight",
+      can_begin:false,
+      already_completed:true
+    });
+  }
+
+  if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
+    return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
+  }
+
+  if (!["saved", "generating", "failed"].includes(String(trip.status || "").toLowerCase())) {
+    return res.status(409).json({ ok:false, code:"GENERATION_STATE_INVALID", error:"Trip state is not generatable" });
+  }
+
+  return res.status(200).json({
+    ok:true,
+    action:"generation_preflight",
+    can_begin:true,
+    already_completed:false
   });
 }
 
@@ -760,12 +871,13 @@ async function handleGenerationBegin(res, body, session) {
     return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
   }
 
-  if (trip.status === "archived") {
+  const terminal = tripTerminalState(trip);
+  if (terminal.kind === "archived") {
     return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
   }
 
   const checkpoint = generationCheckpoint(trip.itinerary_data);
-  if (trip.status === "generated") {
+  if (terminal.kind === "generated") {
     return res.status(200).json({
       ok:true,
       action:"generation_begin",
@@ -1031,17 +1143,17 @@ async function handleRecoverable(res, session) {
   const priority = {generating:0, failed:0, saved:1};
   candidates.sort((a,b) => (priority[a?.status] ?? 2) - (priority[b?.status] ?? 2));
   for (const trip of candidates) {
-    const plannerInput = generationCheckpoint(trip?.planner_input);
-    if (plannerInput.auto_recovery_disabled === true) continue;
-    // V281: a paid saved trip is recoverable even if Route Resolver failed
-    // before generation_begin (no run_token / generation_count yet).
-    // Entitlement is verified server-side below, not inferred from status.
-    if (trip?.id && await hasGenerationEntitlement(trip.id, session.user_id)) {
-      return res.status(200).json({ ok:true, action:"recoverable", trip });
+    const recovery = automaticRecoveryState(trip);
+    if (!recovery.eligible) continue;
+    // Historical discovery never treats the broad Preview bypass as evidence
+    // that an old server row belongs to the traveler's current browser flow.
+    // Preview recovery still works through an explicitly owned active-trip pointer.
+    if (trip?.id && await hasStoredGenerationEntitlement(trip.id, session.user_id)) {
+      return res.status(200).json({ ok:true, action:"recoverable", trip, recovery:{...recovery,entitlement_verified:true} });
     }
   }
 
-  return res.status(200).json({ ok:true, action:"recoverable", trip:null });
+  return res.status(200).json({ ok:true, action:"recoverable", trip:null, recovery:null });
 }
 
 export default async function handler(req, res) {
@@ -1108,6 +1220,10 @@ export default async function handler(req, res) {
 
     if (action === "generation_begin") {
       return await handleGenerationBegin(res, body, session);
+    }
+
+    if (action === "generation_preflight") {
+      return await handleGenerationPreflight(res, body, session);
     }
 
     if (action === "generation_checkpoint") {

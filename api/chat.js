@@ -2373,7 +2373,7 @@ export default async function handler(req, res) {
       const tiePrompt = `${buildTieSystemPrompt()}\n\nAUTHORITATIVE TIE REQUEST:\n${JSON.stringify(request)}`;
       const raw = await callStructured(
         [{role:"system",content:tiePrompt},{role:"user",content:"Return the validated strategic structure JSON only."}],
-        0.12, 5200, 90000, plannerUsage, PLANNER_MODEL, "medium"
+        0.12, 9000, 120000, plannerUsage, PLANNER_MODEL, "medium"
       );
       let parsed = cleanToJSON(raw);
       let validation = validateTiePlan(parsed, request);
@@ -2381,7 +2381,7 @@ export default async function handler(req, res) {
       if (!validation.ok) {
         const repair = await callStructured(
           [{role:"system",content:`${tiePrompt}\n\nSTRUCTURAL VALIDATION ERRORS:\n${JSON.stringify(validation.errors)}\nRepair only these structural defects. Preserve strong experience choices. JSON only.`}],
-          0.08, 5200, 90000, plannerUsage, REPAIR_MODEL, "low"
+          0.08, 9000, 120000, plannerUsage, REPAIR_MODEL, "low"
         );
         parsed = cleanToJSON(repair);
         validation = validateTiePlan(parsed, request);
@@ -2683,6 +2683,7 @@ QUALITY POLICY:
 - Preserve official proper names and write concise, useful concierge notes. Notes are the traveler-facing intelligence layer. For a meaningful attraction, normally provide 2–3 concrete execution insights selected from: whether advance/timed entry is prudent, what to prioritize inside a large site, the most relevant access/logistics point, seasonal/daylight considerations, a closure/hours caveat when genuinely relevant, and one useful fallback only when it adds value. Avoid generic filler ("great for photos", "enjoy the atmosphere", "buy souvenirs"), internal engine terminology, contract/window language and invented certainty.
 - Notes must also support commerce WITHOUT becoming commercial copy: if access is intrinsic, say clearly that an entrance/ticket is required or advisable; if guidance materially improves a complex visit, say why; if a transfer must be arranged, state the practical decision the traveler needs to make. Do not mention affiliate partners in itinerary notes.
 - Commerce metadata must be explicit enough for the contextual engine to act without re-interpreting prose. Classify paid/access-controlled attractions separately from free sights and logistics. A TOUR_EXPERIENCE is a genuinely guided/experiential product, not every sightseeing row. Preserve every known user-fixed mode. For local access, rank one recommended option plus only useful contextual alternatives, attach an estimate and condition to each, and keep the attraction's semantic identity intact. Never invent an operator, terminal, stop, schedule, reservation or availability.
+- For an authoritative selected NIGHT_OVERLAY event, preserve its exact identity and set commerce_context.semantic_type=TOUR_EXPERIENCE, including when that event is a distinctive culinary celebration. Use RESTAURANT only for an ordinary supporting meal; preparation, dinner, transfer and return rows never substitute for the selected night experience.
 
 OUTPUT CONTRACT:
 Return JSON only:

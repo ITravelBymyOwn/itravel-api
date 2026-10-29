@@ -6,7 +6,8 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=282" />
+  <link rel="stylesheet" href="./planner.css?v=295.4.6" />
+  <link rel="stylesheet" href="./assets/css/itbmo-platform.css?v=295.1" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -214,16 +215,26 @@
                 <small id="account-upgrade-email-hint" class="account-upgrade-email-hint" style="display:none;">You may keep your guest email or use a different email for your account.</small>
               </label>
 
-              <label>
-                <span id="label-password">Password</span>
-                <input id="account-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-password" for="account-password">Password</label>
+                <div class="account-password-control">
+                  <input id="account-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-password" aria-controls="account-password" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
                 <small id="password-hint">Minimum 8 characters, including uppercase, lowercase and a number.</small>
-              </label>
+              </div>
 
-              <label>
-                <span id="label-password-confirm">Confirm password</span>
-                <input id="account-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
-              </label>
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-password-confirm" for="account-password-confirm">Confirm password</label>
+                <div class="account-password-control">
+                  <input id="account-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-password-confirm" aria-controls="account-password-confirm" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <label class="account-check">
@@ -241,6 +252,11 @@
               <span id="account-marketing-copy">Send me travel inspiration, recommendations and special offers from ITBMO.</span>
             </label>
 
+            <div class="account-confirmation-notice" role="note">
+              <span class="account-confirmation-notice__icon" aria-hidden="true">✉</span>
+              <p id="account-confirmation-before">After creating your account, we will email you a confirmation link. It may take a few minutes to arrive, so there is no need to register again.</p>
+            </div>
+
             <button class="btn primary w-100" id="account-register-submit" type="button">Create account</button>
             <button class="btn ghost w-100" id="account-upgrade-cancel" type="button" style="display:none; margin-top:.55rem;">Cancel</button>
           </div>
@@ -252,10 +268,15 @@
                 <input id="account-login-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
               </label>
 
-              <label>
-                <span id="label-login-password">Password</span>
-                <input id="account-login-password" type="password" maxlength="128" autocomplete="current-password" />
-              </label>
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-login-password" for="account-login-password">Password</label>
+                <div class="account-password-control">
+                  <input id="account-login-password" type="password" maxlength="128" autocomplete="current-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-login-password" aria-controls="account-login-password" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <button class="btn primary w-100" id="account-login-submit" type="button">Sign in</button>
@@ -302,15 +323,25 @@
 
           <div id="account-reset-panel" class="account-panel" style="display:none;">
             <div class="account-form-grid">
-              <label>
-                <span id="label-reset-password">New password</span>
-                <input id="account-reset-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
-              </label>
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-reset-password" for="account-reset-password">New password</label>
+                <div class="account-password-control">
+                  <input id="account-reset-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-reset-password" aria-controls="account-reset-password" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
 
-              <label>
-                <span id="label-reset-password-confirm">Confirm new password</span>
-                <input id="account-reset-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
-              </label>
+              <div class="account-form-field account-form-field--password">
+                <label class="account-form-label" id="label-reset-password-confirm" for="account-reset-password-confirm">Confirm new password</label>
+                <div class="account-password-control">
+                  <input id="account-reset-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                  <button class="account-password-toggle" type="button" data-password-toggle="account-reset-password-confirm" aria-controls="account-reset-password-confirm" aria-label="Show password" title="Show password" aria-pressed="false">
+                    <span class="account-password-eye" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <button class="btn primary w-100" id="account-reset-submit" type="button">Update password</button>
@@ -318,6 +349,18 @@
 
           <div id="account-message" class="account-message" aria-live="polite"></div>
         </form>
+
+        <div id="account-confirmation-panel" class="account-confirmation-card" style="display:none;" role="status" aria-live="polite">
+          <span class="account-confirmation-card__icon" aria-hidden="true">✉</span>
+          <div class="account-confirmation-card__copy">
+            <small id="account-confirmation-eyebrow">ONE LAST STEP</small>
+            <h4 id="account-confirmation-title">Check your email</h4>
+            <p id="account-confirmation-body">We sent a confirmation link. Delivery may take a few minutes. Check Spam or Promotions too, and do not create the account again while it arrives.</p>
+            <p id="account-confirmation-email" class="account-confirmation-card__email"></p>
+            <p id="account-confirmation-next" class="account-confirmation-card__next">Once you confirm your email, return to ITBMO and sign in.</p>
+            <button class="btn primary" id="account-confirmation-login" type="button">I've confirmed my email</button>
+          </div>
+        </div>
 
         <div id="account-authenticated" class="account-authenticated account-authenticated--premium" style="display:none;">
           <div class="account-authenticated-copy">
@@ -692,6 +735,7 @@
       <p id="support-copy">If something went wrong with your itinerary, payment or account, our team is here to help.</p>
 
       <form id="support-form" class="support-form">
+        <div data-itbmo-support-channels></div>
         <label><span id="support-category-label">Help topic</span><select id="support-category" required><option value="itinerary">Itinerary generation issues</option><option value="payment">Payments and refunds</option><option value="account">Account assistance</option><option value="other">Other</option></select></label>
         <label><span id="support-contact-label">Your contact email</span><input id="support-contact-email" type="email" autocomplete="email" required></label>
         <label><span id="support-message-label">Tell us what happened</span><textarea id="support-message" rows="5" maxlength="4000" required></textarea></label>
@@ -1188,15 +1232,6 @@
     })();
   </script>
 
-  <!-- ExcelJS (required for styled, editable XLSX export) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-
-  <!-- jsPDF (required for PDF export) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-<!-- jsPDF AutoTable (required for tables) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-
 <!-- Focus bridge: same Planner iframe asks the parent Home to enter immersive mode.
      It does not alter Planner state, payment, ITBMO, Info Chat or generation logic. -->
 <script>
@@ -1230,9 +1265,10 @@
   })();
 </script>
 
-<!-- Tu JS del planner (después de los dos de arriba) -->
+<!-- Core Planner. Export libraries are loaded on demand by planner.js. -->
 <script src="./travel-model-v2.js?v=285"></script>
-<script src="./planner.js?v=294"></script>
+<script src="./planner.js?v=295.4.6"></script>
+<script src="./assets/js/itbmo-platform.js?v=295.2"></script>
  
 </body>
 </html>

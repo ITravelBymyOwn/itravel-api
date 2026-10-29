@@ -163,6 +163,38 @@ export function validateTiePlan(plan, request){
   for(const item of inventory){
     if(!['defining','major','complementary','supporting'].includes(String(item?.significance||''))) errors.push({code:'BAD_EXPERIENCE_SIGNIFICANCE',experience:item?.experience});
   }
+  // V295.4.4: a NIGHT_OVERLAY is executable itinerary structure, not optional
+  // descriptive metadata. Reject malformed ownership before it reaches the
+  // planner, where a late-night repair would otherwise have to guess intent.
+  const overlays=Array.isArray(plan?.night_overlays)?plan.night_overlays:[];
+  const overlayOwnerDays=new Set();
+  const validClock=value=>{
+    const match=String(value||'').trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+    return Boolean(match);
+  };
+  for(const overlay of overlays){
+    const identity=String(overlay?.identity||'').trim();
+    const type=String(overlay?.type||'').trim();
+    const preferredDay=Number(overlay?.preferred_day);
+    const eligibleDays=[...new Set((Array.isArray(overlay?.eligible_days)?overlay.eligible_days:[]).map(Number).filter(Number.isFinite))];
+    const startWindow=String(overlay?.start_window||'').trim();
+    const windowParts=startWindow.split(/[-–]/).map(x=>x.trim());
+    const duration=Number(overlay?.duration_minutes);
+    if(!identity) errors.push({code:'MISSING_NIGHT_OVERLAY_IDENTITY',preferred_day:preferredDay||null});
+    if(!type) errors.push({code:'MISSING_NIGHT_OVERLAY_TYPE',identity:identity||null});
+    if(!openDays.includes(preferredDay)) errors.push({code:'NIGHT_OVERLAY_OUTSIDE_OPEN_DAYS',identity:identity||null,preferred_day:preferredDay||null});
+    if(overlayOwnerDays.has(preferredDay)) errors.push({code:'DUPLICATE_NIGHT_OVERLAY_OWNER_DAY',preferred_day:preferredDay});
+    overlayOwnerDays.add(preferredDay);
+    if(!eligibleDays.length || !eligibleDays.includes(preferredDay)){
+      errors.push({code:'BAD_NIGHT_OVERLAY_ELIGIBLE_DAYS',identity:identity||null,preferred_day:preferredDay||null,eligible_days:eligibleDays});
+    }
+    if(startWindow.toLowerCase()!=='flexible' && !(windowParts.length===2&&validClock(windowParts[0])&&validClock(windowParts[1]))){
+      errors.push({code:'BAD_NIGHT_OVERLAY_START_WINDOW',identity:identity||null,start_window:startWindow||null});
+    }
+    if(!Number.isFinite(duration)||duration<30||duration>480){
+      errors.push({code:'BAD_NIGHT_OVERLAY_DURATION',identity:identity||null,duration_minutes:overlay?.duration_minutes??null});
+    }
+  }
   const ownership=new Map();
   for(const item of Array.isArray(plan?.ownership)?plan.ownership:[]){
     const key=String(item?.experience||'').trim().toLowerCase();

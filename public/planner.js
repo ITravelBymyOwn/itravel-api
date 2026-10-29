@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V271';
-const ITBMO_RUNTIME_ASSET='planner.js?v=286';
+const ITBMO_RUNTIME_BUILD='V295.4.6';
+const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.6';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -90,9 +90,11 @@ trackITBMOEvent('planner_open');
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
 const ITBMO_GUEST_SESSION_KEY = 'itbmo_guest_session_token';
 const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
+const ITBMO_ACTIVE_TRIP_TAB_KEY = 'itbmo_active_trip_id_tab_v2';
 const ITBMO_USER_CACHE_KEY = 'itbmo_user_cache_v1';
 const ITBMO_AUTH_SYNC_KEY = 'itbmo_auth_sync_v1';
 const ITBMO_AUTH_OWNER_KEY = 'itbmo_auth_owner_v1';
+const ITBMO_PENDING_SIGNUP_KEY = 'itbmo_pending_signup_v1';
 const ITBMO_PLANNER_PRESENCE_KEY = 'itbmo_planner_presence_v1'; // legacy telemetry; retained for backward compatibility
 const ITBMO_SURFACE_PRESENCE_KEY = 'itbmo_surface_presence_v2';
 const ITBMO_PLANNER_TAB_ID_KEY = 'itbmo_planner_tab_id_v2';
@@ -106,10 +108,67 @@ const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
 
+/* ---------- Fast standalone surfaces ----------
+   Keep Planner startup focused on trip creation. Export engines are fetched
+   only when a document is requested, while the Workspace is warmed quietly
+   after the Planner becomes idle. */
+const ITBMO_LAZY_SCRIPT_PROMISES=new Map();
+function _itbmoLoadScriptOnce_(src,isReady){
+  if(isReady?.())return Promise.resolve();
+  if(ITBMO_LAZY_SCRIPT_PROMISES.has(src))return ITBMO_LAZY_SCRIPT_PROMISES.get(src);
+  const promise=new Promise((resolve,reject)=>{
+    const existing=[...document.scripts].find(script=>script.src===new URL(src,document.baseURI).href);
+    const done=()=>isReady?.()?resolve():reject(new Error(`ASSET_NOT_READY:${src}`));
+    if(existing){existing.addEventListener('load',done,{once:true});existing.addEventListener('error',()=>reject(new Error(`ASSET_LOAD_FAILED:${src}`)),{once:true});return;}
+    const script=document.createElement('script');
+    script.src=src;script.async=true;script.dataset.itbmoLazyAsset='export';
+    script.addEventListener('load',done,{once:true});
+    script.addEventListener('error',()=>{script.remove();reject(new Error(`ASSET_LOAD_FAILED:${src}`));},{once:true});
+    document.head.appendChild(script);
+  }).catch(error=>{ITBMO_LAZY_SCRIPT_PROMISES.delete(src);throw error;});
+  ITBMO_LAZY_SCRIPT_PROMISES.set(src,promise);
+  return promise;
+}
+async function _itbmoEnsureExcelExport_(){
+  await _itbmoLoadScriptOnce_('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',()=>Boolean(window.ExcelJS?.Workbook));
+}
+async function _itbmoEnsurePdfExport_(){
+  await _itbmoLoadScriptOnce_('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',()=>Boolean(window.jspdf?.jsPDF));
+  await _itbmoLoadScriptOnce_('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js',()=>Boolean(window.jspdf?.jsPDF?.API?.autoTable));
+}
+function _itbmoWarmWorkspace_(){
+  const lang=document.documentElement.lang?.toLowerCase().startsWith('en')?'en':'es';
+  const assets=[
+    `./trip-workspace.html?lang=${lang}`,
+    './trip-workspace.css?v=230',
+    './assets/css/itbmo-platform.css?v=295.3',
+    './assets/js/itbmo-foundation.js?v=1.0',
+    './trip-workspace.js?v=295.4',
+    './assets/js/itbmo-platform.js?v=295.2',
+    './assets/js/itbmo-feedback.js?v=295.3',
+    './assets/js/itbmo-companion.js?v=295.2'
+  ];
+  if(!_itbmoWarmWorkspace_.requests)_itbmoWarmWorkspace_.requests=new Map();
+  assets.forEach(href=>{
+    if(_itbmoWarmWorkspace_.requests.has(href))return;
+    const request=fetch(href,{method:'GET',credentials:'same-origin',cache:'force-cache'})
+      .then(response=>response.ok?response.arrayBuffer():null)
+      .catch(()=>null);
+    _itbmoWarmWorkspace_.requests.set(href,request);
+  });
+}
+function _itbmoScheduleWorkspaceWarmup_(){
+  window.setTimeout(_itbmoWarmWorkspace_,120);
+}
+if(document.readyState==='complete')_itbmoScheduleWorkspaceWarmup_();
+else window.addEventListener('load',_itbmoScheduleWorkspaceWarmup_,{once:true});
+
 let currentUser = null;
 let currentTripId = null;
 let authReady = false;
 let guestUpgradeFormOpen = false;
+let signupConfirmationView = false;
+let pendingSignupEmail = '';
 let pendingVerificationTimer = null;
 let plannerPresenceTimer = null;
 let plannerPresenceId = '';
@@ -539,6 +598,9 @@ const $preferencesGenerateV2 = qs('#generate-itineraries-v2');
 /* ---------- ITBMO Account / Supabase ---------- */
 const $accountGuest = qs('#account-guest');
 const $accountAuthenticated = qs('#account-authenticated');
+const $accountConfirmationPanel = qs('#account-confirmation-panel');
+const $accountConfirmationEmail = qs('#account-confirmation-email');
+const $accountConfirmationLogin = qs('#account-confirmation-login');
 const $accountRegisterToggle = qs('#account-register-toggle');
 const $accountLoginToggle = qs('#account-login-toggle');
 const $accountGuestToggle = qs('#account-guest-toggle');
@@ -612,7 +674,7 @@ const AUTH_COPY = {
     title:'Tu cuenta ITBMO', subtitle:'Crea una cuenta, inicia sesión o continúa como invitado.',
     subtitleGuest:'Estás usando ITBMO como invitado.', subtitlePending:'Confirma tu correo para activar tu cuenta.', subtitleRegistered:'Tu cuenta está activa.',
     register:'Crear cuenta', login:'Iniciar sesión', guest:'Continuar como invitado',
-    name:'Nombre', email:'Email', password:'Contraseña', passwordConfirm:'Confirmar contraseña',
+    name:'Nombre', email:'Email', password:'Contraseña', passwordConfirm:'Confirmar contraseña', showPassword:'Mostrar contraseña', hidePassword:'Ocultar contraseña',
     create:'Crear cuenta', signIn:'Iniciar sesión', forgot:'¿Olvidaste tu contraseña?',
     guestContinue:'Continuar como invitado', forgotTitle:'Restablecer contraseña', sendReset:'Enviar enlace de recuperación',
     backToLogin:'Volver a iniciar sesión', newPassword:'Nueva contraseña', newPasswordConfirm:'Confirmar nueva contraseña', updatePassword:'Actualizar contraseña',
@@ -628,6 +690,10 @@ const AUTH_COPY = {
     required:'Completa todos los campos obligatorios.', legalRequired:'Debes aceptar los Términos de Uso y la Política de Privacidad.',
     emailInvalid:'Ingresa un email válido.', passwordRule:'La contraseña debe tener al menos 8 caracteres e incluir mayúscula, minúscula y número.', passwordMismatch:'Las contraseñas no coinciden.',
     duplicateEmail:'Ese email ya está registrado. Usa “Iniciar sesión”.', registerFail:'No pudimos crear tu cuenta. Intenta nuevamente.',
+    confirmationBefore:'Después de crear tu cuenta, te enviaremos un enlace de confirmación. Puede tardar unos minutos en llegar; no es necesario repetir el registro.',
+    confirmationEyebrow:'UN ÚLTIMO PASO', confirmationTitle:'Revisa tu correo',
+    confirmationBody:'Te enviamos un enlace de confirmación. Puede tardar unos minutos en llegar. Revisa también Spam o Promociones y no vuelvas a crear la cuenta mientras llega.',
+    confirmationNext:'Cuando confirmes el correo, vuelve a ITBMO e inicia sesión.', confirmationLogin:'Ya confirmé mi correo',
     confirmationSent:'Cuenta creada. Revisa tu email y confirma tu correo para iniciar sesión.', loginFail:'Email o contraseña incorrectos, o el correo aún no ha sido confirmado.',
     guestFail:'No pudimos iniciar la sesión de invitado. Intenta nuevamente.', guestMismatch:'El nombre y el correo no coinciden con el invitado registrado anteriormente.', guestHasAccount:'Ese correo ya tiene una cuenta. Usa “Iniciar sesión”.', connectionFail:'No se pudo conectar con ITBMO. Intenta nuevamente.',
     resetSent:'Si existe una cuenta con ese email, recibirás un enlace para restablecer tu contraseña.', resetFail:'No pudimos procesar la recuperación. Intenta nuevamente.',
@@ -639,7 +705,7 @@ const AUTH_COPY = {
     title:'Your ITBMO account', subtitle:'Create an account, sign in, or continue as a guest.',
     subtitleGuest:'You are using ITBMO as a guest.', subtitlePending:'Confirm your email to activate your account.', subtitleRegistered:'Your account is active.',
     register:'Create account', login:'Sign in', guest:'Continue as guest',
-    name:'Name', email:'Email', password:'Password', passwordConfirm:'Confirm password',
+    name:'Name', email:'Email', password:'Password', passwordConfirm:'Confirm password', showPassword:'Show password', hidePassword:'Hide password',
     create:'Create account', signIn:'Sign in', forgot:'Forgot your password?',
     guestContinue:'Continue as guest', forgotTitle:'Reset password', sendReset:'Send reset link',
     backToLogin:'Back to sign in', newPassword:'New password', newPasswordConfirm:'Confirm new password', updatePassword:'Update password',
@@ -655,6 +721,10 @@ const AUTH_COPY = {
     required:'Complete all required fields.', legalRequired:'You must accept the Terms of Use and Privacy Policy.',
     emailInvalid:'Enter a valid email.', passwordRule:'Password must be at least 8 characters and include an uppercase letter, lowercase letter and number.', passwordMismatch:'Passwords do not match.',
     duplicateEmail:'That email is already registered. Use “Sign in”.', registerFail:'We could not create your account. Please try again.',
+    confirmationBefore:'After creating your account, we will email you a confirmation link. It may take a few minutes to arrive, so there is no need to register again.',
+    confirmationEyebrow:'ONE LAST STEP', confirmationTitle:'Check your email',
+    confirmationBody:'We sent you a confirmation link. Delivery may take a few minutes. Check Spam or Promotions too, and do not create the account again while it arrives.',
+    confirmationNext:'Once you confirm your email, return to ITBMO and sign in.', confirmationLogin:"I've confirmed my email",
     confirmationSent:'Account created. Check your email and confirm your address before signing in.', loginFail:'Incorrect email or password, or the email has not been confirmed yet.',
     guestFail:'We could not start the guest session. Please try again.', guestMismatch:'The name and email do not match the guest previously registered.', guestHasAccount:'That email already has an account. Use “Sign in”.', connectionFail:'Could not connect to ITBMO. Please try again.',
     resetSent:'If an account exists for that email, you will receive a password reset link.', resetFail:'We could not process password recovery. Please try again.',
@@ -675,6 +745,39 @@ function setAccountMessage(message='', type=''){
   $accountMessage.textContent = message;
   $accountMessage.classList.remove('error','success');
   if(type) $accountMessage.classList.add(type);
+}
+
+function restorePendingSignupState(){
+  try{
+    const parsed=JSON.parse(sessionStorage.getItem(ITBMO_PENDING_SIGNUP_KEY)||'null');
+    const email=String(parsed?.email||'').trim().toLowerCase();
+    if(email && validAccountEmail(email)){
+      pendingSignupEmail=email;
+      signupConfirmationView=true;
+    }
+  }catch(_){ }
+}
+function rememberPendingSignup(email=''){
+  const normalized=String(email||'').trim().toLowerCase();
+  if(!normalized)return;
+  pendingSignupEmail=normalized;
+  signupConfirmationView=true;
+  try{sessionStorage.setItem(ITBMO_PENDING_SIGNUP_KEY,JSON.stringify({email:normalized,created_at:Date.now()}));}catch(_){ }
+}
+function clearPendingSignupState(){
+  pendingSignupEmail='';
+  signupConfirmationView=false;
+  try{sessionStorage.removeItem(ITBMO_PENDING_SIGNUP_KEY);}catch(_){ }
+}
+function updateSignupConfirmationCopy(){
+  const set=(selector,value)=>{const node=qs(selector);if(node)node.textContent=value;};
+  set('#account-confirmation-before',authCopy('confirmationBefore'));
+  set('#account-confirmation-eyebrow',authCopy('confirmationEyebrow'));
+  set('#account-confirmation-title',authCopy('confirmationTitle'));
+  set('#account-confirmation-body',authCopy('confirmationBody'));
+  set('#account-confirmation-next',authCopy('confirmationNext'));
+  set('#account-confirmation-login',authCopy('confirmationLogin'));
+  if($accountConfirmationEmail)$accountConfirmationEmail.textContent=pendingSignupEmail;
 }
 
 /* ITBMO shared surface session lifecycle.
@@ -809,8 +912,68 @@ function clearSessionToken({broadcast=true}={}){
   clearCachedUser();
   if(broadcast) broadcastAuthState('signed_out');
 }
-function getStoredActiveTripId(){ try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }catch(_){ return ''; } }
-function storeActiveTripId(tripId){ try{ if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId)); else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY); }catch(_){ } }
+function getStoredActiveTripId(){
+  try{
+    const tabRaw=String(sessionStorage.getItem(ITBMO_ACTIVE_TRIP_TAB_KEY) || '').trim();
+    const legacyRaw=String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim();
+    const currentTabId=plannerTabId();
+    const hasOtherLivePlanner=Object.entries(pruneSurfacePresence()).some(([id,entry])=>id!==currentTabId && entry?.type==='planner');
+    // A tab-scoped pointer owns normal reload recovery. The durable fallback is
+    // accepted only when no other live Planner could own it (closed-tab recovery),
+    // plus one-time support for the UUID-only V295.4.4 format.
+    const allowDurableFallback=legacyRaw && (!legacyRaw.startsWith('{') || !hasOtherLivePlanner);
+    const raw=tabRaw || (allowDurableFallback ? legacyRaw : '');
+    if(!raw) return '';
+    try{
+      const pointer=JSON.parse(raw);
+      if(!pointer || typeof pointer!=='object' || Array.isArray(pointer)) return '';
+      const tripId=String(pointer.trip_id || '').trim();
+      const pointerUserId=String(pointer.user_id || '').trim();
+      const activeUserId=String(currentUser?.id || '').trim();
+      if(pointerUserId && activeUserId && pointerUserId!==activeUserId){
+        sessionStorage.removeItem(ITBMO_ACTIVE_TRIP_TAB_KEY);
+        return '';
+      }
+      return tripId;
+    }catch(_){
+      // One-time compatibility with the legacy UUID-only pointer. Ownership and
+      // recoverability are still revalidated by /api/trip before any hydration.
+      return raw;
+    }
+  }catch(_){ return ''; }
+}
+function storeActiveTripId(tripId){
+  try{
+    if(!tripId){
+      const tabRaw=String(sessionStorage.getItem(ITBMO_ACTIVE_TRIP_TAB_KEY) || '').trim();
+      const durableRaw=String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim();
+      const pointerTripId=raw=>{
+        if(!raw) return '';
+        try{return String(JSON.parse(raw)?.trip_id || '').trim();}catch(_){return raw;}
+      };
+      const tabTripId=pointerTripId(tabRaw);
+      const durableTripId=pointerTripId(durableRaw);
+      const currentTabId=plannerTabId();
+      const hasOtherLivePlanner=Object.entries(pruneSurfacePresence()).some(([id,entry])=>id!==currentTabId && entry?.type==='planner');
+      sessionStorage.removeItem(ITBMO_ACTIVE_TRIP_TAB_KEY);
+      // Clearing one Planner must never erase another tab's durable fallback.
+      if((tabTripId && tabTripId===durableTripId) || (!tabTripId && !hasOtherLivePlanner)){
+        localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY);
+      }
+      return;
+    }
+    const pointer=JSON.stringify({
+      schema_version:2,
+      trip_id:String(tripId),
+      user_id:String(currentUser?.id || ''),
+      updated_at:new Date().toISOString()
+    });
+    sessionStorage.setItem(ITBMO_ACTIVE_TRIP_TAB_KEY,pointer);
+    // Retain the latest pointer only as a non-automatic diagnostic/migration aid;
+    // automatic V295.4.5 recovery reads the tab-scoped record above.
+    localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,pointer);
+  }catch(_){ }
+}
 
 function validAccountEmail(email){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()); }
 function validAccountPassword(password){ return typeof password === 'string' && password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password); }
@@ -934,6 +1097,7 @@ function applyAuthPlannerGate(unlocked){
 }
 
 function closeAccountDialog(){
+  resetAccountPasswordVisibility();
   const box=qs('#account-box');
   if(box){ box.classList.remove('is-auth-dialog-open'); box.setAttribute('aria-hidden','true'); }
   if($accountModalBackdrop){ $accountModalBackdrop.hidden=true; $accountModalBackdrop.classList.remove('is-open'); }
@@ -947,7 +1111,7 @@ function openAccountDialog(mode){
   box.setAttribute('aria-hidden','false');
   if($accountModalBackdrop){ $accountModalBackdrop.hidden=false; requestAnimationFrame(()=>$accountModalBackdrop.classList.add('is-open')); }
   document.body.classList.add('itbmo-auth-dialog-open');
-  const focusTarget=mode==='register'?$accountFirstName:mode==='login'?$accountLoginEmail:mode==='guest'?$accountGuestName:mode==='reset'?$accountResetPassword:null;
+  const focusTarget=signupConfirmationView?null:(mode==='register'?$accountFirstName:mode==='login'?$accountLoginEmail:mode==='guest'?$accountGuestName:mode==='reset'?$accountResetPassword:null);
   setTimeout(()=>{ try{ focusTarget?.focus(); }catch(_){} },60);
 }
 
@@ -955,10 +1119,21 @@ function showAccountMode(mode){
   const logged=Boolean(currentUser && getStoredSessionToken());
   const guestCanUpgrade=logged && currentUser && !currentUser.is_registered;
   if(logged && !guestCanUpgrade) return;
-  if(logged && guestCanUpgrade && mode !== 'register') return;
+  if(logged && guestCanUpgrade && mode !== 'register' && !currentUser?.registration_pending) return;
 
+  if(mode==='register' && pendingSignupEmail){
+    signupConfirmationView=true;
+    renderAuthState();
+    setAccountMessage('');
+    return;
+  }
+  if(mode!=='register')signupConfirmationView=false;
+
+  resetAccountPasswordVisibility();
   const panels = { register:$accountRegisterPanel, login:$accountLoginPanel, guest:$accountGuestPanel, forgot:$accountForgotPanel, reset:$accountResetPanel };
   Object.entries(panels).forEach(([key,panel])=>{ if(panel) panel.style.display = key === mode ? 'block' : 'none'; });
+  if($accountConfirmationPanel)$accountConfirmationPanel.style.display='none';
+  if($accountGuest)$accountGuest.style.display='block';
   if(mode !== 'reset') setAccountMessage('');
 }
 
@@ -1008,6 +1183,7 @@ async function refreshPendingVerification(){
       if(currentUser?.is_registered){
         storeSessionToken(token,true);
         stopPendingVerificationWatch();
+        clearPendingSignupState();
         setAccountMessage(authCopy('confirmationComplete'),'success');
         renderAuthState();
         enterFreshPlannerAfterAuth();
@@ -1033,9 +1209,12 @@ function renderAuthState(){
   const registered = Boolean(logged && currentUser?.is_registered);
   const pending = Boolean(logged && currentUser?.registration_pending);
   const guest = Boolean(logged && !registered && !pending);
+  if(pending && currentUser?.email && !pendingSignupEmail)rememberPendingSignup(currentUser.email);
+  const confirmationVisible=Boolean(signupConfirmationView || pending);
 
-  if($accountGuest) $accountGuest.style.display = (!logged || (guest && guestUpgradeFormOpen)) ? 'block' : 'none';
-  if($accountAuthenticated) $accountAuthenticated.style.display = logged ? 'flex' : 'none';
+  if($accountGuest) $accountGuest.style.display = !confirmationVisible && (!logged || (guest && guestUpgradeFormOpen)) ? 'block' : 'none';
+  if($accountConfirmationPanel)$accountConfirmationPanel.style.display=confirmationVisible?'block':'none';
+  if($accountAuthenticated) $accountAuthenticated.style.display = logged && !confirmationVisible ? 'flex' : 'none';
   if($accountModeActions) $accountModeActions.style.display = (guest && guestUpgradeFormOpen) ? 'none' : '';
   if($accountGuestToggle) $accountGuestToggle.style.display = (guest && guestUpgradeFormOpen) ? 'none' : '';
   if($accountUpgradeCancel) $accountUpgradeCancel.style.display = (guest && guestUpgradeFormOpen) ? 'block' : 'none';
@@ -1066,7 +1245,9 @@ function renderAuthState(){
   }
 
   if($accountSubtitle){
-    $accountSubtitle.textContent = !logged
+    $accountSubtitle.textContent = confirmationVisible
+      ? authCopy('subtitlePending')
+      : !logged
       ? authCopy('subtitle')
       : authCopy(registered ? 'subtitleRegistered' : (pending ? 'subtitlePending' : 'subtitleGuest'));
   }
@@ -1079,6 +1260,8 @@ function renderAuthState(){
     if($accountUpgradeToggle) $accountUpgradeToggle.textContent = authCopy('upgradeAction');
     if($accountLogout) $accountLogout.textContent = authCopy('logout');
   }
+
+  updateSignupConfirmationCopy();
 
   // Guest can plan normally. While the guest is actively creating an account,
   // or while email verification is pending, the Planner stays temporarily locked.
@@ -1109,9 +1292,66 @@ function applyAuthLanguage(){
   set('#account-register-submit',authCopy('create')); set('#account-login-submit',authCopy('signIn')); set('#account-guest-submit',authCopy('guestContinue'));
   set('#account-forgot-password',authCopy('forgot')); set('#account-forgot-submit',authCopy('sendReset')); set('#account-forgot-back',authCopy('backToLogin')); set('#account-reset-submit',authCopy('updatePassword'));
   set('#account-marketing-copy',authCopy('marketing')); set('#account-guest-upgrade-title',authCopy('upgradeTitle')); set('#account-guest-upgrade-copy',authCopy('upgradeCopy')); set('#account-upgrade-toggle',authCopy('upgradeAction')); set('#account-upgrade-cancel',authCopy('upgradeCancel')); set('#account-upgrade-email-hint',authCopy('upgradeEmailHint')); set('#account-logout',authCopy('logout'));
+  updateSignupConfirmationCopy();
   setLegalLanguage('#account-legal-copy','#account-terms-link','#account-privacy-link');
   setLegalLanguage('#account-guest-legal-copy','#account-guest-terms-link','#account-guest-privacy-link');
+  syncAccountPasswordToggleLabels();
   renderAuthState();
+}
+
+function syncAccountPasswordToggle(button){
+  if(!button) return;
+  const input=qs(`#${button.dataset.passwordToggle || ''}`);
+  if(!input) return;
+  const visible=input.type==='text';
+  const label=authCopy(visible?'hidePassword':'showPassword');
+  button.classList.toggle('is-password-visible',visible);
+  button.setAttribute('aria-pressed',String(visible));
+  button.setAttribute('aria-label',label);
+  button.title=label;
+}
+
+function syncAccountPasswordToggleLabels(){
+  qsa('[data-password-toggle]').forEach(syncAccountPasswordToggle);
+}
+
+function resetAccountPasswordVisibility(){
+  qsa('[data-password-toggle]').forEach(button=>{
+    const input=qs(`#${button.dataset.passwordToggle || ''}`);
+    if(input && input.type!=='password') input.type='password';
+    syncAccountPasswordToggle(button);
+  });
+}
+
+function toggleAccountPassword(button){
+  const input=qs(`#${button?.dataset?.passwordToggle || ''}`);
+  if(!input) return;
+  const start=input.selectionStart;
+  const end=input.selectionEnd;
+  input.type=input.type==='password'?'text':'password';
+  syncAccountPasswordToggle(button);
+  try{
+    input.focus({preventScroll:true});
+    if(Number.isInteger(start) && Number.isInteger(end)) input.setSelectionRange(start,end);
+  }catch(_){ }
+}
+
+function submitVisibleAccountPanelOnEnter(event){
+  if(event.key!=='Enter' || event.isComposing || event.repeat) return;
+  const target=event.target;
+  if(!(target instanceof HTMLInputElement) || target.type==='checkbox' || target.type==='button') return;
+  const actions=[
+    [$accountRegisterPanel,$accountRegisterSubmit],
+    [$accountLoginPanel,$accountLoginSubmit],
+    [$accountGuestPanel,$accountGuestSubmit],
+    [$accountForgotPanel,$accountForgotSubmit],
+    [$accountResetPanel,$accountResetSubmit]
+  ];
+  const match=actions.find(([panel])=>panel && panel.contains(target) && panel.style.display!=='none' && !panel.hidden);
+  if(!match) return;
+  event.preventDefault();
+  const button=match[1];
+  if(button && !button.disabled) button.click();
 }
 
 async function postUserAction(payload){
@@ -1134,16 +1374,16 @@ async function registerITBMOUser(){
   try{
     const {response,data}=await postUserAction({ action:'sign_up', name,email,password,password_confirmation:passwordConfirmation, session_token:getStoredSessionToken() || null, ...authTrackingPayload(), ...legalPayload('account') });
     if(response.ok && data?.ok){
+      rememberPendingSignup(data?.user?.email || email);
+      if($accountPassword) $accountPassword.value='';
+      if($accountPasswordConfirm) $accountPasswordConfirm.value='';
       if(currentUser && getStoredSessionToken()){
         currentUser={...currentUser,...(data.user || {}),is_registered:false,registration_pending:true,email_verified:false};
         guestUpgradeFormOpen=false;
         if($accountEmail) $accountEmail.readOnly=false;
-        if($accountPassword) $accountPassword.value=''; if($accountPasswordConfirm) $accountPasswordConfirm.value='';
-        renderAuthState();
-      }else{
-        setAccountMessage(authCopy('confirmationSent'),'success');
-        if($accountPassword) $accountPassword.value=''; if($accountPasswordConfirm) $accountPasswordConfirm.value='';
       }
+      setAccountMessage('');
+      renderAuthState();
       return;
     }
     if(response.status===409 || data?.email_taken) setAccountMessage(authCopy('duplicateEmail'),'error');
@@ -1161,7 +1401,7 @@ async function loginITBMOUser(){
   try{
     const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); void restorePaidGenerationIfNeeded(); return;
+      clearPendingSignupState(); storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); enterFreshPlannerAfterAuth(); void restorePaidGenerationIfNeeded(); return;
     }
     setAccountMessage(authCopy('loginFail'),'error');
   }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1215,7 +1455,7 @@ async function completeEmailConfirmation(accessToken){
   try{
     const {response,data}=await postUserAction({action:'complete_auth',access_token:accessToken});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); enterFreshPlannerAfterAuth(); void restorePaidGenerationIfNeeded(); return;
+      clearPendingSignupState(); storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); enterFreshPlannerAfterAuth(); void restorePaidGenerationIfNeeded(); return;
     }
     setAccountMessage(authCopy('confirmationFail'),'error');
   }catch(err){ console.error('ITBMO confirmation error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1434,6 +1674,7 @@ function enterFreshPlannerAfterAuth(){
   renderAuthState();
   // Neutral authenticated landing: show only the primary planning CTA.
   // Keep saved trips, payment entitlements and route drafts untouched.
+  document.body.classList.remove('itbmo-generated-clean');
   document.body.classList.add('itbmo-builder-closed-clean');
 }
 
@@ -1494,6 +1735,7 @@ async function syncPlannerAuthFromAnotherTab(event){
 }
 
 function bindAccountListeners(){
+  restorePendingSignupState();
   $accountRegisterToggle?.addEventListener('click',()=>showAccountMode('register'));
   $accountLoginToggle?.addEventListener('click',()=>showAccountMode('login'));
   $accountGuestToggle?.addEventListener('click',()=>showAccountMode('guest'));
@@ -1504,6 +1746,17 @@ function bindAccountListeners(){
   $accountGuestSubmit?.addEventListener('click',continueAsGuest);
   $accountForgotSubmit?.addEventListener('click',sendForgotPassword);
   $accountResetSubmit?.addEventListener('click',resetITBMOPassword);
+  qsa('[data-password-toggle]').forEach(button=>button.addEventListener('click',()=>toggleAccountPassword(button)));
+  $accountGuest?.addEventListener('keydown',submitVisibleAccountPanelOnEnter);
+  $accountConfirmationLogin?.addEventListener('click',async()=>{
+    if(currentUser?.registration_pending){
+      await refreshPendingVerification();
+      return;
+    }
+    signupConfirmationView=false;
+    if($accountLoginEmail && pendingSignupEmail)$accountLoginEmail.value=pendingSignupEmail;
+    showAccountMode('login');
+  });
   $accountUpgradeToggle?.addEventListener('click',openGuestAccountUpgrade);
   $accountUpgradeCancel?.addEventListener('click',closeGuestAccountUpgrade);
   $accountLogout?.addEventListener('click',logoutITBMOUser);
@@ -5059,10 +5312,20 @@ function normalizeRow(r = {}, fallbackDay = 1){
   let safeCommerce=commerceContext ? {...commerceContext} : null;
   if(safeCommerce){
     const semanticText=_canonicalText_(`${safeActivity} ${safeTo}`);
-    if(/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|restaurante|restaurant|brasserie|trattoria|osteria|cafe|cafeteria)\b/i.test(semanticText)){
-      safeCommerce.semantic_type='RESTAURANT';safeCommerce.ticket_need='none';safeCommerce.guided_tour_value='none';safeCommerce.commercial_eligible=false;
-    }else if(/^(traslado|transfer|regreso|retorno|llegada|salida|check in|check out)\b/i.test(semanticText)){
+    const distinctiveExperience=_v295IsDistinctiveExperienceMeal_({activity:safeActivity,to:safeTo,kind,commerce_context:safeCommerce});
+    if(/^(traslado|transfer|regreso|retorno|llegada|salida|check in|check out)\b/i.test(semanticText)){
+      // Physical movement keeps logistics authority even when its prose names the
+      // celebration it departs from or returns from.
       safeCommerce.semantic_type='LOGISTICS';safeCommerce.ticket_need='none';safeCommerce.guided_tour_value='none';safeCommerce.commercial_eligible=false;
+    }else if(distinctiveExperience){
+      // V295.4.4: a selected celebration, tasting, culinary class or show does
+      // not become an ordinary restaurant row merely because its title also
+      // contains "dinner/cena". Preserve the structured experience identity.
+      safeCommerce.semantic_type='TOUR_EXPERIENCE';
+      if(!String(safeCommerce.guided_tour_value||'').trim())safeCommerce.guided_tour_value='none';
+      safeCommerce.commercial_eligible=Boolean(safeCommerce.commercial_eligible);
+    }else if(/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|restaurante|restaurant|brasserie|trattoria|osteria|cafe|cafeteria)\b/i.test(semanticText)){
+      safeCommerce.semantic_type='RESTAURANT';safeCommerce.ticket_need='none';safeCommerce.guided_tour_value='none';safeCommerce.commercial_eligible=false;
     }else if(String(safeCommerce.semantic_type||'').toUpperCase()==='TRANSPORT' && kind==='activity'){
       // Local mobility alternatives belong to the activity and must never
       // convert that attraction into a pure-transport row.
@@ -5092,6 +5355,14 @@ function normalizeRow(r = {}, fallbackDay = 1){
     _tie_aurora_context:Boolean(r._tie_aurora_context ?? r.tie_aurora_context),
     _tie_aurora_stay_context:Boolean(r._tie_aurora_stay_context ?? r.tie_aurora_stay_context),
     _tie_aurora_row_authorized:Boolean(r._tie_aurora_row_authorized ?? r.tie_aurora_row_authorized),
+    _tie_selected_anchor:Boolean(r._tie_selected_anchor ?? r.tie_selected_anchor),
+    _tie_selected_anchor_verification_required:Boolean(r._tie_selected_anchor_verification_required ?? r.tie_selected_anchor_verification_required),
+    _itbmo_window_role:String(r._itbmo_window_role ?? commerceContext?._itbmo_window_role ?? '').trim() || null,
+    _itbmo_window_crosses_midnight:Boolean(r._itbmo_window_crosses_midnight ?? commerceContext?._itbmo_window_crosses_midnight),
+    _itbmo_window_minimum_useful_target:Number(r._itbmo_window_minimum_useful_target ?? commerceContext?._itbmo_window_minimum_useful_target ?? 0)||null,
+    _itbmo_day_offset:Number(r._itbmo_day_offset ?? commerceContext?._itbmo_day_offset ?? 0)||0,
+    _itbmo_night_chain_id:String(r._itbmo_night_chain_id ?? commerceContext?._itbmo_night_chain_id ?? '').trim() || null,
+    _itbmo_night_experience:Boolean(r._itbmo_night_experience ?? commerceContext?._itbmo_night_experience),
     plan_status:String(r.plan_status ?? r.planStatus ?? '').trim().toLowerCase() || null,
     fallback_role:String(r.fallback_role ?? r.fallbackRole ?? '').trim() || null,
     reservation_rigidity:String(r.reservation_rigidity ?? commerceContext?.reservation_rigidity ?? '').trim() || null,
@@ -6525,14 +6796,27 @@ function _activityDurationBounds_(duration=''){
 // V110 semantic itinerary roles. Utility rows are part of the physical truth of a
 // trip, but they must never masquerade as tourism richness or be duplicated merely
 // to fill a clock. Keep this deliberately language-tolerant and deterministic.
+function _v295IsDistinctiveExperienceMeal_(row={}){
+  const activity=_canonicalText_(`${row?.activity||''} ${row?.to||''}`);
+  const semantic=String(row?.commerce_context?.semantic_type||'').trim().toUpperCase();
+  const experienceSemantic=['TOUR_EXPERIENCE','ATTRACTION_TICKET'].includes(semantic);
+  const distinctive=/\b(cooking class|clase de cocina|food tour|tour gastronomico|tasting experience|experiencia gastronomica|tasting menu|menu degustacion|degustacion|cata|maridaje|banquet|banquete|feast|festin|gala|celebration|celebracion|countdown|cuenta regresiva|new year|ano nuevo|nochevieja|festival|festividad|performance|espectaculo|show|concert|concierto|ceremony|ceremonia|nightlife|vida nocturna|live music|musica en vivo)\b/.test(activity);
+  const merelyBefore=/\b(before|antes de|prior to|previo a|previa a)\b/.test(activity);
+  return distinctive && (experienceSemantic || !merelyBefore);
+}
 function _v110SemanticRole_(row={}){
   if(_isPureTransportRow_(row)) return 'transfer';
   const t=_canonicalText_(`${row?.kind||''} ${row?.activity||''} ${row?.notes||''}`);
-  if(/\b(cooking class|clase de cocina|food tour|tour gastronomico|tasting experience|experiencia gastronomica)\b/.test(t)) return 'experience';
-  if(/\b(lunch|almuerzo|dinner|cena|breakfast|desayuno|meal|comida|brunch)\b/.test(t)) return 'meal';
-  if(/\b(rest|descanso|recovery|recuperacion|pausa|break)\b/.test(t)) return 'recovery';
+  const semantic=String(row?.commerce_context?.semantic_type||'').trim().toUpperCase();
   if(/\b(return|regreso|retorno|back to|vuelta).*(hotel|alojamiento|base|lodging|accommodation)\b/.test(t)) return 'return';
   if(/^(transfer|traslado|transporte|transport|regreso|retorno|return|walk to|caminar hacia|paseo hacia|drive to|conducir hacia|train to|tren hacia|bus to|autobus hacia)\b/.test(t)) return 'transfer';
+  if(semantic==='LOGISTICS')return /\b(return|regreso|retorno|vuelta)\b/.test(t)?'return':'buffer';
+  if(row?._itbmo_night_experience||row?.commerce_context?._itbmo_night_experience)return 'experience';
+  if(_v295IsDistinctiveExperienceMeal_(row))return 'experience';
+  if(['TOUR_EXPERIENCE','ATTRACTION_TICKET','FREE_SIGHT'].includes(semantic))return 'experience';
+  if(/\b(lunch|almuerzo|dinner|cena|breakfast|desayuno|meal|comida|brunch)\b/.test(t)) return 'meal';
+  if(semantic==='RESTAURANT')return 'meal';
+  if(/\b(rest|descanso|recovery|recuperacion|pausa|break)\b/.test(t)) return 'recovery';
   if(/\b(buffer|margen|access|acceso|check in|control|queue|fila|security)\b/.test(t)) return 'buffer';
   if(/\b(free time|tiempo libre|flexible|flexibilidad)\b/.test(t)) return 'free_time';
   return 'experience';
@@ -7013,6 +7297,26 @@ function _v112RepairBlockRows_(rows=[],findings=[],scopeDays=[]){
   const byDay=_rowsByDayObject_(rows),selected=[];
   const seen=new Set();
   const add=(r)=>{if(!r)return;const k=`${r.day}|${r.start}|${r.end}|${r.activity||''}|${r.to||''}`;if(seen.has(k))return;seen.add(k);selected.push(r);};
+  // V295.4.4: nocturnal execution is a single physical chain. Supplying only the
+  // implicated row plus one neighbour made Luna repair a dinner or return in
+  // isolation and left stale pieces of the failed chain behind. Expose the exact
+  // authoritative NIGHT_OVERLAY window—never the rest of the healthy day.
+  const nightCodes=new Set(['MISSING_NIGHT_OVERLAY_EXECUTION','NIGHT_OVERLAY_TOO_SHORT','ORPHAN_NIGHT_CONTINUATION']);
+  const nightWindowIds=new Set();
+  for(const f of findings||[]){
+    if(!nightCodes.has(String(f?.code||'')))continue;
+    if(String(f?.window_id||'').trim())nightWindowIds.add(String(f.window_id));
+    const day=Number(f?.day||0),arr=byDay[day]||[],rowNumber=Number(f?.row||0);
+    const implicated=rowNumber>0?arr[rowNumber-1]:null;
+    const derived=String(implicated?.planning_window_id||implicated?.commerce_context?.planning_window_id||'').trim();
+    if(derived)nightWindowIds.add(derived);
+  }
+  if(nightWindowIds.size){
+    (rows||[]).forEach(r=>{
+      const id=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'').trim();
+      if(nightWindowIds.has(id))add(r);
+    });
+  }
   for(const f of findings||[]){
     const day=Number(f?.day||0),arr=byDay[day]||[];if(!day||!arr.length)continue;
     const indexes=new Set();
@@ -7256,12 +7560,21 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       // from TIE/window semantics, never from a destination hardcode. Keep this as
       // repairable semantic QA rather than blindly stretching rows: movement and
       // return logic may legitimately occupy part of the overlay window.
-      if(_v114IsNightOverlayRow_(r) && _v110SemanticRole_(r)==='experience'){
-        const target=Number(r?._itbmo_window_minimum_useful_target||r?.commerce_context?._itbmo_window_minimum_useful_target||0);
-        const span=_v110RowSpan_(r);
-        const minimum=target>0?Math.max(60,Math.round(target*0.65)):0;
-        if(minimum&&span<minimum){
-          errors.push({code:'NIGHT_OVERLAY_TOO_SHORT',day,row,span,target,minimum,activity:r.activity||null,instruction:'Preserve the intended nocturnal experience duration from the authoritative NIGHT_OVERLAY. It may cross midnight and remain owned by its starting itinerary day. Do not truncate it merely to fit 24:00; keep realistic movement/return logic and show post-midnight clock time explicitly.'});
+      if(_v114IsNightOverlayRow_(r) && _v295IsCommittedNightExperienceRow_(r)){
+        const windowId=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||r?._itbmo_night_chain_id||'');
+        const committedRows=dayRows.filter(candidate=>{
+          const candidateWindow=String(candidate?.planning_window_id||candidate?.commerce_context?.planning_window_id||candidate?._itbmo_night_chain_id||'');
+          return candidateWindow===windowId&&_v295IsCommittedNightExperienceRow_(candidate);
+        });
+        // A selected experience may legitimately span several consecutive rows.
+        // Audit its total executed dwell once instead of rejecting each segment.
+        if(committedRows[0]===r){
+          const target=Math.max(...committedRows.map(candidate=>Number(candidate?._itbmo_window_minimum_useful_target||candidate?.commerce_context?._itbmo_window_minimum_useful_target||0)),0);
+          const span=committedRows.reduce((sum,candidate)=>sum+_v110RowSpan_(candidate),0);
+          const minimum=target>0?Math.max(60,Math.round(target*0.65)):0;
+          if(minimum&&span<minimum){
+            errors.push({code:'NIGHT_OVERLAY_TOO_SHORT',day,row,window_id:windowId||null,span,target,minimum,activity:r.activity||null,instruction:'Preserve the intended nocturnal experience duration from the authoritative NIGHT_OVERLAY. It may cross midnight and remain owned by its starting itinerary day. Do not truncate it merely to fit 24:00; keep realistic movement/return logic and show post-midnight clock time explicitly.'});
+          }
         }
       }
 
@@ -7270,9 +7583,13 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       // V116 failure mode where a 00:xx return was published after its parent
       // experience disappeared.
       if(_v117DayOffset_(r,'start')>0){
-        const hasNightParent=dayRows.slice(0,i).some(prev=>_v114IsNightOverlayRow_(prev)&&_v110SemanticRole_(prev)==='experience'&&_v114LogicalEndMinutes_(prev)!=null&&_v114LogicalEndMinutes_(prev)<=start);
+        const windowId=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||r?._itbmo_night_chain_id||'');
+        const hasNightParent=dayRows.slice(0,i).some(prev=>{
+          const previousWindow=String(prev?.planning_window_id||prev?.commerce_context?.planning_window_id||prev?._itbmo_night_chain_id||'');
+          return previousWindow===windowId&&_v114IsNightOverlayRow_(prev)&&_v295IsCommittedNightExperienceRow_(prev)&&_v114LogicalEndMinutes_(prev)!=null&&_v114LogicalEndMinutes_(prev)<=start;
+        });
         if(!hasNightParent){
-          errors.push({code:'ORPHAN_NIGHT_CONTINUATION',day,row,start:r.start,end:r.end,activity:r.activity||null,instruction:'Keep the complete nocturnal chain in its starting itinerary day. Restore the preceding NIGHT_OVERLAY experience before any post-midnight continuation/return; never publish a D+1 continuation as the first element of the owner day.'});
+          errors.push({code:'ORPHAN_NIGHT_CONTINUATION',day,row,window_id:windowId||null,start:r.start,end:r.end,activity:r.activity||null,instruction:'Keep the complete nocturnal chain in its starting itinerary day. Restore the preceding NIGHT_OVERLAY experience before any post-midnight continuation/return; never publish a D+1 continuation as the first element of the owner day.'});
         }
       }
 
@@ -8320,7 +8637,7 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   units.forEach(unit=>(unit.windows||[]).filter(w=>String(w?.role||'')==='NIGHT_OVERLAY').forEach(w=>{
     const windowId=String(w?.window_id||'');
     const chainRows=(rows||[]).filter(r=>String(r?.stay_unit_id||'')===String(unit.id||'')&&String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'')===windowId);
-    const hasExperience=chainRows.some(r=>_v110SemanticRole_(r)==='experience');
+    const hasExperience=chainRows.some(_v295IsCommittedNightExperienceRow_);
     if(!hasExperience){
       errors.push({code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'});
     }
@@ -8969,6 +9286,19 @@ function _tieValidateBrowser_(plan={},request={}){
   if(!Array.isArray(plan?.corridor_candidates)||!plan.corridor_candidates.length)errors.push('CORRIDORS');
   units.forEach(u=>{const d=Number(u.day);if(!expected.includes(d))errors.push(`OUTSIDE:${d}`);if(seen.has(d))errors.push(`DUP:${d}`);seen.add(d);if(!['BASE_FULL','BASE_LIGHT','REGIONAL_FULL','REGIONAL_HALF'].includes(String(u.type||'')))errors.push(`TYPE:${d}`);if(String(u.type||'').startsWith('REGIONAL')&&!(u.route_manifest||[]).length)errors.push(`MANIFEST:${d}`);});
   expected.forEach(d=>{if(!seen.has(d))errors.push(`MISSING:${d}`);});
+  const overlayDays=new Set(),validClock=value=>/^([01]\d|2[0-3]):[0-5]\d$/.test(String(value||'').trim());
+  (Array.isArray(plan?.night_overlays)?plan.night_overlays:[]).forEach(overlay=>{
+    const identity=String(overlay?.identity||'').trim(),type=String(overlay?.type||'').trim();
+    const day=Number(overlay?.preferred_day),eligible=[...new Set((Array.isArray(overlay?.eligible_days)?overlay.eligible_days:[]).map(Number).filter(Number.isFinite))];
+    const startWindow=String(overlay?.start_window||'').trim(),parts=startWindow.split(/[-–]/).map(x=>x.trim());
+    const duration=Number(overlay?.duration_minutes);
+    if(!identity||!type)errors.push(`OVERLAY_IDENTITY:${day||'?'}`);
+    if(!expected.includes(day))errors.push(`OVERLAY_OUTSIDE:${day||'?'}`);
+    if(overlayDays.has(day))errors.push(`OVERLAY_DUP:${day}`);overlayDays.add(day);
+    if(!eligible.length||!eligible.includes(day))errors.push(`OVERLAY_ELIGIBLE:${day||'?'}`);
+    if(startWindow.toLowerCase()!=='flexible'&&!(parts.length===2&&validClock(parts[0])&&validClock(parts[1])))errors.push(`OVERLAY_WINDOW:${day||'?'}`);
+    if(!Number.isFinite(duration)||duration<30||duration>480)errors.push(`OVERLAY_DURATION:${day||'?'}`);
+  });
   return {ok:!errors.length,errors};
 }
 
@@ -8980,7 +9310,11 @@ async function _tieCallStructure_(request){
     const res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'tie_structure',tie_request:request})});
     const data=await res.json();
     if(data?.usage)_captureExactUsage_(data);
-    if(!res.ok||!data?.ok||!data?.plan)throw new Error(data?.error?.code||`TIE_HTTP_${res.status}`);
+    if(!res.ok||!data?.ok||!data?.plan){
+      const failure=new Error(data?.error?.code||`TIE_HTTP_${res.status}`);
+      failure.details=data?.error?.details||null;
+      throw failure;
+    }
     const validation=_tieValidateBrowser_(data.plan,request);
     if(!validation.ok)throw new Error(`TIE_BROWSER_VALIDATION:${validation.errors.join(',')}`);
     const value={plan:data.plan,fingerprint,duration_ms:Math.round(performance.now()-started)};
@@ -9420,6 +9754,43 @@ function _v81ProtectTicketedMealContinuity_(rows=[]){
   return rows;
 }
 
+// V295.4.4: bind a generated row to the exact authoritative night commitment.
+// Text heuristics alone are insufficient because a special dinner/celebration may
+// legitimately contain meal words while still being the selected experience.
+function _v295NightIdentityTokens_(value=''){
+  const stop=new Set(['the','and','with','from','into','para','por','con','desde','una','uno','del','las','los','en','de','experience','experiencia','night','noche']);
+  return [...new Set(_canonicalText_(value).split(/\s+/).filter(token=>token.length>=4&&!stop.has(token)))];
+}
+function _v295NightIdentityMatch_(row={},identity=''){
+  const rowText=`${row?.activity||''} ${row?.to||''}`;
+  if(!String(identity||'').trim())return false;
+  if(_arePoiAliases_(rowText,identity))return true;
+  const a=new Set(_v295NightIdentityTokens_(rowText)),b=_v295NightIdentityTokens_(identity);
+  if(!a.size||!b.length)return false;
+  const common=b.filter(token=>a.has(token)).length;
+  return common>=2&&common/Math.min(a.size,b.length)>=.45;
+}
+function _v295NightCommitmentMatch_(row={},window={},unit={},inventoryMatch=null){
+  if(String(window?.role||'')!=='NIGHT_OVERLAY'||_isPureTransportRow_(row))return false;
+  const raw={...row,_itbmo_night_experience:false,commerce_context:{...(row?.commerce_context||{}),_itbmo_night_experience:false}};
+  const role=_v110SemanticRole_(raw);
+  if(['transfer','return','recovery','buffer','free_time'].includes(role))return false;
+  const distinctive=_v295IsDistinctiveExperienceMeal_(raw);
+  if(role==='meal'&&!distinctive)return false;
+  const day=Number(window?.day||row?.day||0);
+  const overlays=(unit?.tie_structure?.night_overlays||[]).filter(overlay=>Number(overlay?.preferred_day)===day);
+  const identities=overlays.flatMap(overlay=>[overlay?.identity,overlay?.type]).filter(Boolean);
+  const directMatch=identities.some(identity=>_v295NightIdentityMatch_(raw,identity));
+  const semantic=String(raw?.commerce_context?.semantic_type||'').toUpperCase();
+  const structuredExperience=['TOUR_EXPERIENCE','ATTRACTION_TICKET'].includes(semantic);
+  const inventoryCommitment=Boolean(inventoryMatch)&&(structuredExperience||distinctive);
+  const sameExperienceFamily=distinctive&&identities.some(identity=>_v295IsDistinctiveExperienceMeal_({activity:identity,commerce_context:{semantic_type:'TOUR_EXPERIENCE'}}));
+  return directMatch||inventoryCommitment||(structuredExperience&&sameExperienceFamily);
+}
+function _v295IsCommittedNightExperienceRow_(row={}){
+  return Boolean(row?._itbmo_night_experience||row?.commerce_context?._itbmo_night_experience);
+}
+
 // V287: targeted night-chain diagnostics; no itinerary mutation.
 function _v287NightTrace_(stage,unit,rows=[]){
   const nights=(unit?.windows||[]).filter(w=>String(w?.role||'')==='NIGHT_OVERLAY');
@@ -9431,8 +9802,8 @@ function _v287NightTrace_(stage,unit,rows=[]){
     const selected=(unit?.tie_structure?.night_overlays||[]).filter(o=>Number(o?.preferred_day)===day);
     console.groupCollapsed(`[ITBMO V287 NIGHT TRACE] ${stage} · ${unit.base_destination||unit.physical_destination||''} · day ${day} · ${id}`);
     console.log('contract',{stay_unit_id:unit.id,window:{...w},selected_night_overlays:selected,unit_type:unit.unit_type});
-    console.table(sameDay.map((r,i)=>({index:i,day:r.day,start:r.start,end:r.end,activity:r.activity,to:r.to,window_id:r.planning_window_id||r.commerce_context?.planning_window_id||'',semantic_role:_v110SemanticRole_(r),day_offset:r._itbmo_day_offset||0,night_chain_id:r._itbmo_night_chain_id||''})));
-    console.log('evaluation',{same_day_rows:sameDay.length,assigned_rows:assigned.length,experience_rows:assigned.filter(r=>_v110SemanticRole_(r)==='experience').length,assigned_roles:assigned.map(r=>_v110SemanticRole_(r))});
+    console.table(sameDay.map((r,i)=>({index:i,day:r.day,start:r.start,end:r.end,activity:r.activity,to:r.to,window_id:r.planning_window_id||r.commerce_context?.planning_window_id||'',semantic_type:r.commerce_context?.semantic_type||'',semantic_role:_v110SemanticRole_(r),night_commitment:_v295IsCommittedNightExperienceRow_(r),day_offset:r._itbmo_day_offset||0,night_chain_id:r._itbmo_night_chain_id||''})));
+    console.log('evaluation',{same_day_rows:sameDay.length,assigned_rows:assigned.length,experience_rows:assigned.filter(_v295IsCommittedNightExperienceRow_).length,assigned_roles:assigned.map(r=>_v110SemanticRole_(r)),selected_identities:selected.map(o=>o?.identity||o?.type||null)});
     console.groupEnd();
   }
 }
@@ -9484,9 +9855,10 @@ function _v3StampStayRows_(rows=[],unit={}){
     const nightChainId=String(window.role||'')==='NIGHT_OVERLAY'?(window.window_id||null):null;
     const inventory=(unit.tie_structure?.experience_inventory||[]).filter(x=>x?.selected&&Number(x?.owner_day||0)===day);
     const inventoryMatch=inventory.find(x=>_arePoiAliases_(x?.experience||'',row?.to||'')||_arePoiAliases_(x?.experience||'',row?.activity||''))||null;
+    const nightExperience=_v295NightCommitmentMatch_(row,window,unit,inventoryMatch);
     const windowStart=_hhmmToMinutes_(window.start),rowStartRaw=_hhmmToMinutes_(row.start);
     const dayOffset=(String(window.role||'')==='NIGHT_OVERLAY'&&Boolean(window.crosses_midnight)&&windowStart!=null&&rowStartRaw!=null&&rowStartRaw<windowStart)?1:0;
-    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_stay_context:Boolean(unit.tie_structure?.aurora_stay_context),_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),_tie_selected_anchor:Boolean(inventoryMatch),_tie_selected_anchor_verification_required:Boolean(inventoryMatch?.verification_required),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
+    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,_itbmo_night_experience:nightExperience,_tie_day_identity:directive?.identity||null,_tie_day_cluster:directive?.cluster||null,_tie_unit_type:directive?.type||unit.unit_type||null,_tie_aurora_context:auroraAuthorized,_tie_aurora_stay_context:Boolean(unit.tie_structure?.aurora_stay_context),_tie_aurora_row_authorized:auroraAuthorized&&_isAuroraActivityRow_(row),_tie_selected_anchor:Boolean(inventoryMatch),_tie_selected_anchor_verification_required:Boolean(inventoryMatch?.verification_required),reservation_rigidity:row?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,_itbmo_window_role:window.role||null,_itbmo_window_crosses_midnight:Boolean(window.crosses_midnight),_itbmo_window_minimum_useful_target:Number(window.minimum_useful_target||0)||null,_itbmo_day_offset:dayOffset,_itbmo_night_chain_id:nightChainId,_itbmo_night_experience:nightExperience,reservation_rigidity:row?.commerce_context?.reservation_rigidity||inventoryMatch?.reservation_rigidity||null,calendar_sensitivity:row?.commerce_context?.calendar_sensitivity||inventoryMatch?.calendar_sensitivity||null}}];
   });
   // V71 · if ITBMO had to move an estimated full-day excursion away from an
   // impossible transition day, explain the adjustment once in traveler-facing
@@ -9601,7 +9973,7 @@ ${JSON.stringify(stayContract)}
 V288 EXECUTABLE NIGHT COMMITMENTS — authoritative selected TIE identity, NOT generic free time:
 ${JSON.stringify(_v288NightCommitments_(unit))}
 
-V288 HARD NIGHT OUTPUT: For EACH commitment above, create an explicit substantive experience row that names and executes selected_overlay identity/experience/type or the matching selected_inventory anchor. Assign it to its NIGHT_OVERLAY window by its actual start/end clock, not merely by metadata. Dinner, restaurant, lodging, preparation, walking transfer, and return are NOT substitutes. When the selected commitment is genuinely a culinary experience, describe the distinctive selected event itself, not an ordinary dinner. Reserve enough of the night window for that experience BEFORE placing optional meals. Keep any after-midnight continuation on the owner global day. Do not invent a different night attraction when the selected TIE identity is unclear; use the selected contract verbatim and verification notes.
+V288 HARD NIGHT OUTPUT: For EACH commitment above, create an explicit substantive experience row that names and executes selected_overlay identity/experience/type or the matching selected_inventory anchor. Assign it to its NIGHT_OVERLAY window by its actual start/end clock, not merely by metadata. Set commerce_context.semantic_type=TOUR_EXPERIENCE for the authoritative selected night event, including a distinctive culinary celebration; use RESTAURANT only for an ordinary supporting meal. Dinner, restaurant, lodging, preparation, walking transfer, and return are NOT substitutes. When the selected commitment is genuinely a culinary experience, describe the distinctive selected event itself, not an ordinary dinner. Reserve enough of the night window for that experience BEFORE placing optional meals. Keep any after-midnight continuation on the owner global day. Do not invent a different night attraction when the selected TIE identity is unclear; use the selected contract verbatim and verification notes.
 
 Plan ONLY the useful time supplied for this physical planning unit. Its type is ${unit.unit_type||'BASE_STAY'}, its overnight/base destination is ${unit.base_destination||unit.physical_destination}, and its physical tourism destination is ${unit.physical_destination||unit.base_destination}. This is one chronological fragment of a continuous trip.
 - Never regenerate USER_FIXED/fixed boundary movements; ITBMO inserts those deterministically. For a TIE-discovered REGIONAL unit with no supplied fixed excursion legs, you DO own the non-fixed regional access, micro-stop movements and realistic return to the overnight base inside the planning window.
@@ -9709,7 +10081,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // night experience disappeared while a 00:xx return survived elsewhere.
     const missingNightExecution=(unit.windows||[]).filter(w=>String(w?.role||'')==='NIGHT_OVERLAY').flatMap(w=>{
       const chainRows=(rows||[]).filter(r=>String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'')===String(w?.window_id||''));
-      const hasExperience=chainRows.some(r=>_v110SemanticRole_(r)==='experience');
+      const hasExperience=chainRows.some(_v295IsCommittedNightExperienceRow_);
       return hasExperience?[]:[{code:'MISSING_NIGHT_OVERLAY_EXECUTION',day:Number(w.day),stay_unit_id:unit.id,window_id:w.window_id,window:`${w.start||''}-${w.end||''}`,instruction:'Restore the authoritative preferred nocturnal experience inside this NIGHT_OVERLAY owner-day window. Keep its complete chain, including any post-midnight continuation and return, on this same itinerary day; do not substitute preparation, recovery or a return-only row.'}];
     });
     // V276: A REGIONAL day trip must finish at its overnight base unless an
@@ -9806,7 +10178,22 @@ Repair ONLY the supplied local row block(s). Rows not supplied are immutable and
     const raw=await _v3Call_(prompt);
     const parsed=parseJSON(raw);
     const candidateDays=repairScope.type==='stay'?unitDays:scopeDays;
-    const candidate=_v3StampStayRows_(_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unitCity,totalDays,candidateDays)),unit);
+    const nightRepairCodes=new Set(['MISSING_NIGHT_OVERLAY_EXECUTION','NIGHT_OVERLAY_TOO_SHORT','ORPHAN_NIGHT_CONTINUATION']);
+    const replacedNightWindowIds=new Set();
+    const currentByDay=_rowsByDayObject_(rows);
+    repairFindings.forEach(f=>{
+      if(!nightRepairCodes.has(String(f?.code||'')))return;
+      const explicit=String(f?.window_id||'').trim();if(explicit)replacedNightWindowIds.add(explicit);
+      const arr=currentByDay[Number(f?.day||0)]||[],implicated=arr[Number(f?.row||0)-1];
+      const derived=String(implicated?.planning_window_id||implicated?.commerce_context?.planning_window_id||'').trim();
+      if(derived)replacedNightWindowIds.add(derived);
+    });
+    const candidateRaw=_v3StampStayRows_(_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unitCity,totalDays,candidateDays)),unit);
+    const nightOnlyRepair=repairFindings.length>0&&repairFindings.every(f=>nightRepairCodes.has(String(f?.code||'')))&&replacedNightWindowIds.size>0;
+    // A pure night repair has no authority outside the failed overlay, even if a
+    // model response repeats healthy daytime rows. Mixed repairs retain the
+    // historical patch behavior and are still protected by overlap/anchor gates.
+    const candidate=nightOnlyRepair?candidateRaw.filter(r=>replacedNightWindowIds.has(String(r?.planning_window_id||r?.commerce_context?.planning_window_id||''))):candidateRaw;
     if(!candidate.length){stagnant+=1;continue;}
     // Repairs are patches, never replacements. Even a final Stay-scope repair may
     // return only a subset of days; merge only the days actually returned and keep
@@ -9822,6 +10209,8 @@ Repair ONLY the supplied local row block(s). Rows not supplied are immutable and
     candidate.forEach(r=>{const d=Number(r.day);if(!candidateByDay.has(d))candidateByDay.set(d,[]);candidateByDay.get(d).push(r);});
     const preservedReturnedDayRows=rows.filter(r=>{
       const day=Number(r.day);if(!returnedDaySet.has(day))return false;
+      const rowWindow=String(r?.planning_window_id||r?.commerce_context?.planning_window_id||'').trim();
+      if(rowWindow&&replacedNightWindowIds.has(rowWindow))return false;
       const rowPoiKeys=[r?.activity,r?.from,r?.to].map(_canonicalText_).filter(Boolean);
       if(rowPoiKeys.some(k=>[...implicatedPoiKeys].some(p=>p&&(k===p||k.includes(p)||p.includes(k)))))return false;
       const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
@@ -10872,6 +11261,16 @@ function _hydrateGenerationTrip_(trip){
 }
 
 function _showGenerationRetry_(reason=''){
+  if(/GENERATION_ALREADY_COMPLETED|GENERATION_ARCHIVED/i.test(String(reason||''))){
+    // A terminal/historical trip is not an interrupted generation. Detach its
+    // stale browser pointer and return to the clean new-trip surface. Generated
+    // documents remain available exclusively through My Trips.
+    clearPlannerUIForLogout();
+    renderAuthState();
+    _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
+    console.info('[ITBMO RECOVERY] terminal trip detached from automatic recovery');
+    return;
+  }
   // Recovery is the only visible action after a failed paid generation.
   document.querySelector('#guided-personalization-overlay')?.remove();
   document.body.classList.remove('guided-preferences-open');
@@ -11030,6 +11429,9 @@ function _showCleanPlannerLanding_({clearRouteDraft=false,enableReset=false}={})
     $resetBtn.disabled=!enableReset;
     $resetBtn.setAttribute('aria-disabled',String(!enableReset));
   }
+  const generated=hasGeneratedItineraryRows();
+  document.body.classList.toggle('itbmo-builder-closed-clean',!generated);
+  document.body.classList.toggle('itbmo-generated-clean',generated);
 }
 
 function _applyGeneratedUIState({showModal=false}={}){
@@ -11108,6 +11510,23 @@ async function runPaidGeneration({manualRetry=false}={}){
   if(manualRetry) _resumeAstraGenerationMetricsForRecovery_(); else _resetAstraGenerationMetrics_();
 
   try{
+    // V295.4.5: establish server-side trip identity before Route Resolver performs
+    // any expensive work. Historical/terminal rows are detached immediately and
+    // can never reach automatic generation through a stale browser pointer.
+    showWOW(true,getLang()==='es'?'Verificando tu viaje antes de iniciar…':'Checking your trip before starting…');
+    const token=getStoredSessionToken();
+    const preflight=await tripApi({
+      action:'generation_preflight',
+      session_token:token,
+      trip_id:currentTripId
+    });
+    _assertGenerationRunActive_(runEpoch);
+    if(preflight?.already_completed || preflight?.can_begin===false){
+      const conflict=new Error('Este viaje ya figura como generado en el servidor. No se mostrarán documentos anteriores como resultado de esta generación.');
+      conflict.code='GENERATION_ALREADY_COMPLETED';
+      throw conflict;
+    }
+
     // V72: never erase a terminal-success marker before we know the server has opened a genuinely new run.
     // A transient Route Resolver failure must not resurrect an already completed trip.
     showWOW(true,getLang()==='es'?'✨ ITBMO está resolviendo la logística de tu recorrido…':'✨ ITBMO is resolving your trip logistics…');
@@ -11115,7 +11534,6 @@ async function runPaidGeneration({manualRetry=false}={}){
     try{const pendingStory=_travelV2()?.state?.tripStory;if(pendingStory?.stays?.length)_tripStorySaveDraft_(JSON.parse(JSON.stringify(pendingStory)));}catch(e){console.warn('[ITBMO V279 RECOVERY] local route snapshot unavailable',e);}
     await _resolveTripStoryRoutesBeforeGeneration_();
     _assertGenerationRunActive_(runEpoch);
-    const token=getStoredSessionToken();
     const begin=await tripApi({
       action:'generation_begin',
       session_token:token,
@@ -11298,9 +11716,13 @@ async function runPaidGeneration({manualRetry=false}={}){
       $preferencesGenerateV2.classList.remove('is-generated');
     }
     _pauseAstraGenerationMetrics_();
-    if(['GENERATION_ALREADY_COMPLETED','GENERATION_RUN_MISMATCH','GENERATION_ARCHIVED'].includes(err?.code)){
+    if(['GENERATION_ALREADY_COMPLETED','GENERATION_ARCHIVED'].includes(err?.code)){
       showWOW(false);
       console.error('[ITBMO V243 GENERATION IDENTITY] Historical/completed trip rejected; no previous exports published', {trip_id:currentTripId,code:err.code});
+      _showGenerationRetry_(recoveryReason);
+    }else if(err?.code==='GENERATION_RUN_MISMATCH'){
+      showWOW(false);
+      console.error('[ITBMO V243 GENERATION IDENTITY] Active generation ownership changed; retry remains available', {trip_id:currentTripId,code:err.code});
       _showGenerationRetry_(recoveryReason);
     }else{
       _showGenerationRetry_(recoveryReason);
@@ -11548,12 +11970,57 @@ function _plannerOwnsAutomaticGenerationRecovery_(){
   return /(?:^|\/)planner\.html$/i.test(String(window.location.pathname||''));
 }
 
+let paidGenerationRecoveryDiscoveryRunning=false;
+const ITBMO_RECOVERABLE_POST_PAYMENT_PHASES=new Set(['preferences','preferences_confirmed','collecting_hotels','collecting_language','generation_requested']);
+function _automaticRecoveryAssessment_(trip,serverRecovery){
+  if(!trip?.id) return {eligible:false,reason:'TRIP_MISSING'};
+  const status=String(trip.status || '').trim().toLowerCase();
+  const plannerInput=trip.planner_input && typeof trip.planner_input==='object' && !Array.isArray(trip.planner_input) ? trip.planner_input : {};
+  const checkpoint=trip.itinerary_data && typeof trip.itinerary_data==='object' && !Array.isArray(trip.itinerary_data) ? trip.itinerary_data : {};
+  const runStatus=String(checkpoint.run_status || '').trim().toLowerCase();
+  const terminalArchived=status==='archived' || runStatus==='archived' || Boolean(checkpoint.archived_at);
+  const terminalGenerated=status==='generated' || Boolean(trip.generated_at) || ['generated','completed'].includes(runStatus) || checkpoint.completed===true || checkpoint.generation_completed===true || Boolean(checkpoint.completed_at);
+  if(terminalArchived) return {eligible:false,terminal:true,reason:'TRIP_ARCHIVED'};
+  if(terminalGenerated) return {eligible:false,terminal:true,reason:'TRIP_ALREADY_COMPLETED'};
+  if(plannerInput.auto_recovery_disabled===true) return {eligible:false,reason:'AUTO_RECOVERY_DISABLED'};
+
+  let localEligible=false;
+  let reason='STATUS_NOT_RECOVERABLE';
+  if(status==='saved'){
+    const progress=plannerInput.post_payment_progress && typeof plannerInput.post_payment_progress==='object' && !Array.isArray(plannerInput.post_payment_progress) ? plannerInput.post_payment_progress : {};
+    const phase=String(progress.phase || '').trim().toLowerCase();
+    localEligible=ITBMO_RECOVERABLE_POST_PAYMENT_PHASES.has(phase);
+    reason=localEligible?'POST_PAYMENT_INTERRUPTED':'SAVED_WITHOUT_POST_PAYMENT_PROGRESS';
+  }else if(status==='generating' || status==='failed'){
+    localEligible=Boolean(String(checkpoint.run_token || '').trim()) && Math.max(0,Number(trip.generation_count || 0))>=1;
+    reason=localEligible?'GENERATION_INTERRUPTED':'GENERATION_IDENTITY_MISSING';
+  }
+
+  if(serverRecovery && serverRecovery.eligible!==true){
+    return {eligible:false,reason:String(serverRecovery.reason || reason)};
+  }
+  return {eligible:localEligible,reason};
+}
+function _detachInvalidAutomaticRecovery_(trip,reason=''){
+  const tripId=String(trip?.id || getStoredActiveTripId() || '').trim();
+  storeActiveTripId(null);
+  _clearPostPaymentProgressLocal_(tripId);
+  _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
+  console.info('[ITBMO V295.4.5 RECOVERY IDENTITY] automatic recovery detached',{trip_id:tripId||null,reason:String(reason||'NOT_RECOVERABLE')});
+}
 async function restorePaidGenerationIfNeeded(interruptedTripId){
   if(!_plannerOwnsAutomaticGenerationRecovery_()) return;
-  // Explicit new journeys must never revive a previous payment/generation.
-  // Explicit new-mode stays blank unless this browser holds an interrupted paid trip.
-  if(new URLSearchParams(window.location.search).get('mode')==='new' && !interruptedTripId && !getStoredActiveTripId()) return;
-  if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
+  // A Home launch explicitly requests an independent clean Planner. Consume the
+  // marker once so subsequent reloads in this same tab can recover its own trip.
+  const startupUrl=new URL(window.location.href);
+  if(startupUrl.searchParams.get('mode')==='new'){
+    try{sessionStorage.removeItem(ITBMO_ACTIVE_TRIP_TAB_KEY);}catch(_){ }
+    startupUrl.searchParams.delete('mode');
+    try{history.replaceState(history.state,'',startupUrl.toString());}catch(_){ }
+    return;
+  }
+  if(generationResetInProgress || paidGenerationRunning || paidGenerationRecoveryDiscoveryRunning || !currentUser || !getStoredSessionToken()) return;
+  paidGenerationRecoveryDiscoveryRunning=true;
   const restoreEpoch=generationRunEpoch;
   try{
     const token=getStoredSessionToken();
@@ -11561,49 +12028,68 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
     // interrupted generation on the server. Completed/saved trips are NEVER hydrated.
     const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
     const tripId=requestedTripId || String(interruptedTripId || getStoredActiveTripId() || '').trim();
+    // V295.4.5 contract: a clean/new tab has no recovery identity and must remain
+    // clean. Server history is available through My Trips, never as an unsolicited
+    // automatic Planner hydration.
+    if(!tripId) return;
     let trip=null;
+    let recovery=null;
+    let explicitPointerResolved=false;
     if(tripId){
       try{
-        const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
+        const data=await tripApi({action:'get',session_token:token,trip_id:tripId,recovery_check:true});
         trip=data?.trip || null;
+        recovery=data?.recovery || null;
+        explicitPointerResolved=Boolean(trip);
       }catch(err){
         if(err?.status===404) storeActiveTripId(null);
         else throw err;
       }
     }
-    if(!trip || !['saved','generating','failed'].includes(trip.status)){
-      // V272: discover eligible unfinished paid trips; completed trips remain terminal.
-      const data=await tripApi({action:'recoverable',session_token:token});
-      trip=data?.trip || null;
+    // An explicit pointer is authoritative only when both client and server agree
+    // that it represents this account's real interrupted post-payment flow.
+    if(explicitPointerResolved){
+      const assessment=_automaticRecoveryAssessment_(trip,recovery);
+      if(!assessment.eligible){
+        _detachInvalidAutomaticRecovery_(trip,assessment.reason);
+        return;
+      }
     }
     if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
-    if(!trip || !['saved','generating','failed'].includes(trip.status)) return;
-    // A paid saved trip is a recoverable pre-generation state, not a completed trip.
-    storeActiveTripId(String(trip.id));
-
-    // V86 RECOVERY CONTRACT:
-    // Login/new Planner = blank. Completed/saved route creation is never restored.
-    // The ONLY automatic hydration allowed here is a paid generation retry.
-    if(trip.status==='generated'){
-      _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:true});
+    if(!trip) return;
+    const assessment=_automaticRecoveryAssessment_(trip,recovery);
+    if(!assessment.eligible){
+      _detachInvalidAutomaticRecovery_(trip,assessment.reason);
       return;
     }
 
-    // generating / failed: preserve the paid-generation recovery path.
-    if(!_hydrateGenerationTrip_(trip)) return;
-
     let paymentStatus=null;
     try{
-      paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+      paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:trip.id});
       applyInfoChatStatus(paymentStatus);
-    }catch(_){ }
-    if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch || currentTripId!==trip.id) return;
+    }catch(err){
+      // A transient entitlement-status failure must keep the Planner clean and the
+      // valid pointer intact so a later reload can retry safely.
+      console.warn('[GENERATION RESTORE ENTITLEMENT]',err);
+      return;
+    }
+    if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch) return;
 
     if(!paymentStatus?.paid && !paymentStatus?.admin_bypass && !paymentStatus?.info_chat_authorized){
       paymentGateSatisfiedTripId=null;
       setPostPaymentTripConfigurationLocked(false);
+      _detachInvalidAutomaticRecovery_(trip,'GENERATION_PAYMENT_REQUIRED');
       return;
     }
+
+    // Only after state and entitlement validation may historical server data enter
+    // the visible Planner. This is the critical V295.4.5 identity boundary.
+    storeActiveTripId(String(trip.id));
+    if(!_hydrateGenerationTrip_(trip)){
+      _detachInvalidAutomaticRecovery_(trip,'TRIP_HYDRATION_INVALID');
+      return;
+    }
+    if(generationResetInProgress || paidGenerationRunning || restoreEpoch!==generationRunEpoch || currentTripId!==trip.id) return;
 
     // Positive server entitlement is the only restore-time authority for the lock.
     paymentGateSatisfiedTripId=currentTripId;
@@ -11638,6 +12124,8 @@ async function restorePaidGenerationIfNeeded(interruptedTripId){
     }
   }catch(err){
     console.warn('[GENERATION RESTORE]',err);
+  }finally{
+    paidGenerationRecoveryDiscoveryRunning=false;
   }
 }
 
@@ -12897,6 +13385,10 @@ async function exportItineraryToXLSX(options={}){
   const blocks=_exportPhysicalDestinationBlocks_();
   const es=_plannerOutputLang_()==='es';
   if(!blocks.length){alert(es?'No hay itinerarios generados todavía para exportar.':'There are no generated itineraries to export yet.');throw new Error('NO_ITINERARY_FOR_XLSX');}
+  try{await _itbmoEnsureExcelExport_();}catch(_){
+    alert(es?'No se pudo cargar el generador de Excel. Revisa tu conexión e inténtalo nuevamente.':'The Excel generator could not be loaded. Check your connection and try again.');
+    throw new Error('EXCELJS_UNAVAILABLE');
+  }
   if(!window.ExcelJS?.Workbook){
     alert(es?'No se pudo cargar el generador de Excel. Revisa tu conexión e inténtalo nuevamente.':'The Excel generator could not be loaded. Check your connection and try again.');
     throw new Error('EXCELJS_UNAVAILABLE');
@@ -13092,9 +13584,10 @@ function _v121PdfApplyAuroraNotes_(days=[],es=true){
   return auroraRoots;
 }
 async function exportItineraryToPDF(options={}){
-  if(!window.jspdf?.jsPDF){alert('jsPDF no está disponible.');return;}
   const blocks=_exportPhysicalDestinationBlocks_();
   if(!blocks.length){alert(getLang()==='es'?'No hay itinerarios para exportar.':'There is no itinerary to export.');return;}
+  try{await _itbmoEnsurePdfExport_();}catch(_){alert(getLang()==='es'?'No se pudo cargar el generador de PDF. Revisa tu conexión e inténtalo nuevamente.':'The PDF generator could not be loaded. Check your connection and try again.');return;}
+  if(!window.jspdf?.jsPDF){alert(getLang()==='es'?'No se pudo cargar el generador de PDF.':'The PDF generator could not be loaded.');return;}
   const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:'portrait',unit:'pt',format:'a4'}),es=_plannerOutputLang_()==='es';
   _itbmoPdfRegisterFonts_(doc);
   const logo=await _itbmoPdfLogoDataUrl_();
@@ -13513,6 +14006,7 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
 
   const c = copy[lang] || copy.en;
 
+  try{await _itbmoEnsurePdfExport_();}catch(_){alert(c.prep);return false;}
   if(!window.jspdf?.jsPDF){
     alert(c.prep);
     return false;
@@ -14146,15 +14640,10 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     applyAuthPlannerGate(Boolean(authReady&&currentUser&&getStoredSessionToken()));
     updateSaveAvailability();
 
-    // UX: enfocar primer input de ciudad
-    const firstCity = qs('.city-row .city');
-    if (firstCity) firstCity.focus();
-    scheduleAstraCoach(
-      currentUser ? 'travelers' : 'account',
-      currentUser ? '#travelers-box' : '#account-box',
-      360,
-      {force:true}
-    );
+    // A reset returns to the same clean shell as a fresh authenticated entry.
+    // Route inputs remain inside the guided journey overlay and never leak as
+    // empty compatibility forms on the Planner canvas.
+    _showCleanPlannerLanding_({clearRouteDraft:true,enableReset:false});
     generationResetInProgress = false;
   });
 
@@ -16063,6 +16552,7 @@ function _tripStoryResetRoute_(story){
 let _tripStoryBuilderSession_=null;
 function openTripStoryBuilder(){
   document.body.classList.remove('itbmo-builder-closed-clean');
+  document.body.classList.remove('itbmo-generated-clean');
   // V95: opening/restoring the full builder always owns the route UI. Remove any
   // orphan launcher restored by planner boot before creating or restoring it.
   document.querySelectorAll('.trip-story-minimized-fab').forEach(x=>x.remove());
