@@ -1280,7 +1280,7 @@ export default async function handler(req, res) {
     // Vercel Hobby permits 12 Serverless Functions in this project. Email is
     // intentionally multiplexed through the existing /api/user function while
     // api/email.js remains a reusable internal handler (not a 13th function).
-    if (action === "support_request" || action === "send_itinerary") {
+    if (action === "support_request" || action === "send_itinerary" || action === "partner_interest") {
       req.body = body;
       return await emailHandler(req, res);
     }

@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /planner.html
+Disallow: /trip-workspace.html
+Disallow: /auth-confirmed.html
+Disallow: /api/
+
+Sitemap: https://www.itravelbymyown.com/sitemap.xml

@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V295.4.6';
-const ITBMO_RUNTIME_ASSET='planner.js?v=295.4.6';
+const ITBMO_RUNTIME_BUILD='V296';
+const ITBMO_RUNTIME_ASSET='planner.js?v=296';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -1069,21 +1069,26 @@ function applyAuthPlannerGate(unlocked){
     }
   });
 
-  // V152 AUTH CTA CONTRACT: the large Trip Story entry CTA is available only
-  // while a server-validated account/guest session is active. Payment may still
-  // lock it later for an already-defined paid trip; auth must never override that.
-  // V154 AUTH CTA CONTRACT: both visible entry CTAs are auth-owned. The large
-  // guided-journey "Comenzar" button is the primary entry currently shown to
-  // the user; build-trip-story remains covered for the alternate/legacy surface.
-  ['#build-guided-journey','#build-trip-story'].forEach(sel=>{
-    const entry=qs(sel);
-    if(!entry) return;
-    const paymentLocked=entry.classList.contains('is-payment-locked');
+  // V296 ENTRY CONTRACT: the visible "Comenzar" CTA is always actionable.
+  // Without a validated session it opens account creation; after authentication
+  // it opens the builder. A payment lock still wins for the current paid trip.
+  const guidedEntry=qs('#build-guided-journey');
+  if(guidedEntry){
+    const paymentLocked=guidedEntry.classList.contains('is-payment-locked');
+    guidedEntry.disabled=paymentLocked;
+    guidedEntry.setAttribute('aria-disabled',String(paymentLocked));
+    guidedEntry.classList.remove('is-auth-locked');
+  }
+
+  // The alternate/legacy entry surface stays protected by the original gate.
+  const legacyEntry=qs('#build-trip-story');
+  if(legacyEntry){
+    const paymentLocked=legacyEntry.classList.contains('is-payment-locked');
     const disabled=authLocked||paymentLocked;
-    entry.disabled=disabled;
-    entry.setAttribute('aria-disabled',String(disabled));
-    entry.classList.toggle('is-auth-locked',authLocked);
-  });
+    legacyEntry.disabled=disabled;
+    legacyEntry.setAttribute('aria-disabled',String(disabled));
+    legacyEntry.classList.toggle('is-auth-locked',authLocked);
+  }
 
   // These controls already have their own Planner-state rules.
   // Auth can force them OFF, but never force them ON.
@@ -1482,6 +1487,17 @@ async function resetITBMOPassword(){
 
 function wantsMyTripsView(){
   return String(new URLSearchParams(window.location.search).get('view') || '').trim().toLowerCase()==='my-trips';
+}
+
+function openRequestedAccountMode(){
+  const url=new URL(window.location.href);
+  const mode=String(url.searchParams.get('mode')||'').trim().toLowerCase();
+  if(!['login','register','guest'].includes(mode)) return false;
+  url.searchParams.delete('mode');
+  history.replaceState(null,'',url.pathname+(url.searchParams.toString()?`?${url.searchParams.toString()}`:'')+url.hash);
+  if(currentUser && getStoredSessionToken()) return false;
+  openAccountDialog(mode);
+  return true;
 }
 
 function openRequestedMyTripsView(){
@@ -17139,7 +17155,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
   syncPlannerLanguageShell();
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   qs('#build-trip-story')?.addEventListener('click',openTripStoryBuilder);
-  qs('#build-guided-journey')?.addEventListener('click',openTripStoryBuilder);
+  qs('#build-guided-journey')?.addEventListener('click',()=>{
+    if(!currentUser || !getStoredSessionToken()){
+      openAccountDialog('register');
+      return;
+    }
+    openTripStoryBuilder();
+  });
   renderTripStorySummary();
   // V93: returning to Planner after visiting a workspace restores only the
   // minimized launcher. The builder itself remains closed until the user asks
@@ -17152,7 +17174,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
   initializePlannerSessionLifecycle();
   bindAccountListeners();
   bindJourneyHome();
-  restoreITBMOSession();
+  const initialAuthCallback=getSupabaseCallback();
+  void restoreITBMOSession().then(()=>{
+    if(!initialAuthCallback.accessToken) openRequestedAccountMode();
+  }).catch(error=>console.error('[ITBMO AUTH] Session initialization failed',error));
 
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
   bindInfoChatListeners();

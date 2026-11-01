@@ -42,9 +42,33 @@ export default async function handler(req,res){
   if(req.method!=='POST') return send(res,405,{ok:false,code:'METHOD_NOT_ALLOWED'});
   try{
     const body=req.body||{};
+    const action=text(body.action,40);
+
+    /* Public pilot intake: intentionally email-only. It does not create a
+       Supabase row, account, subscription or operator listing. */
+    if(action==='partner_interest'){
+      if(text(body.website_field,200))return send(res,201,{ok:true});
+      const replyTo=email(body.email);
+      const operator=text(body.operator_name,160),contact=text(body.contact_name,140);
+      const location=text(body.location,180),activity=text(body.activity_type,180);
+      const presence=text(body.web_presence,500),message=text(body.message,3000);
+      if(!replyTo||operator.length<2||contact.length<2||location.length<2||activity.length<2||message.length<20||body.consent!=='yes')return send(res,400,{ok:false,code:'PARTNER_FIELDS_REQUIRED'});
+      const ip=text(req.headers?.['x-forwarded-for']||req.socket?.remoteAddress||'unknown',100).split(',')[0];
+      const rateKey=`partner:${ip}:${replyTo}`;
+      const now=Date.now(),windowStart=now-(60*60*1000);
+      const recent=(recentSends.get(rateKey)||[]).filter(ts=>ts>windowStart);
+      if(recent.length>=3)return send(res,429,{ok:false,code:'PARTNER_RATE_LIMIT'});
+      const partnerEmail=email(process.env.BREVO_PARTNERS_EMAIL)||'affiliates@itravelbymyown.com';
+      const senderEmail=email(process.env.BREVO_SUPPORT_SENDER_EMAIL)||email(process.env.BREVO_SENDER_EMAIL);
+      if(!senderEmail)return send(res,503,{ok:false,code:'EMAIL_NOT_CONFIGURED'});
+      const html=`<div style="font-family:Arial,sans-serif;color:#092c4c;line-height:1.55"><h2>Nueva propuesta de colaboración ITBMO</h2><p><strong>Operador:</strong> ${escapeHtml(operator)}</p><p><strong>Contacto:</strong> ${escapeHtml(contact)}</p><p><strong>Email:</strong> ${escapeHtml(replyTo)}</p><p><strong>País / ciudad:</strong> ${escapeHtml(location)}</p><p><strong>Actividad:</strong> ${escapeHtml(activity)}</p><p><strong>Web / Instagram:</strong> ${escapeHtml(presence||'No indicado')}</p><hr><p style="white-space:pre-wrap">${escapeHtml(message)}</p></div>`;
+      const result=await sendBrevo({to:[{email:partnerEmail,name:'ITBMO Partnerships'}],replyTo:{email:replyTo,name:contact},subject:`ITBMO Collaboration · ${operator} · ${location}`,htmlContent:html,tags:['partner-interest']},senderEmail);
+      recent.push(now);recentSends.set(rateKey,recent);
+      return send(res,201,{ok:true,message_id:result?.messageId||null});
+    }
+
     const session=await resolveSession(body.session_token).catch(()=>null);
     if(!session) return send(res,401,{ok:false,code:'SESSION_REQUIRED'});
-    const action=text(body.action,40);
     const rateKey=`${session.id}:${action}`;
     const now=Date.now(),windowStart=now-(10*60*1000);
     const recent=(recentSends.get(rateKey)||[]).filter(ts=>ts>windowStart);
