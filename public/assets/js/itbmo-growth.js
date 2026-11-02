@@ -1,4 +1,4 @@
-/* ITBMO V297.3 · Commercial, resources and destination shell
+/* ITBMO V297.4 · Commercial, resources and destination shell
    One code path for Home + product pages, inside Webflow or standalone. */
 (() => {
   'use strict';
@@ -69,9 +69,9 @@
      page content remains indexable; this only normalizes the interactive UI. */
   function normalizeChrome(){
     const labels=lang==='es'?{
-      home:'Inicio',how:'Cómo funciona',sample:'Ejemplo real',destinations:'Destinos',resources:'Recursos',pricing:'Precios',login:'Ingresar',plan:'Crear itinerario',tagline:'Tu viaje, pensado por ti. Organizado por ITBMO.',discover:'EXPLORA',company:'ITBMO',help:'AYUDA',start:'EMPIEZA',about:'Acerca de',collaborate:'Colabora',support:'Soporte',privacy:'Privacidad',terms:'Términos',rights:'Todos los derechos reservados.',world:'Diseñado para viajeros de todo el mundo.'
+      home:'Inicio',how:'Cómo funciona',sample:'Ejemplo real',destinations:'Destinos',resources:'Recursos',pricing:'Precios',login:'Ingresar',plan:'Crear itinerario',tagline:'Tu viaje. Tu estilo. Una ruta diseñada para ti.',discover:'EXPLORA',company:'ITBMO',help:'AYUDA',start:'EMPIEZA',about:'Acerca de',collaborate:'Colabora',support:'Soporte',privacy:'Privacidad',terms:'Términos',rights:'Todos los derechos reservados.',world:'Diseñado para viajeros de todo el mundo.'
     }:{
-      home:'Home',how:'How it works',sample:'Real example',destinations:'Destinations',resources:'Resources',pricing:'Pricing',login:'Sign in',plan:'Create itinerary',tagline:'Your trip, imagined by you. Organized by ITBMO.',discover:'EXPLORE',company:'ITBMO',help:'HELP',start:'START',about:'About',collaborate:'Partner with us',support:'Support',privacy:'Privacy',terms:'Terms',rights:'All rights reserved.',world:'Designed for travelers worldwide.'
+      home:'Home',how:'How it works',sample:'Real example',destinations:'Destinations',resources:'Resources',pricing:'Pricing',login:'Sign in',plan:'Create itinerary',tagline:'Your trip. Your style. A route designed for you.',discover:'EXPLORE',company:'ITBMO',help:'HELP',start:'START',about:'About',collaborate:'Partner with us',support:'Support',privacy:'Privacy',terms:'Terms',rights:'All rights reserved.',world:'Designed for travelers worldwide.'
     };
     const header=document.querySelector('.g-header');
     if(header){
@@ -208,59 +208,6 @@
     const mark=button.querySelector('span');if(mark)mark.textContent=open?'＋':'−';
   }));
 
-  /* The real-itinerary example is the untouched PDF, presented one day at a time. */
-  const documentTabs=document.querySelector('[data-document-tabs]');
-  if(documentTabs){
-    const tabs=[...documentTabs.querySelectorAll('[data-document-day]')];
-    const panels=[...document.querySelectorAll('[data-document-panel]')];
-    const activateDocumentDay=day=>{
-      tabs.forEach(tab=>{
-        const active=String(tab.dataset.documentDay)===String(day);
-        tab.classList.toggle('is-active',active);
-        tab.setAttribute('aria-selected',String(active));
-        tab.tabIndex=active?0:-1;
-      });
-      panels.forEach(panel=>{
-        const active=String(panel.dataset.documentPanel)===String(day);
-        panel.classList.toggle('is-active',active);
-        panel.hidden=!active;
-        if(active)panel.querySelectorAll('img[data-src]').forEach(image=>{
-          image.src=image.dataset.src;
-          image.removeAttribute('data-src');
-        });
-      });
-    };
-    tabs.forEach((tab,index)=>{
-      tab.addEventListener('click',()=>activateDocumentDay(tab.dataset.documentDay));
-      tab.addEventListener('keydown',event=>{
-        if(event.key!=='ArrowRight'&&event.key!=='ArrowLeft'&&event.key!=='Home'&&event.key!=='End')return;
-        event.preventDefault();
-        const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
-        tabs[next].focus();
-        activateDocumentDay(tabs[next].dataset.documentDay);
-      });
-    });
-    panels.forEach(panel=>panel.querySelectorAll('figure').forEach(figure=>{
-      const image=figure.querySelector('img');
-      if(!image)return;
-      image.tabIndex=0;
-      image.setAttribute('role','button');
-      image.setAttribute('aria-label',lang==='es'?'Ampliar o reducir esta página':'Enlarge or reduce this page');
-      const toggleZoom=()=>{
-        const zoomed=figure.classList.toggle('is-zoomed');
-        image.setAttribute('aria-pressed',String(zoomed));
-        if(!zoomed)figure.scrollIntoView({block:'nearest',inline:'nearest'});
-      };
-      image.addEventListener('click',toggleZoom);
-      image.addEventListener('keydown',event=>{
-        if(event.key!=='Enter'&&event.key!==' ')return;
-        event.preventDefault();
-        toggleZoom();
-      });
-    }));
-    activateDocumentDay(tabs.find(tab=>tab.classList.contains('is-active'))?.dataset.documentDay||'1');
-  }
-
   const partnerForm=document.querySelector('[data-partner-form]');
   if(partnerForm){
     const status=partnerForm.querySelector('[data-form-status]');
@@ -297,6 +244,48 @@
   if(sticky&&hero&&'IntersectionObserver'in window){
     new IntersectionObserver(([entry])=>sticky.classList.toggle('is-visible',!entry.isIntersecting),{threshold:.05}).observe(hero);
   }
+
+  /* Home carousel: real photographs, pause on interaction and respect motion preferences. */
+  const carousel=document.querySelector('[data-hero-carousel]');
+  if(carousel){
+    const slides=[...carousel.querySelectorAll('[data-slide]')];
+    const dots=[...carousel.querySelectorAll('[data-carousel-dot]')];
+    let current=0,timer=null,paused=false,showToken=0;
+    const load=index=>{
+      const slide=slides[(index+slides.length)%slides.length],image=slide?.querySelector('img');
+      if(!image)return Promise.resolve();
+      if(image.dataset.src&&!image.getAttribute('src')){image.src=image.dataset.src;delete image.dataset.src;}
+      if(image.complete&&image.naturalWidth)return Promise.resolve();
+      return new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true});});
+    };
+    const show=async index=>{
+      const next=(index+slides.length)%slides.length,token=++showToken;
+      await load(next);if(token!==showToken)return;
+      current=next;
+      slides.forEach((slide,i)=>slide.classList.toggle('is-active',i===current));
+      dots.forEach((dot,i)=>{dot.classList.toggle('is-active',i===current);dot.setAttribute('aria-current',i===current?'true':'false');});
+      void load(current+1);
+    };
+    const stop=()=>{if(timer)clearInterval(timer);timer=null;};
+    const start=()=>{stop();if(!paused&&!document.hidden&&!matchMedia('(prefers-reduced-motion: reduce)').matches)timer=setInterval(()=>show(current+1),4300);};
+    carousel.querySelector('[data-carousel-prev]')?.addEventListener('click',()=>{show(current-1);start();});
+    carousel.querySelector('[data-carousel-next]')?.addEventListener('click',()=>{show(current+1);start();});
+    dots.forEach(dot=>dot.addEventListener('click',()=>{show(Number(dot.dataset.carouselDot||0));start();}));
+    carousel.addEventListener('mouseenter',()=>{paused=true;stop();});carousel.addEventListener('mouseleave',()=>{paused=false;start();});
+    carousel.addEventListener('focusin',stop);carousel.addEventListener('focusout',start);document.addEventListener('visibilitychange',()=>document.hidden?stop():start());void load(1);show(0);start();
+  }
+
+  /* Faithful product walkthrough: one clear workspace state at a time. */
+  document.querySelectorAll('[data-workspace-demo]').forEach(demo=>{
+    const tabs=[...demo.querySelectorAll('[data-workspace-tab]')];
+    const panels=[...demo.querySelectorAll('[data-workspace-panel]')];
+    tabs.forEach(tab=>tab.addEventListener('click',()=>{
+      const key=tab.dataset.workspaceTab;
+      tabs.forEach(item=>{const active=item===tab;item.classList.toggle('is-active',active);item.setAttribute('aria-selected',String(active));});
+      panels.forEach(panel=>panel.classList.toggle('is-active',panel.dataset.workspacePanel===key));
+      window.ITBMOFoundation?.track('workspace_preview_opened',{section:key,language:lang});
+    }));
+  });
 
   window.ITBMOFoundation?.track('view_home',{placement:page,language:lang});
 })();
