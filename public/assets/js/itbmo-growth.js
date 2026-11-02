@@ -1,4 +1,4 @@
-/* ITBMO V297 · Commercial, resources and destination shell
+/* ITBMO V297.3 · Commercial, resources and destination shell
    One code path for Home + product pages, inside Webflow or standalone. */
 (() => {
   'use strict';
@@ -207,6 +207,59 @@
     if(answer)answer.hidden=open;
     const mark=button.querySelector('span');if(mark)mark.textContent=open?'＋':'−';
   }));
+
+  /* The real-itinerary example is the untouched PDF, presented one day at a time. */
+  const documentTabs=document.querySelector('[data-document-tabs]');
+  if(documentTabs){
+    const tabs=[...documentTabs.querySelectorAll('[data-document-day]')];
+    const panels=[...document.querySelectorAll('[data-document-panel]')];
+    const activateDocumentDay=day=>{
+      tabs.forEach(tab=>{
+        const active=String(tab.dataset.documentDay)===String(day);
+        tab.classList.toggle('is-active',active);
+        tab.setAttribute('aria-selected',String(active));
+        tab.tabIndex=active?0:-1;
+      });
+      panels.forEach(panel=>{
+        const active=String(panel.dataset.documentPanel)===String(day);
+        panel.classList.toggle('is-active',active);
+        panel.hidden=!active;
+        if(active)panel.querySelectorAll('img[data-src]').forEach(image=>{
+          image.src=image.dataset.src;
+          image.removeAttribute('data-src');
+        });
+      });
+    };
+    tabs.forEach((tab,index)=>{
+      tab.addEventListener('click',()=>activateDocumentDay(tab.dataset.documentDay));
+      tab.addEventListener('keydown',event=>{
+        if(event.key!=='ArrowRight'&&event.key!=='ArrowLeft'&&event.key!=='Home'&&event.key!=='End')return;
+        event.preventDefault();
+        const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+        tabs[next].focus();
+        activateDocumentDay(tabs[next].dataset.documentDay);
+      });
+    });
+    panels.forEach(panel=>panel.querySelectorAll('figure').forEach(figure=>{
+      const image=figure.querySelector('img');
+      if(!image)return;
+      image.tabIndex=0;
+      image.setAttribute('role','button');
+      image.setAttribute('aria-label',lang==='es'?'Ampliar o reducir esta página':'Enlarge or reduce this page');
+      const toggleZoom=()=>{
+        const zoomed=figure.classList.toggle('is-zoomed');
+        image.setAttribute('aria-pressed',String(zoomed));
+        if(!zoomed)figure.scrollIntoView({block:'nearest',inline:'nearest'});
+      };
+      image.addEventListener('click',toggleZoom);
+      image.addEventListener('keydown',event=>{
+        if(event.key!=='Enter'&&event.key!==' ')return;
+        event.preventDefault();
+        toggleZoom();
+      });
+    }));
+    activateDocumentDay(tabs.find(tab=>tab.classList.contains('is-active'))?.dataset.documentDay||'1');
+  }
 
   const partnerForm=document.querySelector('[data-partner-form]');
   if(partnerForm){
