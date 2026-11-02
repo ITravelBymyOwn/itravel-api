@@ -19,15 +19,21 @@ function normalizeSearch(value = "") {
 }
 
 function matchRank(record, needle) {
-  const labels = [record?.es, record?.en, ...(Array.isArray(record?.a) ? record.a : [])]
-    .map(normalizeSearch)
-    .filter(Boolean);
-
-  let best = 99;
-  for (const value of labels) {
-    if (value === needle) best = Math.min(best, 0);
-    else if (value.startsWith(needle)) best = Math.min(best, 1);
-    else if (value.split(/\s+/).some(part => part.startsWith(needle))) best = Math.min(best, 2);
+  const canonical=[record?.es,record?.en].map(normalizeSearch).filter(Boolean);
+  const aliases=(Array.isArray(record?.a)?record.a:[]).map(normalizeSearch).filter(Boolean);
+  let best=99;
+  for(const value of canonical){
+    if(value===needle)best=Math.min(best,0);
+    else if(value.startsWith(needle))best=Math.min(best,1);
+    else if(value.split(/\s+/).some(part=>part.startsWith(needle)))best=Math.min(best,2);
+  }
+  /* An alternate name helps discovery but must never outrank the actual city
+     name. This prevents aliases such as “Paris of the North” from displacing
+     Paris, and “Hall” from displacing Hallstatt. */
+  for(const value of aliases){
+    if(value===needle)best=Math.min(best,3);
+    else if(value.startsWith(needle))best=Math.min(best,4);
+    else if(value.split(/\s+/).some(part=>part.startsWith(needle)))best=Math.min(best,5);
   }
   return best;
 }
@@ -69,7 +75,7 @@ function rankedRows(countryCode, query, lang = "en") {
     tourismExtra:Number(row?.x||0),
     relevance:Number(row?.q||0),
     population:Number(row?.p||0)
-  })).filter(x=>x.city&&x.rank<=3);
+  })).filter(x=>x.city&&x.rank<=5);
 }
 
 function globalSuggestions(query, lang="en") {
@@ -78,10 +84,10 @@ function globalSuggestions(query, lang="en") {
   const ranked=[];
   const candidates=GLOBAL_PREFIX.get(needle.slice(0,3))||[];
   for(const {countryCode,row} of candidates){
-    const rank=matchRank(row,needle);if(rank>3)continue;
+    const rank=matchRank(row,needle);if(rank>5)continue;
     ranked.push({city:String(row?.[displayLang]||row?.en||row?.es||"").trim(),countryCode,country:countryLabel(countryCode,displayLang),region:String(row?.r?.[displayLang]||row?.r?.en||row?.r?.es||"").trim(),rank,tourismExtra:Number(row?.x||0),relevance:Number(row?.q||0),population:Number(row?.p||0)});
   }
-  ranked.sort((a,b)=>a.rank-b.rank||b.tourismExtra-a.tourismExtra||b.relevance-a.relevance||b.population-a.population||a.city.localeCompare(b.city,displayLang,{sensitivity:"base"}));
+  ranked.sort((a,b)=>a.rank-b.rank||((b.relevance+b.tourismExtra*90)-(a.relevance+a.tourismExtra*90))||b.population-a.population||a.city.localeCompare(b.city,displayLang,{sensitivity:"base"}));
   const seen=new Set(),results=[];
   for(const item of ranked){
     const key=`${normalizeSearch(item.city)}|${item.countryCode}`;
@@ -100,7 +106,7 @@ function localSuggestions(countryCode, query, lang = "en") {
   const ranked = [];
   for (const row of rows) {
     const rank = matchRank(row, needle);
-    if (rank > 3) continue;
+    if (rank > 5) continue;
     ranked.push({
       label: String(row?.[displayLang] || row?.en || row?.es || "").trim(),
       rank,
@@ -112,8 +118,7 @@ function localSuggestions(countryCode, query, lang = "en") {
 
   ranked.sort((a, b) =>
     a.rank - b.rank ||
-    b.tourismExtra - a.tourismExtra ||
-    b.relevance - a.relevance ||
+    (b.relevance + b.tourismExtra * 90) - (a.relevance + a.tourismExtra * 90) ||
     b.population - a.population ||
     a.label.localeCompare(b.label, displayLang, { sensitivity: "base" })
   );

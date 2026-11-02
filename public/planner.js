@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V296';
-const ITBMO_RUNTIME_ASSET='planner.js?v=296';
+const ITBMO_RUNTIME_BUILD='V297.3';
+const ITBMO_RUNTIME_ASSET='planner.js?v=297.3';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -1111,7 +1111,7 @@ function closeAccountDialog(){
 function openAccountDialog(mode){
   const box=qs('#account-box');
   if(!box) return;
-  if(mode) showAccountMode(mode);
+  showAccountMode(mode || null);
   box.classList.add('is-auth-dialog-open');
   box.setAttribute('aria-hidden','false');
   if($accountModalBackdrop){ $accountModalBackdrop.hidden=false; requestAnimationFrame(()=>$accountModalBackdrop.classList.add('is-open')); }
@@ -1492,11 +1492,11 @@ function wantsMyTripsView(){
 function openRequestedAccountMode(){
   const url=new URL(window.location.href);
   const mode=String(url.searchParams.get('mode')||'').trim().toLowerCase();
-  if(!['login','register','guest'].includes(mode)) return false;
+  if(!['access','login','register','guest'].includes(mode)) return false;
   url.searchParams.delete('mode');
   history.replaceState(null,'',url.pathname+(url.searchParams.toString()?`?${url.searchParams.toString()}`:'')+url.hash);
   if(currentUser && getStoredSessionToken()) return false;
-  openAccountDialog(mode);
+  openAccountDialog(mode==='access'?null:mode);
   return true;
 }
 
@@ -11822,7 +11822,7 @@ function _journeyCopy_(){
   return es ? {
     eyebrow:'TU VIAJE SIGUE AQUÍ',
     title:'¿Qué quieres hacer hoy?',
-    copy:'Continúa donde lo dejaste o empieza una nueva aventura. Tus viajes anteriores permanecen disponibles para que vuelvas a ellos cuando los necesites.',
+    copy:'Continúa donde lo dejaste o empieza una nueva aventura. Aquí puedes volver a tus 30 itinerarios generados más recientes y descargar sus archivos.',
     resumeKicker:'ÚLTIMO VIAJE',
     resumeTitle:'Continuar con mi último viaje',
     resumeAction:'Abrir Trip Workspace',
@@ -11834,12 +11834,16 @@ function _journeyCopy_(){
     historyTitle:'Mis viajes',
     tripCount:n=>`${n} ${n===1?'viaje guardado':'viajes guardados'}`,
     open:'Abrir viaje',
+    pdf:'PDF',
+    excel:'Excel',
+    downloading:'Preparando…',
+    downloadError:'No pudimos preparar este archivo. Inténtalo nuevamente.',
     myTrips:'Mis viajes',
     myTripsHint:'Tu espacio de viaje'
   } : {
     eyebrow:'YOUR TRIP IS STILL HERE',
     title:'What would you like to do today?',
-    copy:'Continue where you left off or start a new adventure. Your previous trips stay available whenever you need them.',
+    copy:'Continue where you left off or start a new adventure. Return to your 30 most recent generated itineraries and download their files here.',
     resumeKicker:'LATEST TRIP',
     resumeTitle:'Continue my latest trip',
     resumeAction:'Open Trip Workspace',
@@ -11851,6 +11855,10 @@ function _journeyCopy_(){
     historyTitle:'My trips',
     tripCount:n=>`${n} saved ${n===1?'trip':'trips'}`,
     open:'Open trip',
+    pdf:'PDF',
+    excel:'Excel',
+    downloading:'Preparing…',
+    downloadError:'We could not prepare this file. Please try again.',
     myTrips:'My trips',
     myTripsHint:'Your trip space'
   };
@@ -11894,12 +11902,32 @@ function _journeyRenderHistory_(){
   if(count)count.textContent=c.tripCount(trips.length);
   grid.innerHTML='';
   trips.forEach((trip,index)=>{
-    const card=document.createElement('button');
-    card.type='button';card.className='journey-trip-card';card.dataset.tripId=trip.id;
-    card.innerHTML=`<span class="journey-trip-card__number">${String(index+1).padStart(2,'0')}</span><strong>${_journeyEsc_(_journeyTripLabel_(trip))}</strong><small>${_journeyEsc_(_journeyTripMeta_(trip))}</small><span class="journey-trip-card__open">${_journeyEsc_(c.open)} →</span>`;
-    card.addEventListener('click',()=>_journeyOpenTrip_(trip.id));
+    const card=document.createElement('article');
+    card.className='journey-trip-card';card.dataset.tripId=trip.id;
+    card.innerHTML=`<span class="journey-trip-card__number">${String(index+1).padStart(2,'0')}</span><strong>${_journeyEsc_(_journeyTripLabel_(trip))}</strong><small>${_journeyEsc_(_journeyTripMeta_(trip))}</small><div class="journey-trip-card__actions"><button type="button" class="journey-trip-card__open" data-journey-open>${_journeyEsc_(c.open)} →</button><button type="button" data-journey-download="pdf" aria-label="${_journeyEsc_(c.pdf)}">↓ ${_journeyEsc_(c.pdf)}</button><button type="button" data-journey-download="xlsx" aria-label="${_journeyEsc_(c.excel)}">↓ ${_journeyEsc_(c.excel)}</button></div>`;
+    card.querySelector('[data-journey-open]')?.addEventListener('click',()=>_journeyOpenTrip_(trip.id));
+    card.querySelectorAll('[data-journey-download]').forEach(button=>button.addEventListener('click',()=>_journeyDownloadTrip_(trip.id,button.dataset.journeyDownload,button)));
     grid.appendChild(card);
   });
+}
+async function _journeyDownloadTrip_(tripId,kind,button){
+  if(!tripId||button?.dataset.busy==='1')return;
+  const c=_journeyCopy_(),original=button?.textContent||'';
+  if(button){button.dataset.busy='1';button.disabled=true;button.textContent=c.downloading;}
+  try{
+    const token=getStoredSessionToken();
+    const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
+    const trip=data?.trip;
+    if(!trip||!_hydrateGenerationTrip_(trip))throw new Error('TRIP_NOT_AVAILABLE');
+    journeyHomeLatestTrip=trip;
+    if(kind==='xlsx')await exportItineraryToXLSX();
+    else await exportItineraryToPDF();
+  }catch(err){
+    console.warn('[JOURNEY DOWNLOAD]',err);
+    alert(c.downloadError);
+  }finally{
+    if(button){delete button.dataset.busy;button.disabled=false;button.textContent=original;}
+  }
 }
 async function showJourneyReturnGate(trip){
   if(!trip?.id)return;
@@ -14871,7 +14899,7 @@ function _commerceCopy_(){
     checkoutTitle:'Tu viaje está listo para ser creado',
     checkoutSub:'Desbloquea tu itinerario completo y personalizado con ITBMO.',
     offer:'OFERTA DE LANZAMIENTO · TIEMPO LIMITADO',
-    priceNote:'Pago único · Viaje completo · Todas las ciudades configuradas',
+    priceNote:'1 pago = 1 itinerario generado · Hasta 30 días · Sin suscripción',
     inc1:'Itinerario personalizado completo',
     inc2:'Inteligencia de viaje de ITBMO',
     inc3:'Exportación PDF y Excel',
@@ -14909,7 +14937,7 @@ function _commerceCopy_(){
     checkoutTitle:'Your journey is ready to be created',
     checkoutSub:'Unlock your complete personalized itinerary with ITBMO.',
     offer:'LIMITED-TIME LAUNCH OFFER',
-    priceNote:'One-time payment · Complete trip · All configured cities',
+    priceNote:'1 payment = 1 generated itinerary · Up to 30 days · No subscription',
     inc1:'Complete personalized itinerary',
     inc2:'ITBMO travel intelligence',
     inc3:'PDF & Excel exports',

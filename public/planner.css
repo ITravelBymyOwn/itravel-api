@@ -6548,7 +6548,6 @@ body{
   border-radius:25px;
   background:rgba(255,255,255,.78);
   box-shadow:0 12px 38px rgba(16,24,40,.055);
-  cursor:pointer;
   text-align:left;
   transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease;
 }
@@ -6560,7 +6559,11 @@ body{
 .journey-trip-card__number{display:block;color:#98a2b3;font-size:.68rem;font-weight:900;letter-spacing:.12em;}
 .journey-trip-card strong{display:block;margin-top:22px;font-size:1.3rem;line-height:1.08;letter-spacing:-.035em;}
 .journey-trip-card small{display:block;margin-top:8px;color:#667085;line-height:1.45;}
-.journey-trip-card__open{display:block;margin-top:24px;color:#087b9a;font-size:.78rem;font-weight:900;}
+.journey-trip-card__actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:24px;}
+.journey-trip-card__actions button{appearance:none;border:1px solid #c9dce9;border-radius:999px;background:rgba(255,255,255,.9);padding:9px 12px;color:#31556d;font:800 .72rem/1 inherit;cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;}
+.journey-trip-card__actions button:hover{transform:translateY(-1px);border-color:#58bdd1;box-shadow:0 7px 18px rgba(8,123,154,.11);}
+.journey-trip-card__actions button:disabled{cursor:wait;opacity:.62;transform:none;}
+.journey-trip-card__actions .journey-trip-card__open{margin-right:auto;border-color:transparent;background:linear-gradient(135deg,#0a7df7,#12b9c5);color:#fff;}
 
 body.journey-home-open #planner-grid{display:none!important;}
 body.journey-home-open .astra-guide-replay{display:none!important;}
@@ -8085,9 +8088,14 @@ body.itbmo-auth-dialog-open{overflow:hidden;}
 .planner-account-guide__copy strong{margin:0!important;color:#101828;font-size:1rem!important;line-height:1.25;}
 .planner-account-guide__copy p{max-width:760px;margin:4px 0 0!important;color:#667085;font-size:.84rem!important;line-height:1.45!important;}
 
-/* The topbar is now the only primary account navigation surface. */
-#account-box #account-mode-actions,
-#account-box #account-logout{display:none!important;}
+/* The access dialog must always expose every valid path.  The topbar is the
+   entry point; this selector is the decision surface. */
+#account-box #account-mode-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:10px!important;width:min(100%,820px);margin:4px auto 14px!important}
+#account-box #account-logout{display:none!important}
+#account-box #account-mode-actions .account-mode-btn{min-height:52px!important;border-radius:15px!important}
+#account-box #account-mode-actions .account-mode-btn--register{background:linear-gradient(105deg,#0877f9,#0aa8b8)!important;box-shadow:0 12px 28px rgba(8,119,249,.18)!important}
+#account-box #account-mode-actions .account-mode-btn--login,
+#account-box #account-mode-actions .account-mode-btn--guest{border:1px solid rgba(6,93,122,.2)!important;color:#075b78!important;background:#fff!important}
 
 #account-box .account-head{
   display:grid!important;
@@ -8116,6 +8124,7 @@ body.itbmo-auth-dialog-open{overflow:hidden;}
   background:linear-gradient(180deg,#fff,#fbfdfc)!important;
   box-shadow:0 14px 34px rgba(16,24,40,.045)!important;
 }
+@media(max-width:720px){#account-box #account-mode-actions{grid-template-columns:1fr!important}}
 #account-box .account-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:14px 18px!important;}
 #account-box .account-panel input{min-height:50px!important;}
 #account-box .account-panel .w-100{min-height:50px!important;border-radius:14px!important;font-size:.9rem!important;}
