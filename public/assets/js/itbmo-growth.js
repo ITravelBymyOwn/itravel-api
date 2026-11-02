@@ -251,6 +251,16 @@
     const slides=[...carousel.querySelectorAll('[data-slide]')];
     const dots=[...carousel.querySelectorAll('[data-carousel-dot]')];
     let current=0,timer=null,paused=false,showToken=0;
+    slides.forEach(slide=>{
+      const caption=slide.querySelector('figcaption');
+      if(!caption)return;
+      const parts=caption.textContent.split(/\s·\s(?=(?:Foto|Photo):)/i);
+      if(parts.length<2)return;
+      caption.textContent='';
+      const place=document.createElement('strong');place.textContent=parts[0];
+      const credit=document.createElement('span');credit.textContent=parts.slice(1).join(' · ');
+      caption.append(place,credit);
+    });
     const load=index=>{
       const slide=slides[(index+slides.length)%slides.length],image=slide?.querySelector('img');
       if(!image)return Promise.resolve();
@@ -267,7 +277,7 @@
       void load(current+1);
     };
     const stop=()=>{if(timer)clearInterval(timer);timer=null;};
-    const start=()=>{stop();if(!paused&&!document.hidden&&!matchMedia('(prefers-reduced-motion: reduce)').matches)timer=setInterval(()=>show(current+1),4300);};
+    const start=()=>{stop();if(!paused&&!document.hidden&&!matchMedia('(prefers-reduced-motion: reduce)').matches)timer=setInterval(()=>show(current+1),1500);};
     carousel.querySelector('[data-carousel-prev]')?.addEventListener('click',()=>{show(current-1);start();});
     carousel.querySelector('[data-carousel-next]')?.addEventListener('click',()=>{show(current+1);start();});
     dots.forEach(dot=>dot.addEventListener('click',()=>{show(Number(dot.dataset.carouselDot||0));start();}));
@@ -276,16 +286,92 @@
   }
 
   /* Faithful product walkthrough: one clear workspace state at a time. */
+  const workspaceMarkup=lang==='es'?`
+    <div class="hc-workspace__journey"><span>RECORRIDO REAL EN ITBMO</span><strong data-workspace-step>1 de 5 · Mis viajes</strong></div>
+    <div class="hc-workspace__rail" role="tablist" aria-label="Recorrido de un viaje generado">
+      <button class="is-active" type="button" role="tab" aria-selected="true" data-workspace-tab="trips">1 · Mis viajes</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="cities">2 · Todas las ciudades</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="city">3 · Madrid</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="route">4 · Rutas del día</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="prepare">5 · Para tu viaje</button>
+    </div>
+    <div class="hc-workspace__screen">
+      <div class="hc-ws-panel is-active" data-workspace-panel="trips">
+        <div class="hc-ws-head"><small>TU HISTORIAL</small><h3>Mis viajes</h3><p>Elige una tarjeta para volver al recorrido que ya generaste.</p></div>
+        <article class="hc-trip-card"><div class="hc-trip-card__number">01</div><span class="hc-status">✓ Listo para explorar</span><h4>Madrid · Segovia · Toledo · Barcelona · Montserrat · Girona</h4><p>1 may 2027 – 10 may 2027 · 6 ciudades · 10 días</p><button type="button" data-workspace-jump="cities">Abrir viaje →</button></article>
+        <p class="hc-demo-note">Este ejemplo muestra un solo viaje para explicar el recorrido con claridad.</p>
+      </div>
+      <div class="hc-ws-panel" data-workspace-panel="cities">
+        <div class="hc-ws-head"><small>TU VIAJE ITBMO</small><h3>¿Por dónde quieres empezar?</h3><p>Elige una ciudad para explorarla día a día y preparar lo que realmente necesitas.</p></div>
+        <div class="hc-city-grid"><article><small>01 · 5 DÍAS</small><strong>Madrid</strong><button type="button" data-workspace-jump="city">Explorar →</button></article><article><small>02 · 1 DÍA</small><strong>Segovia</strong><span>Explorar →</span></article><article><small>03 · 1 DÍA</small><strong>Toledo</strong><span>Explorar →</span></article><article><small>04 · 5 DÍAS</small><strong>Barcelona</strong><span>Explorar →</span></article><article><small>05 · 1 DÍA</small><strong>Montserrat</strong><span>Explorar →</span></article><article><small>06 · 1 DÍA</small><strong>Girona</strong><span>Explorar →</span></article></div>
+        <div class="hc-global-help"><div><small>PARA TODO TU VIAJE</small><strong>Lo esencial viaja contigo.</strong><span>Recomendaciones generales de conectividad y protección.</span></div><article><b>◎ Conectividad</b><span>eSIM para mantenerte conectado.</span></article><article><b>◇ Seguro de viaje</b><span>Protección para el recorrido completo.</span></article></div>
+      </div>
+      <div class="hc-ws-panel" data-workspace-panel="city">
+        <div class="hc-city-toolbar"><button type="button" data-workspace-jump="cities">← Todas las ciudades</button><div><small>TU CIUDAD</small><h3>Madrid</h3><span>1 may 2027 – 5 may 2027</span></div><div class="hc-city-mode"><b>⌁ Itinerario</b><button type="button" data-workspace-jump="prepare">✦ Para tu viaje</button></div></div>
+        <div class="hc-day-chips"><b>Día 1 · 1 may 2027</b><span>Día 2 · 2 may</span><span>Día 3 · 3 may</span><span>Día 4 · 4 may</span><span>Día 5 · 5 may</span></div>
+        <div class="hc-city-route-callout"><div><small>RUTAS DEL DÍA</small><strong>Muévete con tu itinerario</strong><span>Abre una ruta sólo cuando la necesites.</span></div><button type="button" data-workspace-jump="route">Preparar ruta →</button></div>
+        <div class="hc-timeline"><article><time>13:00</time><div><strong>Acceso local al Palacio Real</strong><span>A pie · aproximadamente 20–25 min</span></div></article><article><time>13:25</time><div><strong>Visita del Palacio Real de Madrid</strong><span>Actividad · 2 h</span></div></article><article><time>15:25</time><div><strong>Almuerzo y pausa en el entorno de Ópera</strong><span>Actividad · 45 min</span></div></article><article><time>16:10</time><div><strong>Visita de la Catedral de la Almudena</strong><span>Actividad · 45 min</span></div></article></div>
+      </div>
+      <div class="hc-ws-panel" data-workspace-panel="route">
+        <div class="hc-city-toolbar hc-city-toolbar--compact"><button type="button" data-workspace-jump="city">← Itinerario</button><div><small>MADRID · DÍA 1</small><h3>Muévete con tu itinerario</h3><span>Google Maps y Waze cuando los necesitas.</span></div></div>
+        <div class="hc-route-box"><label>Desde<strong>Palacio Real de Madrid</strong></label><label>Hasta<strong>Plaza de Oriente</strong></label><div class="hc-route-points"><span><b>13:00</b> Palacio Real</span><span><b>15:25</b> Plaza de Oriente</span><span><b>16:10</b> Almudena</span><span><b>16:55</b> Plaza Mayor</span></div><div class="hc-route-actions"><button>◉ Usar mi ubicación</button><button class="is-primary">Preparar ruta</button><button>Google Maps ↗</button><button>Waze ↗</button></div><p>La ubicación se solicita sólo cuando la usas y no se guarda en ITBMO.</p></div>
+      </div>
+      <div class="hc-ws-panel" data-workspace-panel="prepare">
+        <div class="hc-city-toolbar"><button type="button" data-workspace-jump="city">← Itinerario</button><div><small>TU CIUDAD</small><h3>Madrid</h3><span>Tu itinerario es sólo el comienzo.</span></div><div class="hc-city-mode"><button type="button" data-workspace-jump="city">⌁ Itinerario</button><b>✦ Para tu viaje</b></div></div>
+        <div class="hc-prepare-tabs"><b>Entradas y reservas</b><span>Tours y experiencias</span><span>Cómo moverte</span></div>
+        <div class="hc-entry-grid"><article><small>DÍA 1 · ENTRADA NECESARIA</small><strong>Palacio Real de Madrid</strong><p>Consulta acceso y horarios para la fecha de tu itinerario.</p><div><span>GetYourGuide</span><button>Ver opciones →</button></div><div><span>Viator</span><button>Ver opciones →</button></div></article><article><small>DÍA 3 · ENTRADA NECESARIA</small><strong>Museo del Prado</strong><p>Prepara la entrada que corresponda a tu recorrido.</p><div><span>GetYourGuide</span><button>Ver opciones →</button></div><div><span>Viator</span><button>Ver opciones →</button></div></article><article class="hc-entry-grid__wide"><small>CÓMO MOVERTE · MADRID – SEGOVIA</small><strong>Compara la conexión que encaja con tu ruta</strong><p>Opciones de tren, bus y traslado relacionadas con el itinerario.</p><div class="hc-provider-row"><span>Omio</span><span>12Go</span><span>Bookaway</span></div></article></div>
+      </div>
+    </div>`:`
+    <div class="hc-workspace__journey"><span>THE REAL ITBMO JOURNEY</span><strong data-workspace-step>1 of 5 · My trips</strong></div>
+    <div class="hc-workspace__rail" role="tablist" aria-label="Generated trip journey"><button class="is-active" type="button" role="tab" aria-selected="true" data-workspace-tab="trips">1 · My trips</button><button type="button" role="tab" aria-selected="false" data-workspace-tab="cities">2 · All cities</button><button type="button" role="tab" aria-selected="false" data-workspace-tab="city">3 · Madrid</button><button type="button" role="tab" aria-selected="false" data-workspace-tab="route">4 · Day routes</button><button type="button" role="tab" aria-selected="false" data-workspace-tab="prepare">5 · For your trip</button></div>
+    <div class="hc-workspace__screen">
+      <div class="hc-ws-panel is-active" data-workspace-panel="trips"><div class="hc-ws-head"><small>YOUR HISTORY</small><h3>My trips</h3><p>Choose a card to return to a trip you already generated.</p></div><article class="hc-trip-card"><div class="hc-trip-card__number">01</div><span class="hc-status">✓ Ready to explore</span><h4>Madrid · Segovia · Toledo · Barcelona · Montserrat · Girona</h4><p>May 1, 2027 – May 10, 2027 · 6 cities · 10 days</p><button type="button" data-workspace-jump="cities">Open trip →</button></article><p class="hc-demo-note">This example shows one trip so the journey stays easy to understand.</p></div>
+      <div class="hc-ws-panel" data-workspace-panel="cities"><div class="hc-ws-head"><small>YOUR ITBMO TRIP</small><h3>Where do you want to start?</h3><p>Choose a city to explore it day by day and prepare what you really need.</p></div><div class="hc-city-grid"><article><small>01 · 5 DAYS</small><strong>Madrid</strong><button type="button" data-workspace-jump="city">Explore →</button></article><article><small>02 · 1 DAY</small><strong>Segovia</strong><span>Explore →</span></article><article><small>03 · 1 DAY</small><strong>Toledo</strong><span>Explore →</span></article><article><small>04 · 5 DAYS</small><strong>Barcelona</strong><span>Explore →</span></article><article><small>05 · 1 DAY</small><strong>Montserrat</strong><span>Explore →</span></article><article><small>06 · 1 DAY</small><strong>Girona</strong><span>Explore →</span></article></div><div class="hc-global-help"><div><small>FOR YOUR WHOLE TRIP</small><strong>The essentials travel with you.</strong><span>General connectivity and protection recommendations.</span></div><article><b>◎ Connectivity</b><span>eSIM options for your trip.</span></article><article><b>◇ Travel protection</b><span>Protection for the full journey.</span></article></div></div>
+      <div class="hc-ws-panel" data-workspace-panel="city"><div class="hc-city-toolbar"><button type="button" data-workspace-jump="cities">← All cities</button><div><small>YOUR CITY</small><h3>Madrid</h3><span>May 1, 2027 – May 5, 2027</span></div><div class="hc-city-mode"><b>⌁ Itinerary</b><button type="button" data-workspace-jump="prepare">✦ For your trip</button></div></div><div class="hc-day-chips"><b>Day 1 · May 1</b><span>Day 2 · May 2</span><span>Day 3 · May 3</span><span>Day 4 · May 4</span><span>Day 5 · May 5</span></div><div class="hc-city-route-callout"><div><small>DAY ROUTES</small><strong>Move with your itinerary</strong><span>Open a route only when you need it.</span></div><button type="button" data-workspace-jump="route">Prepare route →</button></div><div class="hc-timeline"><article><time>13:00</time><div><strong>Local access to the Royal Palace</strong><span>Walk · approximately 20–25 min</span></div></article><article><time>13:25</time><div><strong>Royal Palace of Madrid</strong><span>Activity · 2 h</span></div></article><article><time>15:25</time><div><strong>Lunch break near Ópera</strong><span>Activity · 45 min</span></div></article><article><time>16:10</time><div><strong>Almudena Cathedral</strong><span>Activity · 45 min</span></div></article></div></div>
+      <div class="hc-ws-panel" data-workspace-panel="route"><div class="hc-city-toolbar hc-city-toolbar--compact"><button type="button" data-workspace-jump="city">← Itinerary</button><div><small>MADRID · DAY 1</small><h3>Move with your itinerary</h3><span>Google Maps and Waze whenever you need them.</span></div></div><div class="hc-route-box"><label>From<strong>Royal Palace of Madrid</strong></label><label>To<strong>Plaza de Oriente</strong></label><div class="hc-route-points"><span><b>13:00</b> Royal Palace</span><span><b>15:25</b> Plaza de Oriente</span><span><b>16:10</b> Almudena</span><span><b>16:55</b> Plaza Mayor</span></div><div class="hc-route-actions"><button>◉ Use my location</button><button class="is-primary">Prepare route</button><button>Google Maps ↗</button><button>Waze ↗</button></div><p>Your location is requested only when used and is never stored by ITBMO.</p></div></div>
+      <div class="hc-ws-panel" data-workspace-panel="prepare"><div class="hc-city-toolbar"><button type="button" data-workspace-jump="city">← Itinerary</button><div><small>YOUR CITY</small><h3>Madrid</h3><span>Your itinerary is only the beginning.</span></div><div class="hc-city-mode"><button type="button" data-workspace-jump="city">⌁ Itinerary</button><b>✦ For your trip</b></div></div><div class="hc-prepare-tabs"><b>Tickets and reservations</b><span>Tours and experiences</span><span>How to move</span></div><div class="hc-entry-grid"><article><small>DAY 1 · TICKET NEEDED</small><strong>Royal Palace of Madrid</strong><p>Check access and schedules for your itinerary date.</p><div><span>GetYourGuide</span><button>View options →</button></div><div><span>Viator</span><button>View options →</button></div></article><article><small>DAY 3 · TICKET NEEDED</small><strong>Prado Museum</strong><p>Prepare the right ticket for your route.</p><div><span>GetYourGuide</span><button>View options →</button></div><div><span>Viator</span><button>View options →</button></div></article><article class="hc-entry-grid__wide"><small>HOW TO MOVE · MADRID – SEGOVIA</small><strong>Compare the connection that fits your route</strong><p>Train, bus and transfer options connected to the itinerary.</p><div class="hc-provider-row"><span>Omio</span><span>12Go</span><span>Bookaway</span></div></article></div></div>
+    </div>`;
   document.querySelectorAll('[data-workspace-demo]').forEach(demo=>{
+    demo.innerHTML=workspaceMarkup;
     const tabs=[...demo.querySelectorAll('[data-workspace-tab]')];
     const panels=[...demo.querySelectorAll('[data-workspace-panel]')];
-    tabs.forEach(tab=>tab.addEventListener('click',()=>{
-      const key=tab.dataset.workspaceTab;
-      tabs.forEach(item=>{const active=item===tab;item.classList.toggle('is-active',active);item.setAttribute('aria-selected',String(active));});
+    const labels=lang==='es'?{trips:'Mis viajes',cities:'Todas las ciudades',city:'Madrid',route:'Rutas del día',prepare:'Para tu viaje'}:{trips:'My trips',cities:'All cities',city:'Madrid',route:'Day routes',prepare:'For your trip'};
+    const open=key=>{
       panels.forEach(panel=>panel.classList.toggle('is-active',panel.dataset.workspacePanel===key));
+      const activeTab=tabs.find(item=>item.dataset.workspaceTab===key);
+      tabs.forEach(item=>{const active=item===activeTab;item.classList.toggle('is-active',active);item.setAttribute('aria-selected',String(active));});
+      const step=demo.querySelector('[data-workspace-step]'),index=tabs.indexOf(activeTab)+1;
+      if(step)step.textContent=`${index} ${lang==='es'?'de':'of'} ${tabs.length} · ${labels[key]||''}`;
       window.ITBMOFoundation?.track('workspace_preview_opened',{section:key,language:lang});
-    }));
+    };
+    tabs.forEach(tab=>tab.addEventListener('click',()=>open(tab.dataset.workspaceTab)));
+    demo.addEventListener('click',event=>{const trigger=event.target.closest('[data-workspace-jump]');if(trigger)open(trigger.dataset.workspaceJump);});
   });
+
+  /* A faithful Reykjavik PDF, explored day by day instead of a wall of pages. */
+  document.querySelectorAll('.sample-pdf-pages').forEach(container=>{
+    const images=[...container.querySelectorAll('img')].map(image=>({src:image.currentSrc||image.src,alt:image.alt}));
+    if(images.length<7)return;
+    const days=[[0],[1],[2,3],[4,5],[6],[7,8],[9]];
+    const titles=lang==='es'?['Reikiavik y costa urbana','Círculo Dorado','Costa Sur hasta Vík','Península de Snæfellsnes','Reykjanes y geología costera','Cultura, termalismo y auroras','Hvalfjörður y cierre del viaje']:['Reykjavik and the urban coast','Golden Circle','South Coast to Vík','Snæfellsnes Peninsula','Reykjanes coastal geology','Culture, geothermal time and auroras','Hvalfjörður and trip finale'];
+    let day=0,page=0;
+    container.classList.add('sample-day-explorer');
+    container.innerHTML=`<div class="sample-day-tabs" role="tablist" aria-label="${lang==='es'?'Días del itinerario':'Itinerary days'}">${days.map((_,index)=>`<button type="button" role="tab" data-sample-day="${index}" aria-selected="${index===0}">${lang==='es'?'Día':'Day'} ${index+1}</button>`).join('')}</div><div class="sample-viewer"><div class="sample-viewer__toolbar"><div><small data-sample-counter></small><strong data-sample-title></strong></div><div class="sample-viewer__pages"><button type="button" data-sample-prev aria-label="${lang==='es'?'Página anterior':'Previous page'}">←</button><span data-sample-page></span><button type="button" data-sample-next aria-label="${lang==='es'?'Página siguiente':'Next page'}">→</button></div></div><div class="sample-viewer__frame"><img data-sample-image alt=""></div><p class="sample-viewer__truth">${lang==='es'?'Página exacta del PDF generado por ITBMO. El contenido no fue resumido ni recreado.':'Exact page from the PDF generated by ITBMO. The content has not been summarized or recreated.'}</p></div>`;
+    const dayButtons=[...container.querySelectorAll('[data-sample-day]')],image=container.querySelector('[data-sample-image]'),title=container.querySelector('[data-sample-title]'),counter=container.querySelector('[data-sample-counter]'),pageLabel=container.querySelector('[data-sample-page]'),prev=container.querySelector('[data-sample-prev]'),next=container.querySelector('[data-sample-next]');
+    const render=()=>{
+      const indexes=days[day],source=images[indexes[page]];
+      image.src=source.src;image.alt=source.alt;
+      title.textContent=titles[day];counter.textContent=`${lang==='es'?'Día':'Day'} ${day+1} ${lang==='es'?'de':'of'} 7`;
+      pageLabel.textContent=indexes.length>1?`${lang==='es'?'Página':'Page'} ${page+1} ${lang==='es'?'de':'of'} ${indexes.length}`:`${lang==='es'?'Página':'Page'} ${indexes[0]+1} ${lang==='es'?'del PDF':'of the PDF'}`;
+      prev.disabled=page===0;next.disabled=page===indexes.length-1;
+      dayButtons.forEach((button,index)=>{const active=index===day;button.classList.toggle('is-active',active);button.setAttribute('aria-selected',String(active));});
+    };
+    dayButtons.forEach(button=>button.addEventListener('click',()=>{day=Number(button.dataset.sampleDay);page=0;render();}));
+    prev.addEventListener('click',()=>{if(page>0){page--;render();}});next.addEventListener('click',()=>{if(page<days[day].length-1){page++;render();}});render();
+  });
+
+  const conversionCopy=document.querySelector('.hc-conversion>.g-shell>div:first-child>p');
+  if(conversionCopy&&(page==='home'||page==='sample'))conversionCopy.textContent=lang==='es'?'Completa los datos de tu viaje, revisa el precio y genera sólo cuando estés listo.':'Complete your trip details, review the price and generate only when you are ready.';
 
   window.ITBMOFoundation?.track('view_home',{placement:page,language:lang});
 })();
