@@ -8,18 +8,18 @@
   const lang=(document.documentElement.lang||'es').toLowerCase().startsWith('en')?'en':'es';
   const page=String(document.body?.dataset?.page||'home');
   const rawRoutes={
-    home:{es:'./preview-home.html',en:'./preview-home-en.html'},
-    how:{es:'./como-funciona.html',en:'./how-it-works.html'},
-    sample:{es:'./ejemplo-itinerario.html',en:'./sample-itinerary.html'},
-    pricing:{es:'./precios.html',en:'./pricing.html'},
-    about:{es:'./acerca-de-itbmo.html',en:'./about-itbmo.html'},
-    destinations:{es:'./destinos.html',en:'./destinations.html'},
-    resources:{es:'./recursos.html',en:'./resources.html'},
-    collaborate:{es:'./colabora.html',en:'./partner-with-itbmo.html'},
-    support:{es:'./support-contact.html',en:'./support-contact-en.html'},
-    privacy:{es:'./privacy-cookies.html',en:'./privacy-cookies-en.html'},
-    terms:{es:'./terms.html',en:'./terms-en.html'},
-    affiliates:{es:'./ads-affiliates.html',en:'./ads-affiliates-en.html'}
+    home:{es:'/',en:'/english'},
+    how:{es:'/como-funciona',en:'/how-it-works'},
+    sample:{es:'/ejemplo-itinerario',en:'/sample-itinerary'},
+    pricing:{es:'/precios',en:'/pricing'},
+    about:{es:'/acerca-de-itbmo',en:'/about-itbmo'},
+    destinations:{es:'/destinos',en:'/destinations'},
+    resources:{es:'/recursos',en:'/resources'},
+    collaborate:{es:'/colabora',en:'/partner-with-itbmo'},
+    support:{es:'/support-contact.html',en:'/support-contact-en.html'},
+    privacy:{es:'/privacy-cookies.html',en:'/privacy-cookies-en.html'},
+    terms:{es:'/terms.html',en:'/terms-en.html'},
+    affiliates:{es:'/ads-affiliates.html',en:'/ads-affiliates-en.html'}
   };
   const webflowRoutes={
     home:{es:'/',en:'/english'},
@@ -65,6 +65,28 @@
     return parent?`${parent}${webflowRoutes[key]?.[targetLang]||webflowRoutes.home[targetLang]}`:(rawRoutes[key]?.[targetLang]||rawRoutes.home[targetLang]);
   }
 
+  /* One calm, predictable navigation system on every V297 surface.  Static
+     page content remains indexable; this only normalizes the interactive UI. */
+  function normalizeChrome(){
+    const labels=lang==='es'?{
+      home:'Inicio',how:'Cómo funciona',sample:'Ejemplo real',destinations:'Destinos',resources:'Recursos',pricing:'Precios',login:'Ingresar',plan:'Crear itinerario',tagline:'Tu viaje, pensado por ti. Organizado por ITBMO.',discover:'EXPLORA',company:'ITBMO',help:'AYUDA',start:'EMPIEZA',about:'Acerca de',collaborate:'Colabora',support:'Soporte',privacy:'Privacidad',terms:'Términos',rights:'Todos los derechos reservados.',world:'Diseñado para viajeros de todo el mundo.'
+    }:{
+      home:'Home',how:'How it works',sample:'Real example',destinations:'Destinations',resources:'Resources',pricing:'Pricing',login:'Sign in',plan:'Create itinerary',tagline:'Your trip, imagined by you. Organized by ITBMO.',discover:'EXPLORE',company:'ITBMO',help:'HELP',start:'START',about:'About',collaborate:'Partner with us',support:'Support',privacy:'Privacy',terms:'Terms',rights:'All rights reserved.',world:'Designed for travelers worldwide.'
+    };
+    const header=document.querySelector('.g-header');
+    if(header){
+      header.innerHTML=`<div class="g-header__inner"><a class="g-brand" href="${marketingTarget('home')}" data-route="home" aria-label="ITBMO · ${labels.home}"><picture><source srcset="/assets/img/itbmo-logo-premium.webp" type="image/webp"><img src="/assets/img/itbmo-logo-premium.jpg" alt="I Travel By My Own" width="154" height="59"></picture></a><nav class="g-nav" aria-label="${lang==='es'?'Navegación principal':'Main navigation'}"><a href="${marketingTarget('home')}" data-route="home">${labels.home}</a><a href="${marketingTarget('how')}" data-route="how">${labels.how}</a><a href="${marketingTarget('sample')}" data-route="sample">${labels.sample}</a><a href="${marketingTarget('destinations')}" data-route="destinations">${labels.destinations}</a><a href="${marketingTarget('resources')}" data-route="resources">${labels.resources}</a><a href="${marketingTarget('pricing')}" data-route="pricing">${labels.pricing}</a></nav><div class="g-header__actions"><a class="g-login" href="/planner.html?lang=${lang}&mode=access" target="_blank" rel="noopener" data-login-open data-placement="navbar_login">${labels.login}</a><a class="g-button g-button--primary g-button--compact" href="/planner.html?lang=${lang}&mode=new" target="_blank" rel="noopener" data-planner-open data-placement="navbar">${labels.plan}</a></div><div class="g-lang"><button class="${lang==='es'?'is-active':''}" type="button" data-site-lang="es">ES</button><button class="${lang==='en'?'is-active':''}" type="button" data-site-lang="en">EN</button></div><button class="g-menu-toggle" type="button" aria-expanded="false" aria-controls="g-mobile-nav" data-menu-toggle aria-label="${lang==='es'?'Abrir menú':'Open menu'}"><span></span><span></span><span></span></button></div>`;
+    }
+    let mobile=document.querySelector('[data-mobile-nav]');
+    if(!mobile&&header){mobile=document.createElement('nav');mobile.className='g-mobile-nav';mobile.id='g-mobile-nav';mobile.dataset.mobileNav='';mobile.hidden=true;header.insertAdjacentElement('afterend',mobile);}
+    if(mobile)mobile.innerHTML=`<a href="${marketingTarget('home')}" data-route="home">${labels.home}<span>→</span></a><a href="${marketingTarget('how')}" data-route="how">${labels.how}<span>→</span></a><a href="${marketingTarget('sample')}" data-route="sample">${labels.sample}<span>→</span></a><a href="${marketingTarget('destinations')}" data-route="destinations">${labels.destinations}<span>→</span></a><a href="${marketingTarget('resources')}" data-route="resources">${labels.resources}<span>→</span></a><a href="${marketingTarget('pricing')}" data-route="pricing">${labels.pricing}<span>→</span></a><a href="/planner.html?lang=${lang}&mode=access" target="_blank" rel="noopener" data-login-open data-placement="mobile_login">${labels.login}<span>→</span></a><a class="g-button g-button--primary" href="/planner.html?lang=${lang}&mode=new" target="_blank" rel="noopener" data-planner-open data-placement="mobile_menu">${labels.plan}</a>`;
+    const footer=document.querySelector('.g-footer');
+    if(footer)footer.innerHTML=`<div class="g-shell"><div class="g-footer__grid"><div class="g-footer__brand"><strong>ITBMO</strong><p>${labels.tagline}</p><div class="g-footer__social" data-itbmo-social-links></div></div><div class="g-footer__column"><strong>${labels.discover}</strong><a href="${marketingTarget('how')}" data-route="how">${labels.how}</a><a href="${marketingTarget('sample')}" data-route="sample">${labels.sample}</a><a href="${marketingTarget('destinations')}" data-route="destinations">${labels.destinations}</a><a href="${marketingTarget('resources')}" data-route="resources">${labels.resources}</a></div><div class="g-footer__column"><strong>${labels.company}</strong><a href="${marketingTarget('about')}" data-route="about">${labels.about}</a><a href="${marketingTarget('collaborate')}" data-route="collaborate">${labels.collaborate}</a><a href="${marketingTarget('pricing')}" data-route="pricing">${labels.pricing}</a></div><div class="g-footer__column"><strong>${labels.help}</strong><a href="${marketingTarget('support')}" data-route="support">${labels.support}</a><a href="${marketingTarget('privacy')}" data-route="privacy">${labels.privacy}</a><a href="${marketingTarget('terms')}" data-route="terms">${labels.terms}</a></div><div class="g-footer__column"><strong>${labels.start}</strong><a href="/planner.html?lang=${lang}&mode=access" target="_blank" rel="noopener" data-login-open data-placement="footer_login">${labels.login}</a><a href="/planner.html?lang=${lang}&mode=new" target="_blank" rel="noopener" data-planner-open data-placement="footer">${labels.plan}</a></div></div><div class="g-footer__bottom"><span>© 2026 I Travel By My Own. ${labels.rights}</span><span>${labels.world}</span></div></div>`;
+    const activePage=page==='destination-detail'?'destinations':page;
+    document.querySelectorAll('[data-route]').forEach(link=>{const key=String(link.dataset.route||'home');link.href=marketingTarget(key,lang);if(key===activePage)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
+  }
+  normalizeChrome();
+
   document.querySelectorAll('[data-route]').forEach(link=>{
     const key=String(link.dataset.route||'home');
     link.href=marketingTarget(key,lang);
@@ -92,6 +114,16 @@
         try{window.top.location.href=target;}catch(_){location.href=target;}
         return;
       }
+      if(page==='destination-detail'){
+        const esToEn={roma:'rome',egipto:'egypt',estambul:'istanbul',islandia:'iceland',paris:'paris',santorini:'santorini',patagonia:'patagonia',bariloche:'bariloche','rio-de-janeiro':'rio-de-janeiro',tromso:'tromso'};
+        const enToEs=Object.fromEntries(Object.entries(esToEn).map(([es,en])=>[en,es]));
+        const file=(location.pathname.split('/').pop()||'').replace(/\.html$/,'').replace(/^destino-|^destination-/,'');
+        const slug=targetLang==='en'?(esToEn[file]||file):(enToEs[file]||file);
+        const path=`/${targetLang==='en'?'destinations':'destinos'}/${slug}`;
+        const parent=webflowOrigin();
+        try{window.top.location.href=parent?`${parent}${path}`:path;}catch(_){location.href=path;}
+        return;
+      }
       const key=rawKey(location.pathname);
       const target=marketingTarget(key,targetLang);
       try{window.top.location.href=target;}catch(_){location.href=target;}
@@ -110,7 +142,7 @@
   mobileNav?.addEventListener('click',event=>{if(event.target.closest('a'))setMenu(false);});
   document.addEventListener('keydown',event=>{if(event.key==='Escape')setMenu(false);});
 
-  const plannerUrl=(mode='new')=>`./planner.html?lang=${lang}&mode=${mode}`;
+  const plannerUrl=(mode='new')=>`/planner.html?lang=${lang}&mode=${mode}`;
   function openPlanner(trigger,mode='new'){
     const placement=String(trigger?.dataset?.placement||'unknown');
     window.ITBMOFoundation?.track('planner_open',{placement,language:lang});
@@ -127,7 +159,7 @@
   }));
   document.querySelectorAll('[data-login-open]').forEach(trigger=>trigger.addEventListener('click',event=>{
     if(trigger.tagName!=='A')event.preventDefault();
-    openPlanner(trigger,'login');
+    openPlanner(trigger,'access');
   }));
 
   /* Build-aware Planner warmup. Never hard-code a Planner asset version again. */
