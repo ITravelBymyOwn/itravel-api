@@ -1,4 +1,4 @@
-/* ITBMO V297.4 · Commercial, resources and destination shell
+/* ITBMO V297.6 · Commercial, resources and destination shell
    One code path for Home + product pages, inside Webflow or standalone. */
 (() => {
   'use strict';
@@ -245,12 +245,12 @@
     new IntersectionObserver(([entry])=>sticky.classList.toggle('is-visible',!entry.isIntersecting),{threshold:.05}).observe(hero);
   }
 
-  /* Home carousel: real photographs, pause on interaction and respect motion preferences. */
+  /* Home carousel: real photographs, uninterrupted motion and accessible controls. */
   const carousel=document.querySelector('[data-hero-carousel]');
   if(carousel){
     const slides=[...carousel.querySelectorAll('[data-slide]')];
     const dots=[...carousel.querySelectorAll('[data-carousel-dot]')];
-    let current=0,timer=null,paused=false,showToken=0;
+    let current=0,timer=null,showToken=0;
     slides.forEach(slide=>{
       const caption=slide.querySelector('figcaption');
       if(!caption)return;
@@ -277,11 +277,10 @@
       void load(current+1);
     };
     const stop=()=>{if(timer)clearInterval(timer);timer=null;};
-    const start=()=>{stop();if(!paused&&!document.hidden&&!matchMedia('(prefers-reduced-motion: reduce)').matches)timer=setInterval(()=>show(current+1),1500);};
+    const start=()=>{stop();if(!document.hidden&&!matchMedia('(prefers-reduced-motion: reduce)').matches)timer=setInterval(()=>show(current+1),1500);};
     carousel.querySelector('[data-carousel-prev]')?.addEventListener('click',()=>{show(current-1);start();});
     carousel.querySelector('[data-carousel-next]')?.addEventListener('click',()=>{show(current+1);start();});
     dots.forEach(dot=>dot.addEventListener('click',()=>{show(Number(dot.dataset.carouselDot||0));start();}));
-    carousel.addEventListener('mouseenter',()=>{paused=true;stop();});carousel.addEventListener('mouseleave',()=>{paused=false;start();});
     carousel.addEventListener('focusin',stop);carousel.addEventListener('focusout',start);document.addEventListener('visibilitychange',()=>document.hidden?stop():start());void load(1);show(0);start();
   }
 
@@ -375,3 +374,4 @@
 
   window.ITBMOFoundation?.track('view_home',{placement:page,language:lang});
 })();
+
