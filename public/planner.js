@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V297.3';
-const ITBMO_RUNTIME_ASSET='planner.js?v=297.3';
+const ITBMO_RUNTIME_BUILD='V297.4';
+const ITBMO_RUNTIME_ASSET='planner.js?v=297.4';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -382,8 +382,8 @@ const I18N = {
     tooltipDateMissing: 'Selecciona una fecha futura válida para cada ciudad 🗓️',
 
     // Reset modal
-    resetTitle: '¿Reiniciar planificación? 🧭',
-    resetBody: 'Esto eliminará todos los destinos, preferencias, datos de planificación e itinerarios actuales.<br><br><strong>Antes de continuar, asegúrate de haber descargado tu itinerario, Excel y comprobante de pago.</strong><br><br>Si reinicias, tendrás que comenzar un nuevo viaje y <strong>realizar un nuevo pago para volver a generar un itinerario</strong>.<br><br><strong>Esta acción no se puede deshacer.</strong>',
+    resetTitle: '¿Reiniciar esta planificación? 🧭',
+    resetBody: 'Se archivará la planificación activa y dejará de estar disponible como viaje activo. Tus demás viajes guardados no se eliminarán.<br><br>Antes de continuar, conserva los archivos de este viaje que necesites.<br><br>Para generar un nuevo itinerario será necesario realizar un nuevo pago.<br><br><strong>Esta acción no se puede deshacer.</strong>',
     resetConfirm: 'Sí, reiniciar',
     resetCancel: 'Cancelar',
 
@@ -462,8 +462,8 @@ const I18N = {
     tooltipDateMissing: 'Choose a valid future date for every city 🗓️',
 
     // Reset modal
-    resetTitle: 'Reset planning? 🧭',
-    resetBody: 'This will delete all current destinations, preferences, planning data, and itineraries.<br><br><strong>Before continuing, make sure you have downloaded your itinerary, Excel file, and payment receipt.</strong><br><br>If you reset, you will need to start a new trip and <strong>make a new payment to generate another itinerary</strong>.<br><br><strong>This action cannot be undone.</strong>',
+    resetTitle: 'Reset this planning session? 🧭',
+    resetBody: 'The active planning session will be archived and will no longer be available as the active trip. Your other saved trips will not be deleted.<br><br>Before continuing, keep any files from this trip that you need.<br><br>A new payment will be required to generate a new itinerary.<br><br><strong>This action cannot be undone.</strong>',
     resetConfirm: 'Yes, reset',
     resetCancel: 'Cancel',
 
@@ -11822,7 +11822,7 @@ function _journeyCopy_(){
   return es ? {
     eyebrow:'TU VIAJE SIGUE AQUÍ',
     title:'¿Qué quieres hacer hoy?',
-    copy:'Continúa donde lo dejaste o empieza una nueva aventura. Aquí puedes volver a tus 30 itinerarios generados más recientes y descargar sus archivos.',
+    copy:'Continúa donde lo dejaste o empieza una nueva aventura. Aquí puedes volver a tus 30 itinerarios generados más recientes, abrirlos y descargar nuevamente su PDF o Excel editable.',
     resumeKicker:'ÚLTIMO VIAJE',
     resumeTitle:'Continuar con mi último viaje',
     resumeAction:'Abrir Trip Workspace',
@@ -11843,7 +11843,7 @@ function _journeyCopy_(){
   } : {
     eyebrow:'YOUR TRIP IS STILL HERE',
     title:'What would you like to do today?',
-    copy:'Continue where you left off or start a new adventure. Return to your 30 most recent generated itineraries and download their files here.',
+    copy:'Continue where you left off or start a new adventure. Return to your 30 most recent generated itineraries, open them, and download their PDF or editable Excel again.',
     resumeKicker:'LATEST TRIP',
     resumeTitle:'Continue my latest trip',
     resumeAction:'Open Trip Workspace',
@@ -13884,12 +13884,21 @@ const emailSendCopy=()=>getLang()==='es'?{
 function setEmailDeliveryStatus(message='',type=''){
   if(!$itineraryEmailStatus)return;$itineraryEmailStatus.textContent=message;$itineraryEmailStatus.className='form-send-status'+(type?` is-${type}`:'');
 }
-function openItineraryEmailModal(){
+let itineraryEmailOpenedFromFinalModal=false;
+function openItineraryEmailModal({fromFinalModal=false}={}){
   if(!$itineraryEmailModal||!hasGeneratedItineraryRows())return;
+  itineraryEmailOpenedFromFinalModal=Boolean(fromFinalModal);
   $itineraryEmailRecipient.value=String(currentUser?.email||'');setEmailDeliveryStatus('');
   $itineraryEmailModal.classList.add('active');$itineraryEmailModal.setAttribute('aria-hidden','false');setTimeout(()=>$itineraryEmailRecipient.focus(),60);
 }
-function closeItineraryEmailModal({restoreDownloads=false}={}){if(!$itineraryEmailModal)return;$itineraryEmailModal.classList.remove('active');$itineraryEmailModal.setAttribute('aria-hidden','true');if(restoreDownloads && hasGeneratedItineraryRows())setTimeout(()=>showFinalDownloadModal(),80);}
+function closeItineraryEmailModal({restoreDownloads=null,showWorkspaceGuide=false}={}){
+  if(!$itineraryEmailModal)return;
+  const shouldRestoreDownloads=restoreDownloads===null?itineraryEmailOpenedFromFinalModal:Boolean(restoreDownloads);
+  itineraryEmailOpenedFromFinalModal=false;
+  $itineraryEmailModal.classList.remove('active');$itineraryEmailModal.setAttribute('aria-hidden','true');
+  if(showWorkspaceGuide){setTimeout(()=>showPostDownloadWorkspaceGuide(),80);return;}
+  if(shouldRestoreDownloads && hasGeneratedItineraryRows())setTimeout(()=>showFinalDownloadModal(),80);
+}
 async function sendItineraryByEmail(event){
   event?.preventDefault();const copy=emailSendCopy(),recipient=String($itineraryEmailRecipient?.value||'').trim();
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)){setEmailDeliveryStatus(copy.invalid,'error');return;}
@@ -13903,7 +13912,7 @@ async function sendItineraryByEmail(event){
     setEmailDeliveryStatus(copy.sending);const attachments=[];
     for(const item of generated)attachments.push({kind:item.kind,name:item.filename,type:item.blob.type,content:await blobToBase64(item.blob)});
     await emailApi({action:'send_itinerary',session_token:token,trip_id:currentTripId,recipient_email:recipient,lang:getLang(),attachments});
-    setEmailDeliveryStatus(copy.sent,'success');trackITBMOEvent('trip_shared',{channel:'email',file_type:'pdf_xlsx_receipt'});setTimeout(()=>closeItineraryEmailModal({restoreDownloads:false}),900);
+    setEmailDeliveryStatus(copy.sent,'success');trackITBMOEvent('trip_shared',{channel:'email',file_type:'pdf_xlsx_receipt'});const continueToWorkspace=itineraryEmailOpenedFromFinalModal;setTimeout(()=>closeItineraryEmailModal({restoreDownloads:false,showWorkspaceGuide:continueToWorkspace}),900);
   }catch(error){const key=error?.code==='RECEIPT_REQUIRED'?'receipt':error?.code==='ATTACHMENTS_TOO_LARGE'?'large':error?.code==='EMAIL_NOT_CONFIGURED'?'config':'error';setEmailDeliveryStatus(copy[key],'error');}
   finally{$itineraryEmailSubmit.disabled=false;}
 }
@@ -14277,9 +14286,10 @@ function showFinalDownloadModal(){
   const es=getLang()==='es';
   const overlay=document.createElement('div'); overlay.className='itbmo-download-overlay';
   overlay.innerHTML=`<div class="itbmo-download-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-download-title">
-    <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'ITBMO TERMINÓ':'ITBMO IS DONE'}</div>
-    <h3 id="itbmo-download-title">${es?'Tu itinerario está listo.':'Your itinerary is ready.'}</h3>
-    <p>${es?'Descarga cada documento por separado. Así tu navegador no bloqueará ninguno y podrás guardarlos con seguridad.':'Download each document separately. This prevents your browser from blocking any file and lets you save them safely.'}</p>
+    <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'VIAJE GUARDADO':'TRIP SAVED'}</div>
+    <h3 id="itbmo-download-title">${es?'Tu itinerario está listo y guardado.':'Your itinerary is ready and saved.'}</h3>
+    <p>${es?'Puedes descargar ahora tu PDF, Excel editable y comprobante. El PDF y el Excel también estarán disponibles después en Mis viajes.':'You can download your PDF, editable Excel, and receipt now. Your PDF and Excel will also remain available later in My trips.'}</p>
+    <p><strong>${es?'Mis viajes conserva tus 30 itinerarios generados más recientes.':'My trips keeps your 30 most recently generated itineraries.'}</strong></p>
     <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>XLSX · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
     <div class="itbmo-download-actions">
       <button class="btn primary itbmo-open-pdf" type="button"><span>01</span>${es?'Descargar itinerario PDF':'Download itinerary PDF'}</button>
@@ -14288,17 +14298,13 @@ function showFinalDownloadModal(){
       <button class="btn itbmo-email-package" type="button"><span>✉</span>${es?'Enviar los 3 archivos por email':'Email all 3 files'}</button>
     </div>
     <div class="itbmo-download-status" aria-live="polite"></div>
-    <label class="itbmo-download-ack"><input type="checkbox"> <span>${es?'He leído esta información y entiendo que debo conservar mis documentos.':'I have read this information and understand that I must keep my documents.'}</span></label>
-    <button class="btn itbmo-download-close" type="button" disabled>${es?'Continuar':'Continue'}</button>
+    <button class="btn itbmo-download-close" type="button">${es?'Explorar mi viaje':'Explore my trip'}</button>
     <small>${es?'En móvil podrás abrir, compartir o guardar cada archivo mediante las opciones del dispositivo.':'On mobile, you can open, share or save each file using your device options.'}</small>
   </div>`;
   document.body.appendChild(overlay); requestAnimationFrame(()=>overlay.classList.add('active'));
-  const ack=overlay.querySelector('input'); const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
-  ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
+  const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
   close.addEventListener('click',()=>{
-    if(!ack.checked) return;
     overlay.classList.remove('active');
-
     overlay.remove();
     showPostDownloadWorkspaceGuide();
   });
@@ -14348,7 +14354,7 @@ function showFinalDownloadModal(){
       status.textContent=es ? '✓ Comprobante PDF preparado.' : '✓ Receipt PDF prepared.';
     }catch(_){status.textContent=es?'No se pudo preparar el comprobante. Inténtalo de nuevo.':'The receipt could not be prepared. Please try again.';}
   });
-  emailButton?.addEventListener('click',()=>{overlay.classList.remove('active');overlay.remove();openItineraryEmailModal();});
+  emailButton?.addEventListener('click',()=>{overlay.classList.remove('active');overlay.remove();openItineraryEmailModal({fromFinalModal:true});});
 }
 
 function bindExportListeners(){
