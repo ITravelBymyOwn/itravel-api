@@ -264,6 +264,14 @@ function _currentTravelModelV2_(){
   if(plannerState) plannerState.travelModelV2=model;
   return model;
 }
+function _canonicalTripStory_(){
+  const candidates=[
+    _travelV2()?.state?.tripStory,
+    plannerState?.travelModelV2?.trip_story,
+    plannerState?.travelModelV2?.tripStory
+  ];
+  return candidates.find(story=>Array.isArray(story?.stays)&&story.stays.length)||null;
+}
 function _renumberDestinationCards_(){
   if(!$cityList) return;
   qsa('.city-row',$cityList).forEach((row,index)=>{
@@ -3394,6 +3402,8 @@ function openGuidedPersonalizationJourney(){
   const overlay=document.createElement('div'); overlay.id='guided-personalization-overlay'; overlay.className='trip-story-overlay guided-journey-overlay guided-personalization-overlay';
   overlay.innerHTML=`<div class="guided-journey" role="dialog" aria-modal="true"><header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'Tu recorrido ya está listo. Ahora hagámoslo realmente tuyo.':'Your route is ready. Now let’s make it truly yours.'}</p></div><button type="button" data-gp-close>×</button></header><nav class="guided-journey__progress"><button class="is-done">${es?'Viajeros':'Travelers'}</button><i>›</i><button class="is-done">${es?'Ruta':'Route'}</button><i>›</i><button class="is-active">${es?'Personalización':'Personalization'}</button><i>›</i><button disabled>${es?'Itinerario':'Itinerary'}</button></nav><div class="guided-journey__layout"><main class="guided-journey__active" data-gp-active></main><aside class="guided-journey__story"><div class="guided-journey__story-head"><div><small>${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><b>${es?'Tu viaje sigue tomando forma':'Your trip keeps taking shape'}</b></div><button type="button" id="guided-info-chat-open" aria-label="${es?'Abrir Info Chat':'Open Info Chat'}"><span class="v277-chat-title">${es?'¿Tienes dudas?':'Questions?'}</span><span class="v277-chat-subtitle">${es?'Pregúntale a Info Chat':'Ask Info Chat'}</span><span class="v277-chat-action">${es?'Abrir Info Chat →':'Open Info Chat →'}</span><span class="v277-chat-footnote">${es?'Consultas disponibles':'Queries available'}: <span data-gp-chat-left>${Number(document.querySelector('#info-chat-remaining')?.textContent?.match(/\d+/)?.[0]||0)}</span></span></button></div><div data-gp-story></div></aside></div><button class="guided-journey__mobile-story" type="button" data-gp-mobile>${es?'Ver mi recorrido':'View my journey'}</button></div>`;
   document.body.appendChild(overlay); document.body.classList.add('guided-preferences-open');
+  const guidedChatRemaining=overlay.querySelector('[data-gp-chat-left]');
+  if(guidedChatRemaining)guidedChatRemaining.textContent=String(Math.max(0,Number(infoChatQueriesRemaining)||0));
   const active=overlay.querySelector('[data-gp-active]'), storyHost=overlay.querySelector('[data-gp-story]');
   const shell=(eyebrow,title,copy,content,actions='')=>`<section class="gj-focus"><small class="gj-focus__eyebrow">${eyebrow}</small><h3>${title}</h3>${copy?`<p>${copy}</p>`:''}<div class="gj-focus__content">${content}</div><div class="gj-focus__actions">${step!=='global'?`<button type="button" class="gj-back" data-gp-back><span aria-hidden="true">←</span><span>${es?'Atrás':'Back'}</span></button>`:''}${actions}</div></section>`;
   const next=(label)=>`<button type="button" class="gj-primary" data-gp-next>${label}<span>→</span></button>`;
@@ -4219,6 +4229,7 @@ function _workspaceSnapshotViews_(){
 
 function openImmersiveItinerary(){
   const workspaceViews=_workspaceSnapshotViews_();
+  const canonicalStory=_canonicalTripStory_();
   let cities=(workspaceViews?.destinations||[]).map(d=>d?.city).filter(Boolean);
   if(!cities.length)cities=_immersiveAvailableCities_();
   if(!cities.length)return;
@@ -4241,11 +4252,11 @@ function openImmersiveItinerary(){
     // cards, not savedDestinations, are therefore the authority for inter-stay
     // transitions such as Bruges → Rome. trip-workspace.js can then derive every
     // main movement without changing its own affiliate/partner logic.
-    source_destinations:(((_currentTravelModelV2_()?.trip_story?.stays)||[]).length
-      ? ((_currentTravelModelV2_()?.trip_story?.stays)||[]).filter(st=>!st?.transitOnly).map(st=>({city:st?.place||'',country:st?.country||'',days:Number(st?.days||0)||0,baseDate:st?.startDate?_tripStoryDMY_(st.startDate):null}))
+    source_destinations:(((canonicalStory?.stays)||[]).length
+      ? ((canonicalStory?.stays)||[]).filter(st=>!st?.transitOnly).map(st=>({city:st?.place||'',country:st?.country||'',days:Number(st?.days||0)||0,baseDate:st?.startDate?_tripStoryDMY_(st.startDate):null}))
       : (savedDestinations||[]).map(d=>({city:d?.city||'',country:d?.country||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null})))
       .filter(d=>d.city),
-    journey_story:(()=>{const st=_currentTravelModelV2_()?.trip_story;return st?.stays?.length?JSON.parse(JSON.stringify({stays:st.stays,start:st.start,returnTrip:st.returnTrip})):null;})(),
+    journey_story:canonicalStory?JSON.parse(JSON.stringify({stays:canonicalStory.stays,start:canonicalStory.start,returnTrip:canonicalStory.returnTrip})):null,
     workspace_source_map:workspaceViews.source_map||{},
     city_meta:cityMeta||{},
     itineraries:workspaceViews.itineraries||{}
@@ -13297,7 +13308,7 @@ function _v40VisibleTransportForRow_(row={}){
 
 function _chronologicalExportDays_(){
   const out=[];
-  const story=_currentTravelModelV2_()?.trip_story;
+  const story=_canonicalTripStory_();
   (savedDestinations||[]).forEach(dest=>{
     const sourceUnit=dest?.city||'';
     const byDay=itineraries?.[sourceUnit]?.byDay||{};
@@ -13401,7 +13412,7 @@ function _exportBlockType_(row={},outLang='es'){
 function _exportScheduleStatus_(row={},date='',outLang='es'){
   const es=outLang==='es',type=_exportBlockType_(row,outLang);
   if(type!==(es?'Traslado':'Transfer'))return es?'Planificado':'Planned';
-  const story=_currentTravelModelV2_()?.trip_story||{};
+  const story=_canonicalTripStory_()||{};
   const statusLabel=value=>String(value||'').toLowerCase()==='confirmed'?(es?'Confirmado':'Confirmed'):(es?'Estimado':'Estimated');
   for(let i=1;i<(story.stays||[]).length;i++){
     const st=story.stays[i],depDate=_tripStoryDMY_(st.departureDate||st.startDate),arrDate=_tripStoryDMY_(st.arrivalDate||st.startDate);
@@ -13425,6 +13436,41 @@ function _excelColorForType_(type='',outLang='es'){
   return 'F4F8FF';
 }
 
+function _appendReturnJourneyToExportBlocks_(blocks=[],outLang='es'){
+  const story=_canonicalTripStory_(),ret=story?.returnTrip||{};
+  const origin=String(ret?.origin?.label||story?.stays?.at(-1)?.place||'').trim();
+  const destination=String(ret?.arrival?.label||'').trim();
+  if(!ret.enabled||!origin||!destination||!/^\d{4}-\d{2}-\d{2}$/.test(String(ret.departureDate||'')))return blocks;
+  const date=_tripStoryDMY_(ret.departureDate);
+  const duplicate=blocks.some(block=>(block?.days||[]).some(day=>day?.date===date&&(day?.rows||[]).some(row=>
+    _arePoiAliases_(row?.from,origin)&&_arePoiAliases_(row?.to,destination)&&String(row?.start||'')===String(ret.departureTime||'')
+  )));
+  if(duplicate)return blocks;
+  let block=blocks.at(-1);
+  if(!block||!_arePoiAliases_(block.destination,origin)){
+    block={destination:origin,sequence:blocks.length+1,days:[],source_units:new Set(['journey_return'])};
+    blocks.push(block);
+  }
+  let day=block.days.find(item=>item?.date===date);
+  if(!day){
+    const first=story?.stays?.[0]?.startDate||ret.departureDate;
+    day={globalDay:Math.max(1,_tripStoryDiffDays_(first,ret.departureDate)+1),date,rows:[]};
+    block.days.push(day);
+    block.days.sort((a,b)=>(parseDMY(a?.date||'')?.getTime?.()||0)-(parseDMY(b?.date||'')?.getTime?.()||0));
+  }
+  const modeNames={plane:outLang==='es'?'Avión':'Plane',train:outLang==='es'?'Tren':'Train',bus:outLang==='es'?'Autobús':'Bus',car:outLang==='es'?'Automóvil':'Car',ferry:'Ferry',transfer:outLang==='es'?'Traslado':'Transfer'};
+  const mode=_v126TransportText_(ret.transportMode||'');
+  day.rows.push({
+    activity:outLang==='es'?'Regreso internacional':'International return journey',
+    from:origin,to:destination,start:String(ret.departureTime||''),end:String(ret.arrivalTime||''),
+    transport:modeNames[String(mode).toLowerCase()]||mode,
+    notes:outLang==='es'?'Tramo final del recorrido indicado por el viajero. Confirma horarios, terminales y requisitos con el proveedor.':'Final journey leg supplied by the traveler. Confirm times, terminals and requirements with the provider.',
+    _pdfLogistic:true,_itbmoJourneyBoundary:'return'
+  });
+  day.rows.sort((a,b)=>String(a?.start||'').localeCompare(String(b?.start||'')));
+  return blocks;
+}
+
 async function exportItineraryToXLSX(options={}){
   const blocks=_exportPhysicalDestinationBlocks_();
   const es=_plannerOutputLang_()==='es';
@@ -13439,6 +13485,7 @@ async function exportItineraryToXLSX(options={}){
   }
 
   const outLang=es?'es':'en',workbook=new window.ExcelJS.Workbook();
+  _appendReturnJourneyToExportBlocks_(blocks,outLang);
   workbook.creator='I Travel By My Own';
   workbook.company='ITBMO';
   workbook.subject=es?'Itinerario de viaje editable':'Editable travel itinerary';
@@ -13537,7 +13584,7 @@ function _v67PdfDayTripLabel_(day={},fallback=''){
   return meta?`${meta.base}  <->  ${meta.destination}`:fallback;
 }
 function _v69PdfDayTripMeta_(day={}){
-  const story=_currentTravelModelV2_()?.trip_story;
+  const story=_canonicalTripStory_();
   if(!story?.stays?.length||!day?.date)return null;
   const parsed=parseDMY(day.date);if(!parsed)return null;
   const iso=`${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`;
@@ -13645,7 +13692,7 @@ async function exportItineraryToPDF(options={}){
     (day.rows||[]).forEach(row=>item.rows.push({...row,_pdfDestination:block.destination,_pdfSourceUnit:(block.source_units||[])[0]||''}));
   }));
   // V202 · PDF-only journey boundaries. No generated rows, units or checkpoints change.
-  const pdfStory=_currentTravelModelV2_()?.trip_story;
+  const pdfStory=_canonicalTripStory_();
   if(pdfStory?.stays?.length){
     const itineraryFirst=pdfStory.stays[0].startDate;
     const events=[];
@@ -14869,6 +14916,7 @@ function setInfoChatEntitlement({authorized=false, remaining=0, used=0, tripId=n
   if(entIcon) entIcon.textContent=!authorized ? '🔒' : (exhausted ? '✓' : '✓');
   if(usageLabel) usageLabel.textContent=!authorized ? copy.lockedUsage : (exhausted ? copy.exhausted : copy.remaining(safeRemaining));
   if(remainingEl) remainingEl.textContent=`${safeUsed} / ${INFO_CHAT_MAX_QUERIES}`;
+  document.querySelectorAll('[data-gp-chat-left]').forEach(el=>{el.textContent=String(safeRemaining)});
 }
 
 
@@ -16782,7 +16830,11 @@ function openTripStoryBuilder(){
     if(phase==='stay'){
       const st=story.stays[activeStay];
       active.innerHTML=shell(activeStay===0?(es?'INICIO DEL RECORRIDO TURÍSTICO':'START OF SIGHTSEEING ROUTE'):(es?'SIGUIENTE DESTINO DEL RECORRIDO':'NEXT ROUTE DESTINATION'),activeStay===0?(es?'¿Cuál es la primera ciudad de tu recorrido?':'What is the first city on your route?'):(es?'¿Cuál es tu siguiente destino?':'What is your next destination?'),activeStay===0?(es?'Agrega la primera ciudad a la que llegarás, ya sea para hacer turismo o únicamente como tránsito hacia otro destino. <strong>No agregues el viaje de regreso a tu lugar de origen. Podrás indicarlo por separado al finalizar, de forma opcional.</strong>':'Add the first city you will reach, whether for sightseeing or only as transit. <strong>Do not add the trip home here. You can add it separately at the end, optionally.</strong>'):(es?'Agrega la siguiente ciudad donde harás turismo o que utilizarás como tránsito, siguiendo el orden real de tu recorrido. <strong>Si la siguiente ciudad está en el mismo país, vuelve a indicar ese país.</strong> Por ejemplo, después de Madrid puedes agregar Barcelona, indicando nuevamente España. <strong>No agregues el viaje de regreso a tu lugar de origen. Podrás indicarlo por separado al finalizar, de forma opcional.</strong>':'Add the next city for sightseeing or intermediate transit in your actual travel order. <strong>If the next city is in the same country, enter that country again.</strong> For example, after Madrid add Barcelona and select Spain again. <strong>Do not add the trip home here. You can add it separately at the end, optionally.</strong>'),`<div class="gj-form"><label>${es?'País':'Country'}${countryField(st.country,st.countryCode,'data-stay-country')}</label><label>${es?'Destino':'Destination'}${destinationField(st.place,'data-stay-place')}</label><label>${es?'Fecha de llegada':'Arrival date'}<input type="date" data-stay-start value="${st.startDate||''}"></label><label>${es?'¿Cuánto tiempo estarás aquí?':'How long will you be here?'} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-transit-help aria-expanded="false" aria-label="${es?'Información sobre tránsito':'Transit information'}">ⓘ ${es?'Opción de tránsito':'Transit option'}</button><span class="gj-help-bubble" data-transit-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-transit-help-close aria-label="${es?'Cerrar':'Close'}">×</button><span>${es?'Selecciona «Sólo estaré de tránsito» cuando pases por una ciudad sin dedicarle días a visitas turísticas.':'Select «Transit only» when passing through a city without sightseeing days.'}</span></span></span><select data-stay-days>${activeStay===0&&!st.firstDaysSelected?`<option value="" selected>${es?'Selecciona una opción':'Select an option'}</option>`:''}${_tripStoryDaysOptions_(activeStay===0&&!st.firstDaysSelected?0:st.days,st.transitOnly)}</select></label>${activeStay===0&&st.firstDaysSelected&&!st.transitOnly?`<label>${es?`Hora de inicio de recorridos en ${_tripStoryEsc_(st.place||'primer destino')}`:`Time to start exploring ${_tripStoryEsc_(st.place||'first destination')}`} <span class="gj-inline-help"><button type="button" class="gj-help-link gj-help-link--inline" data-first-ready-help aria-expanded="false">ⓘ ${es?'Ver instrucciones':'View instructions'}</button><span class="gj-help-bubble" data-first-ready-help-bubble hidden><button type="button" class="gj-help-bubble__close" data-first-ready-help-close aria-label="${es?'Cerrar':'Close'}">×</button><b>${es?'¿Qué hora debes indicar?':'Which time should you enter?'}</b><span>${es?`Indica la hora a la que ya estarás listo para comenzar a conocer ${_tripStoryEsc_(st.place||'el primer destino')}, después de llegar, trasladarte y dejar tu equipaje si fuera necesario.`:`Enter the time when you will actually be ready to start exploring ${_tripStoryEsc_(st.place||'the first destination')}, after arriving, transferring and leaving your luggage if needed.`}</span></span></span><select data-stay-ready required>${_tripStoryRequiredTimeOptions_(st.firstDayReadyTime)}</select></label>`:''}</div>`,nextButton(es?'Continuar con mi recorrido':'Continue my route'));
+      const preservedFirstReadyTime=st.firstDayReadyTime;
       bindLocation(active.querySelector('[data-stay-country]'),x=>{const changed=st.country!==x.label||Boolean(x.code&&st.countryCode!==x.code);st.country=x.label;if(x.code)st.countryCode=x.code;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});if(activeStay===0)st.firstDayReadyTime='';}persist();},'country');bindLocation(active.querySelector('[data-stay-place]'),x=>{const changed=st.place!==x.label;st.place=x.label;if(changed){_tripStoryInvalidateStayDerived_(st);if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{identityChanged:true});if(activeStay===0)st.firstDayReadyTime='';}persist();},'city',()=>st.countryCode);active.querySelector('[data-stay-start]').onchange=e=>{const changed=st.startDate!==e.target.value;const priorStart=st.startDate;st.startDate=e.target.value;if(changed){if(!st.arrivalDate||st.arrivalDate===priorStart)st.arrivalDate=st.startDate;if(activeStay>0)_tripStoryResetInboundMovement_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);_tripStoryInvalidateStayDerived_(st);_tripStorySyncBoundaryAfterStayEdit_(story,activeStay,{dateChanged:true});if(activeStay===0)st.firstDayReadyTime='';}else st.arrivalDate=st.arrivalDate||st.startDate;_tripStoryEnsureStay_(st);persist();renderStory();};const readyInput=active.querySelector('[data-stay-ready]');if(readyInput)readyInput.onchange=e=>{st.firstDayReadyTime=e.target.value;persist();};const firstReadyHelp=active.querySelector('[data-first-ready-help]'),firstReadyBubble=active.querySelector('[data-first-ready-help-bubble]');if(firstReadyHelp&&firstReadyBubble){const closeFirstReadyHelp=()=>{firstReadyBubble.hidden=true;firstReadyHelp.setAttribute('aria-expanded','false');};firstReadyHelp.onclick=e=>{e.preventDefault();e.stopPropagation();const willOpen=firstReadyBubble.hidden;active.querySelectorAll('.gj-help-bubble').forEach(x=>x.hidden=true);firstReadyBubble.hidden=!willOpen;firstReadyHelp.setAttribute('aria-expanded',willOpen?'true':'false');if(willOpen)setTimeout(()=>document.addEventListener('click',closeFirstReadyHelp,{once:true}),0);};active.querySelector('[data-first-ready-help-close]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeFirstReadyHelp();});firstReadyBubble.addEventListener('click',e=>e.stopPropagation());}const transitHelp=active.querySelector('[data-transit-help]'),transitBubble=active.querySelector('[data-transit-help-bubble]');if(transitHelp&&transitBubble){const close=()=>{transitBubble.hidden=true;transitHelp.setAttribute('aria-expanded','false');};transitHelp.onclick=e=>{e.preventDefault();e.stopPropagation();const show=transitBubble.hidden;active.querySelectorAll('.gj-help-bubble').forEach(x=>x.hidden=true);transitBubble.hidden=!show;transitHelp.setAttribute('aria-expanded',show?'true':'false');if(show)setTimeout(()=>document.addEventListener('click',close,{once:true}),0);};active.querySelector('[data-transit-help-close]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();close();});transitBubble.addEventListener('click',e=>e.stopPropagation());}active.querySelector('[data-stay-days]').onchange=e=>{const transit=e.target.value==='transit';if(activeStay===0)st.firstDaysSelected=true;const nextDays=transit?1:Number(e.target.value);const changed=Boolean(st.transitOnly)!==transit||Number(st.days)!==nextDays;st.transitOnly=transit;st.days=nextDays;if(transit){st.dayTrips=[];if(activeStay===0)st.firstDayReadyTime='';}_tripStoryEnsureStay_(st);if(changed){_tripStoryInvalidateStayDerived_(st);if(story.stays[activeStay+1])_tripStoryResetInboundMovement_(story.stays[activeStay+1]);}persist();render();};active.querySelector('[data-gj-next]').onclick=()=>{
+        const exactCountry=!st.countryCode?_tripStoryCountryMatchLabel_(st.country):null;
+        if(exactCountry){st.country=exactCountry.label;st.countryCode=exactCountry.code;persist();}
+        if(activeStay===0&&preservedFirstReadyTime&&!st.firstDayReadyTime){st.firstDayReadyTime=preservedFirstReadyTime;persist();}
         if(!st.place||!st.startDate)return;
         if(activeStay===0&&!st.firstDaysSelected){alert(es?'Selecciona cuántos días estarás aquí o si sólo estarás de tránsito.':'Select the number of days or transit only.');active.querySelector('[data-stay-days]')?.focus();return;}
         if(activeStay===0&&!st.transitOnly&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(st.firstDayReadyTime||'')){alert(es?'Indica la hora en que estarás disponible para comenzar el itinerario.':'Enter the time when you will be ready to start your itinerary.');active.querySelector('[data-stay-ready]')?.classList.add('is-invalid');active.querySelector('[data-stay-ready]')?.focus();return;}
