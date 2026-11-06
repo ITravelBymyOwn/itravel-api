@@ -1,6 +1,14 @@
-import { registerPartnerClick, resolveCityOffers, resolveTripOffers, resolveOmioWorkspaceRoutes, lookupOmioFeedRoutes } from './_lib/partner-engine.js';
+import { registerPartnerClick, resolveCityOffers, resolveTripOffers, resolveOmioWorkspaceRoutes, lookupOmioFeedRoutes, resolvePublicResourceLink } from './_lib/partner-engine.js';
 function send(res,status,payload){res.status(status).json(payload)}
 export default async function handler(req,res){
+  if(req.method==='GET'&&req.query?.resource){
+    try{
+      const result=await resolvePublicResourceLink(req.query.resource,req.query.lang);
+      if(!result)return send(res,404,{ok:false,code:'RESOURCE_LINK_UNAVAILABLE'});
+      res.setHeader('Cache-Control','private, no-store');
+      return res.redirect(302,result.url);
+    }catch(error){console.error('ITBMO public resource link error:',error);return send(res,503,{ok:false,code:'RESOURCE_LINK_FAILED'});}
+  }
   if(req.method!=='POST') return send(res,405,{ok:false,code:'METHOD_NOT_ALLOWED'});
   try{
     const b=req.body||{},action=String(b.action||'');

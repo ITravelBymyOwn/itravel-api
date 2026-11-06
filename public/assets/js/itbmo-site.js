@@ -49,24 +49,24 @@
     plannerWarmupRequests.set(href,request);
     return request;
   }
+  let plannerWarmPromise=null;
   function warmStandalonePlanner(){
+    if(plannerWarmPromise)return plannerWarmPromise;
     const pageLang=document.documentElement.lang?.toLowerCase().startsWith('es')?'es':'en';
     const assets=[
       `./planner.html?lang=${pageLang}`,
-      './planner.css?v=295.4.4',
+      './planner.css?v=296',
       './assets/css/itbmo-platform.css?v=295.1',
       './assets/js/itbmo-foundation.js?v=1.0',
       './travel-model-v2.js?v=285',
-      './planner.js?v=295.4.5',
+      './planner.js?v=296',
       './assets/js/itbmo-platform.js?v=295.2'
     ];
-    return Promise.allSettled(assets.map(warmStaticAsset));
+    plannerWarmPromise=Promise.allSettled(assets.map(warmStaticAsset));
+    return plannerWarmPromise;
   }
-  const schedulePlannerWarmup=()=>{
-    window.setTimeout(warmStandalonePlanner,80);
-  };
-  if(document.readyState==='complete')schedulePlannerWarmup();
-  else window.addEventListener('load',schedulePlannerWarmup,{once:true});
+  // V296: warm only on user intent. Downloading the complete Planner 80 ms
+  // after every marketing/legal page load caused duplicate stale transfers.
   document.querySelectorAll('[data-planner-open]').forEach(link=>{
     link.addEventListener('pointerenter',warmStandalonePlanner,{once:true,passive:true});
     link.addEventListener('focus',warmStandalonePlanner,{once:true});

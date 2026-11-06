@@ -1,7 +1,10 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/platform.js", "use": "@vercel/node" },
+    {
+      "src": "api/platform.js",
+      "use": "@vercel/node"
+    },
     {
       "src": "api/chat.js",
       "use": "@vercel/node"
@@ -28,7 +31,12 @@
     },
     {
       "src": "api/destination-suggestions.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "api/data/destinations.v2.json.gz"
+        ]
+      }
     },
     {
       "src": "api/context.js",
@@ -58,10 +66,22 @@
     }
   ],
   "routes": [
-    { "src": "/api/platform-config", "dest": "/api/platform.js?endpoint=platform-config" },
-    { "src": "/api/feedback", "dest": "/api/platform.js?endpoint=feedback" },
-    { "src": "/api/travel-intelligence", "dest": "/api/platform.js?endpoint=travel-intelligence" },
-    { "src": "/api/itinerary-changes", "dest": "/api/platform.js?endpoint=itinerary-changes" },
+    {
+      "src": "/api/platform-config",
+      "dest": "/api/platform.js?endpoint=platform-config"
+    },
+    {
+      "src": "/api/feedback",
+      "dest": "/api/platform.js?endpoint=feedback"
+    },
+    {
+      "src": "/api/travel-intelligence",
+      "dest": "/api/platform.js?endpoint=travel-intelligence"
+    },
+    {
+      "src": "/api/itinerary-changes",
+      "dest": "/api/platform.js?endpoint=itinerary-changes"
+    },
     {
       "src": "/api/chat",
       "dest": "/api/chat.js"
@@ -70,7 +90,10 @@
       "src": "/api/info-public",
       "dest": "/api/info-public.js"
     },
-    { "src": "/api/supabase-test", "dest": "/api/platform.js?endpoint=supabase-test" },
+    {
+      "src": "/api/supabase-test",
+      "dest": "/api/platform.js?endpoint=supabase-test"
+    },
     {
       "src": "/api/user",
       "dest": "/api/user.js"
@@ -110,6 +133,118 @@
     {
       "src": "/api/email",
       "dest": "/api/user.js"
+    },
+    {
+      "src": "^/$",
+      "dest": "/public/preview-home.html"
+    },
+    {
+      "src": "^/english/?$",
+      "dest": "/public/preview-home-en.html"
+    },
+    {
+      "src": "^/como-funciona/?$",
+      "dest": "/public/como-funciona.html"
+    },
+    {
+      "src": "^/ejemplo-itinerario/?$",
+      "dest": "/public/ejemplo-itinerario.html"
+    },
+    {
+      "src": "^/precios/?$",
+      "dest": "/public/precios.html"
+    },
+    {
+      "src": "^/acerca-de-itbmo/?$",
+      "dest": "/public/acerca-de-itbmo.html"
+    },
+    {
+      "src": "^/how-it-works/?$",
+      "dest": "/public/how-it-works.html"
+    },
+    {
+      "src": "^/sample-itinerary/?$",
+      "dest": "/public/sample-itinerary.html"
+    },
+    {
+      "src": "^/pricing/?$",
+      "dest": "/public/pricing.html"
+    },
+    {
+      "src": "^/about-itbmo/?$",
+      "dest": "/public/about-itbmo.html"
+    },
+    {
+      "src": "^/destinos/?$",
+      "dest": "/public/destinos.html"
+    },
+    {
+      "src": "^/destinations/?$",
+      "dest": "/public/destinations.html"
+    },
+    {
+      "src": "^/recursos/?$",
+      "dest": "/public/recursos.html"
+    },
+    {
+      "src": "^/resources/?$",
+      "dest": "/public/resources.html"
+    },
+    {
+      "src": "^/colabora/?$",
+      "dest": "/public/colabora.html"
+    },
+    {
+      "src": "^/partner-with-itbmo/?$",
+      "dest": "/public/partner-with-itbmo.html"
+    },
+    {
+      "src": "^/soporte-contacto/?$",
+      "dest": "/public/support-contact.html"
+    },
+    {
+      "src": "^/support-contact/?$",
+      "dest": "/public/support-contact-en.html"
+    },
+    {
+      "src": "^/privacidad-cookies/?$",
+      "dest": "/public/privacy-cookies.html"
+    },
+    {
+      "src": "^/privacy-cookies/?$",
+      "dest": "/public/privacy-cookies-en.html"
+    },
+    {
+      "src": "^/terminos/?$",
+      "dest": "/public/terms.html"
+    },
+    {
+      "src": "^/terms/?$",
+      "dest": "/public/terms-en.html"
+    },
+    {
+      "src": "^/publicidad-afiliados/?$",
+      "dest": "/public/ads-affiliates.html"
+    },
+    {
+      "src": "^/advertising-affiliates/?$",
+      "dest": "/public/ads-affiliates-en.html"
+    },
+    {
+      "src": "^/destinos/(paris|roma|santorini|islandia|estambul|rio-de-janeiro|bariloche|egipto|tromso|patagonia)/?$",
+      "dest": "/public/destino-$1.html"
+    },
+    {
+      "src": "^/destinations/(paris|rome|santorini|iceland|istanbul|rio-de-janeiro|bariloche|egypt|tromso|patagonia)/?$",
+      "dest": "/public/destination-$1.html"
+    },
+    {
+      "src": "^/sitemap-v297.xml$",
+      "dest": "/public/sitemap-v297.xml"
+    },
+    {
+      "src": "^/sitemap.xml$",
+      "dest": "/public/sitemap-v297.xml"
     },
     {
       "src": "/(.*)",

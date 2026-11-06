@@ -355,6 +355,27 @@ export async function getOffer(slug, placement = '') {
   return offer ? { ...offer, partner: { id: partner.id, slug: partner.slug, name: partner.name } } : null;
 }
 
+export async function resolvePublicResourceLink(slug='',language='es'){
+  const safeSlug=clean(slug,40).toLowerCase();
+  const lang=normalizeLanguage(language)==='es'?'es':'en';
+  const campaign=`itbmo-resources-${lang}`;
+  let target='';
+  if(safeSlug==='viator')target=appendParams(lang==='es'?'https://www.viator.com/es-ES/':'https://www.viator.com/',{pid:VIATOR_PID,mcid:VIATOR_MCID,medium:'link',campaign});
+  else if(safeSlug==='getyourguide')target=appendParams(lang==='es'?'https://www.getyourguide.es/s/':'https://www.getyourguide.com/s/',{q:lang==='es'?'tours y actividades':'tours and activities',partner_id:GYG_PARTNER_ID,utm_medium:'online_publisher',cmp:campaign});
+  else if(safeSlug==='omio')target=appendParams('https://omio.sjv.io/c/7727455/861892/7385',{u:lang==='es'?'https://www.omio.es/':'https://www.omio.com/'});
+  else if(safeSlug==='airalo')target='https://airalo.pxf.io/c/7727455/2071037/15608';
+  else if(safeSlug==='riseandshield')target=appendParams('https://riseandshield.com/',{ref:RISE_SHIELD_REF,tm_source:'itbmo'});
+  else if(safeSlug==='discovercars')target=appendParams('https://www.discovercars.com/',{a_aid:DISCOVERCARS_AID,data1:'itbmo',data2:'resources'});
+  else if(safeSlug==='12go')target=appendParams(lang==='es'?'https://12go.asia/es':'https://12go.asia/en',{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
+  else if(safeSlug==='bookaway')target=appendParams('https://www.bookaway.com/',{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+  else if(safeSlug==='holafly'){
+    const offer=(await getOffer('holafly','trip_connectivity'))||(await getOffer('holafly'));
+    target=clean(offer?.target_url,1400);
+  }
+  if(!target||!allowedPartnerUrl(safeSlug,target)||!hasRequiredAttribution(safeSlug,target))return null;
+  return {slug:safeSlug,url:target};
+}
+
 async function getContextTemplate(slug) {
   return getOffer(slug, 'city_contextual');
 }
