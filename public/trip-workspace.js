@@ -95,8 +95,8 @@ const badge=$('#tw-prepare-badge');if(badge)badge.textContent=t.prepareBadge;
 
 $('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
 function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=journeyTripDays(),tripDaysLabel=total===1?(lang==='es'?'día de viaje':'travel day'):(lang==='es'?'días de viaje':'travel days');$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${tripDaysLabel}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${journeyTransitOnly(c)?(lang==='es'?'Sólo tránsito':'Transit only'):`${journeyVisits(c).length?journeyTouristDays(c):days(c).length} ${esc(t.ds)} ${esc(t.organized)}`}</p><span class="tw-city-go">${journeyTransitOnly(c)?(lang==='es'?'Ver conexiones':'View connections'):esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
-function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='prepare';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
-function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw-city-dates').textContent=range(city);const ib=$('#tw-mode-itinerary'),pb=$('#tw-mode-prepare');ib.classList.toggle('active',mode==='itinerary');pb.classList.toggle('active',mode==='prepare');ib.setAttribute('aria-selected',mode==='itinerary');pb.setAttribute('aria-selected',mode==='prepare');renderDays();mode==='itinerary'?renderItinerary():renderPrepare();window.dispatchEvent(new Event('tw:prepare-mode-changed'))}
+function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):(ds[0]||null);mode='prepare';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
+function renderCity(){if(!city)return;const hasDays=days(city).length>0;if(!hasDays&&mode==='itinerary')mode='prepare';$('#tw-city-name').textContent=city;$('#tw-city-dates').textContent=range(city);const ib=$('#tw-mode-itinerary'),pb=$('#tw-mode-prepare');ib.disabled=!hasDays;ib.setAttribute('aria-disabled',hasDays?'false':'true');ib.classList.toggle('active',mode==='itinerary');pb.classList.toggle('active',mode==='prepare');ib.setAttribute('aria-selected',mode==='itinerary');pb.setAttribute('aria-selected',mode==='prepare');renderDays();mode==='itinerary'?renderItinerary():renderPrepare();window.dispatchEvent(new Event('tw:prepare-mode-changed'))}
 function keepActiveDayFullyVisible(nav,active,index){
   if(!nav||!active)return;
   requestAnimationFrame(()=>{
@@ -2052,9 +2052,8 @@ async function revalidateWorkspaceAccess({showErrors=false}={}){
   const result=await fetchTripWorkspaceResult(tripId);
   if(result.ok&&result.workspace){
     const snapshot=readSnapshot();
-    data=(snapshot?.trip_id===tripId && snapshot?.itineraries && Object.keys(snapshot.itineraries).length)
-      ? snapshot
-      : result.workspace;
+    data=chooseRicherWorkspace(snapshot,result.workspace,tripId);
+    cacheWorkspaceSnapshot(data);
     hideWorkspaceAuthGate();
     return true;
   }
@@ -2134,6 +2133,96 @@ function readSnapshot(){
   }catch(_){ return null; }
 }
 
+function recoveryDateLabel(baseDate,dayNumber){
+  const base=parseDate(baseDate),day=Number(dayNumber);
+  if(!base||!Number.isFinite(day)||day<1)return'';
+  const date=addDays(base,day-1),pad=value=>String(value).padStart(2,'0');
+  return `${pad(date.getDate())}/${pad(date.getMonth()+1)}/${date.getFullYear()}`;
+}
+
+function checkpointPhysicalWorkspace(checkpoint,journeyStory){
+  const sourceItineraries=(checkpoint?.itineraries&&typeof checkpoint.itineraries==='object')
+    ? checkpoint.itineraries:{};
+  const storyStays=Array.isArray(journeyStory?.stays)?journeyStory.stays:[];
+  const countryByPlace=new Map();
+  storyStays.forEach(stay=>{
+    const place=String(stay?.place||'').trim(),country=String(stay?.country||'').trim();
+    if(place)countryByPlace.set(normalizeWorkspaceEntity(place),country);
+    (Array.isArray(stay?.dayTrips)?stay.dayTrips:[]).forEach(dayTrip=>{
+      const dayPlace=String(dayTrip?.place||'').trim();
+      if(dayPlace)countryByPlace.set(normalizeWorkspaceEntity(dayPlace),String(dayTrip?.country||country).trim());
+    });
+  });
+
+  const views=new Map();
+  const ensure=(place,country='')=>{
+    const display=String(place||'').trim(),key=normalizeWorkspaceEntity(display);
+    if(!display||!key)return null;
+    if(!views.has(key))views.set(key,{city:display,country:country||countryByPlace.get(key)||'',dates:new Map(),source:''});
+    const view=views.get(key);
+    if(!view.country)view.country=country||countryByPlace.get(key)||'';
+    return view;
+  };
+
+  Object.entries(sourceItineraries).forEach(([sourceCity,itinerary])=>{
+    const baseDate=itinerary?.baseDate||checkpoint?.city_meta?.[sourceCity]?.baseDate||'';
+    Object.keys(itinerary?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNumber=>{
+      const date=recoveryDateLabel(baseDate,dayNumber);
+      (Array.isArray(itinerary?.byDay?.[dayNumber])?itinerary.byDay[dayNumber]:[]).forEach(row=>{
+        const context=row?.commerce_context||{};
+        const sealed=String(row?.physical_location||context?.physical_destination||'').trim();
+        const looksTransfer=String(context?.semantic_type||'').toUpperCase()==='TRANSPORT' ||
+          String(row?.kind||'').toLowerCase()==='transport' || /^(traslado|transfer)\b/i.test(String(row?.activity||''));
+        // This mirrors the Planner's physical Workspace rule: sealed activity
+        // rows belong to their physical destination; an intercity transfer
+        // belongs to its origin so the route continues naturally from there.
+        const place=sealed || (looksTransfer?String(row?.from||'').trim():'');
+        const view=ensure(place,countryByPlace.get(normalizeWorkspaceEntity(place))||'');
+        if(!view||!date)return;
+        if(!view.dates.has(date))view.dates.set(date,[]);
+        view.dates.get(date).push({...row,physical_location:place,
+          commerce_context:{...context,physical_destination:place}});
+        if(!view.source)view.source=sourceCity;
+      });
+    });
+  });
+
+  const destinations=[],itineraries={},sourceMap={};
+  [...views.values()].forEach(view=>{
+    const dates=[...view.dates.keys()].sort((a,b)=>(parseDate(a)?.getTime?.()||0)-(parseDate(b)?.getTime?.()||0));
+    if(!dates.length)return;
+    const byDay={};dates.forEach((date,index)=>{byDay[index+1]=view.dates.get(date)||[]});
+    destinations.push({city:view.city,country:view.country||'',days:dates.length,baseDate:dates[0]});
+    itineraries[view.city]={baseDate:dates[0],currentDay:1,byDay};
+    sourceMap[view.city]=view.source||view.city;
+  });
+  return {destinations,itineraries,source_map:sourceMap};
+}
+
+function workspaceCompleteness(workspace){
+  if(!workspace||typeof workspace!=='object')return -1;
+  const names=new Set();
+  (workspace.destinations||[]).forEach(item=>{const key=normalizeWorkspaceEntity(item?.city);if(key)names.add(key)});
+  Object.keys(workspace.itineraries||{}).forEach(name=>{const key=normalizeWorkspaceEntity(name);if(key)names.add(key)});
+  let daysCount=0,rowCount=0;
+  Object.values(workspace.itineraries||{}).forEach(itinerary=>{
+    Object.values(itinerary?.byDay||{}).forEach(rows=>{daysCount+=1;rowCount+=Array.isArray(rows)?rows.length:0});
+  });
+  return names.size*1000000+daysCount*10000+rowCount;
+}
+
+function chooseRicherWorkspace(cached,recovered,tripId=''){
+  const validCached=cached&&(!tripId||String(cached.trip_id||'')===String(tripId));
+  if(!validCached)return recovered||null;
+  if(!recovered)return cached;
+  return workspaceCompleteness(cached)>=workspaceCompleteness(recovered)?cached:recovered;
+}
+
+function cacheWorkspaceSnapshot(workspace){
+  if(!workspace)return;
+  try{localStorage.setItem(KEY,JSON.stringify(workspace))}catch(_){}
+}
+
 function tripToWorkspace(trip){
   if(!trip?.id || trip.status!=='generated') return null;
   const checkpoint=(trip.itinerary_data && typeof trip.itinerary_data==='object')
@@ -2160,6 +2249,25 @@ function tripToWorkspace(trip){
     : {};
   const tripLanguage=normalizeTripLanguage(plannerState.itineraryLang||plannerState.itinerary_lang||'');
 
+  const model=plannerState.travelModelV2||plannerState.travel_model_v2||{};
+  const rawStory=checkpoint.journey_story||model.trip_story||model.tripStory;
+  const journeyStory=Array.isArray(rawStory?.stays)&&rawStory.stays.length
+    ? {stays:rawStory.stays,start:rawStory.start,returnTrip:rawStory.returnTrip}:null;
+  const recovered=checkpointPhysicalWorkspace(checkpoint,journeyStory);
+  const existingCityCount=new Set([
+    ...destinations.map(item=>normalizeWorkspaceEntity(item.city)),
+    ...Object.keys(itineraries).map(normalizeWorkspaceEntity)
+  ].filter(Boolean)).size;
+  const useRecovered=recovered.destinations.length>existingCityCount;
+  const presentationDestinations=useRecovered?recovered.destinations:destinations;
+  const presentationItineraries=useRecovered?recovered.itineraries:itineraries;
+  const sourceDestinations=Array.isArray(journeyStory?.stays)
+    ? journeyStory.stays.filter(stay=>!stay?.transitOnly).map(stay=>({
+        city:String(stay?.place||'').trim(),country:String(stay?.country||'').trim(),
+        days:Math.max(1,Number(stay?.days||1)),baseDate:stay?.startDate||null
+      })).filter(item=>item.city)
+    : destinations;
+
   return {
     schema_version:3,
     source:'trip_api',
@@ -2167,15 +2275,14 @@ function tripToWorkspace(trip){
     lang:trip.language==='en'?'en':'es',
     trip_language:tripLanguage,
     trip_id:trip.id,
-    destinations,
+    destinations:presentationDestinations,
+    source_destinations:sourceDestinations,
+    workspace_source_map:useRecovered?recovered.source_map:{},
     city_meta:cityMeta,
-    itineraries,
+    itineraries:presentationItineraries,
     // V278: retain the paid journey boundaries on server-based workspace recovery.
     journey_story:(()=>{
-      const model=plannerState.travelModelV2||plannerState.travel_model_v2||{};
-      const story=checkpoint.journey_story||model.trip_story||model.tripStory;
-      return Array.isArray(story?.stays)&&story.stays.length
-        ? {stays:story.stays,start:story.start,returnTrip:story.returnTrip}:null;
+      return journeyStory;
     })()
   };
 }
@@ -2291,12 +2398,13 @@ async function boot(){
     // is already split by the travel compiler into every physical stay
     // (main city + route destinations). The API checkpoint keeps generation
     // units by main destination and must not collapse this richer view.
-    if(cached?.trip_id===requestedTripId && cached?.itineraries && Object.keys(cached.itineraries).length){
-      data=cached;
-      fetchTripWorkspace(requestedTripId).catch(err=>console.warn('[TRIP WORKSPACE REVALIDATE]',err));
-    }else{
-      try{ data=await fetchTripWorkspace(requestedTripId); }
-      catch(err){ console.warn('[TRIP WORKSPACE FETCH]',err); }
+    try{
+      const recovered=await fetchTripWorkspace(requestedTripId);
+      data=chooseRicherWorkspace(cached,recovered,requestedTripId);
+      cacheWorkspaceSnapshot(data);
+    }catch(err){
+      console.warn('[TRIP WORKSPACE FETCH]',err);
+      data=(cached?.trip_id===requestedTripId)?cached:null;
     }
     if(!data) showWorkspaceAuthGate();
   }else if(cached?.trip_id){
@@ -2313,7 +2421,7 @@ async function boot(){
   }
 
   $('#tw-all-cities').onclick=overview;const essentialsCta=$('#tw-overview-essentials-cta');if(essentialsCta)essentialsCta.onclick=()=>{const target=$('#tw-trip-wide');if(target)target.scrollIntoView({behavior:'smooth',block:'start'});window.ITBMOFoundation?.track('trip_essentials_cta_clicked',{language:lang,trip_id:data?.trip_id||''});};
-  $('#tw-mode-itinerary').onclick=()=>{mode='itinerary';renderCity()};
+  $('#tw-mode-itinerary').onclick=()=>{if(!city||!days(city).length)return;mode='itinerary';renderCity()};
   $('#tw-mode-prepare').onclick=()=>{mode='prepare';renderCity()};
   window.addEventListener('tw:open-city',event=>{
     const requested=String(event?.detail?.city||'').trim();
@@ -2336,3 +2444,4 @@ async function boot(){
 
 boot();
 })();
+
