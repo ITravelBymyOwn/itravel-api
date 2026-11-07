@@ -19,17 +19,6 @@
   ensureLink('apple-touch-icon', '/assets/img/apple-touch-icon.png', '180x180');
 
   window.dataLayer = window.dataLayer || [];
-  window.gtag = window.gtag || function(){ window.dataLayer.push(arguments); };
-  window.gtag('js', new Date());
-  window.gtag('config', 'G-F3R0FG5W97');
-
-  if (!document.querySelector('script[src*="googletagmanager.com/gtag/js?id=G-F3R0FG5W97"]')) {
-    const ga = document.createElement('script');
-    ga.async = true;
-    ga.src = 'https://www.googletagmanager.com/gtag/js?id=G-F3R0FG5W97';
-    head.appendChild(ga);
-  }
-
   window.dataLayer.push({'gtm.start': new Date().getTime(), event: 'gtm.js'});
   if (!document.querySelector('script[src*="googletagmanager.com/gtm.js?id=GTM-KTDFNJSS"]')) {
     const gtm = document.createElement('script');
