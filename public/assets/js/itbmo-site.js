@@ -1,3 +1,44 @@
+/* ITBMO analytics + favicon bootstrap: mirrors the former Webflow site settings. */
+(() => {
+  'use strict';
+  if (window.__ITBMO_ANALYTICS_BOOTSTRAPPED__) return;
+  window.__ITBMO_ANALYTICS_BOOTSTRAPPED__ = true;
+
+  const head = document.head || document.getElementsByTagName('head')[0];
+  const ensureLink = (rel, href, sizes) => {
+    if ([...document.querySelectorAll('link[rel="' + rel + '"]')].some((link) => link.getAttribute('href') === href)) return;
+    const link = document.createElement('link');
+    link.rel = rel;
+    link.href = href;
+    if (sizes) link.sizes = sizes;
+    link.type = 'image/png';
+    head.appendChild(link);
+  };
+  ensureLink('icon', '/assets/img/favicon-32.png', '32x32');
+  ensureLink('icon', '/assets/img/favicon-128.png', '128x128');
+  ensureLink('apple-touch-icon', '/assets/img/apple-touch-icon.png', '180x180');
+
+  window.dataLayer = window.dataLayer || [];
+  window.gtag = window.gtag || function(){ window.dataLayer.push(arguments); };
+  window.gtag('js', new Date());
+  window.gtag('config', 'G-F3R0FG5W97');
+
+  if (!document.querySelector('script[src*="googletagmanager.com/gtag/js?id=G-F3R0FG5W97"]')) {
+    const ga = document.createElement('script');
+    ga.async = true;
+    ga.src = 'https://www.googletagmanager.com/gtag/js?id=G-F3R0FG5W97';
+    head.appendChild(ga);
+  }
+
+  window.dataLayer.push({'gtm.start': new Date().getTime(), event: 'gtm.js'});
+  if (!document.querySelector('script[src*="googletagmanager.com/gtm.js?id=GTM-KTDFNJSS"]')) {
+    const gtm = document.createElement('script');
+    gtm.async = true;
+    gtm.src = 'https://www.googletagmanager.com/gtm.js?id=GTM-KTDFNJSS';
+    head.appendChild(gtm);
+  }
+})();
+
 /* =========================================================
    ITBMO · HOME V4.5 JS
    - Stable planner auto-height (no feedback loop / no vibration)
