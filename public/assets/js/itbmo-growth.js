@@ -250,6 +250,9 @@
   if(carousel){
     const slides=[...carousel.querySelectorAll('[data-slide]')];
     const dots=[...carousel.querySelectorAll('[data-carousel-dot]')];
+    const media=carousel.querySelector('.hc-hero__media');
+    const controls=carousel.querySelector('.hc-carousel-controls');
+    if(media&&controls)media.appendChild(controls);
     let current=0,timer=null,showToken=0;
     slides.forEach(slide=>{
       const caption=slide.querySelector('figcaption');
@@ -261,6 +264,22 @@
       const credit=document.createElement('span');credit.textContent=parts.slice(1).join(' · ');
       caption.append(place,credit);
     });
+    let captionFrame=0;
+    const keepCaptionInsidePhoto=()=>{
+      captionFrame=0;
+      const caption=slides[current]?.querySelector('figcaption');
+      if(!media||!caption)return;
+      const photo=media.getBoundingClientRect();
+      const topGap=16;
+      const bottomGap=16;
+      const desired=Math.max(0,-photo.top+topGap);
+      const limit=Math.max(0,photo.height-caption.offsetHeight-topGap-bottomGap);
+      caption.style.setProperty('--caption-travel',`${Math.min(desired,limit)}px`);
+    };
+    const scheduleCaption=()=>{
+      if(captionFrame)return;
+      captionFrame=requestAnimationFrame(keepCaptionInsidePhoto);
+    };
     const load=index=>{
       const slide=slides[(index+slides.length)%slides.length],image=slide?.querySelector('img');
       if(!image)return Promise.resolve();
@@ -274,6 +293,7 @@
       current=next;
       slides.forEach((slide,i)=>slide.classList.toggle('is-active',i===current));
       dots.forEach((dot,i)=>{dot.classList.toggle('is-active',i===current);dot.setAttribute('aria-current',i===current?'true':'false');});
+      requestAnimationFrame(keepCaptionInsidePhoto);
       void load(current+1);
     };
     const stop=()=>{if(timer)clearInterval(timer);timer=null;};
@@ -281,7 +301,7 @@
     carousel.querySelector('[data-carousel-prev]')?.addEventListener('click',()=>{show(current-1);start();});
     carousel.querySelector('[data-carousel-next]')?.addEventListener('click',()=>{show(current+1);start();});
     dots.forEach(dot=>dot.addEventListener('click',()=>{show(Number(dot.dataset.carouselDot||0));start();}));
-    carousel.addEventListener('focusin',stop);carousel.addEventListener('focusout',start);document.addEventListener('visibilitychange',()=>document.hidden?stop():start());void load(1);show(0);start();
+    carousel.addEventListener('focusin',stop);carousel.addEventListener('focusout',start);document.addEventListener('visibilitychange',()=>document.hidden?stop():start());window.addEventListener('scroll',scheduleCaption,{passive:true});window.addEventListener('resize',scheduleCaption,{passive:true});void load(1);show(0);start();
   }
 
   /* Faithful product walkthrough: one clear workspace state at a time. */

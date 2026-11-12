@@ -6,7 +6,8 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/assets/img/favicon-32.png" type="image/png" sizes="32x32" />
-  <link rel="stylesheet" href="./planner.css?v=297.3" />
+  <link rel="stylesheet" href="./planner.css?v=298" />
+  <link rel="stylesheet" href="./planner-v298.css?v=298" />
   <link rel="stylesheet" href="./assets/css/itbmo-platform.css?v=295.1" />
 
   <!-- Tipografía -->
@@ -16,7 +17,7 @@
   <script>
     WebFont.load({ google: { families: ["Inter:400,500,600,700,800,900"] } });
   </script>
-  <script src="./assets/js/itbmo-foundation.js?v=1.0"></script>
+  <script src="./assets/js/itbmo-foundation.js?v=1.1"></script>
 </head>
 <body>
   <!-- TOPBAR -->
@@ -358,7 +359,12 @@
             <p id="account-confirmation-body">We sent a confirmation link. Delivery may take a few minutes. Check Spam or Promotions too, and do not create the account again while it arrives.</p>
             <p id="account-confirmation-email" class="account-confirmation-card__email"></p>
             <p id="account-confirmation-next" class="account-confirmation-card__next">Once you confirm your email, return to ITBMO and sign in.</p>
-            <button class="btn primary" id="account-confirmation-login" type="button">I've confirmed my email</button>
+            <div class="account-confirmation-card__actions">
+              <button class="btn primary" id="account-confirmation-login" type="button">I've confirmed my email</button>
+              <button class="btn secondary" id="account-confirmation-resend" type="button">Resend confirmation email</button>
+              <button class="btn ghost" id="account-confirmation-change-email" type="button">I entered the wrong email</button>
+            </div>
+            <p id="account-confirmation-status" class="account-confirmation-card__status" role="status" aria-live="polite"></p>
           </div>
         </div>
 
@@ -1267,8 +1273,9 @@
 
 <!-- Core Planner. Export libraries are loaded on demand by planner.js. -->
 <script src="./travel-model-v2.js?v=285"></script>
-<script src="./planner.js?v=297.4"></script>
-<script src="./assets/js/itbmo-platform.js?v=295.2"></script>
+<script src="./planner.js?v=298"></script>
+<script src="./planner-v298.js?v=298"></script>
+<script src="./assets/js/itbmo-platform.js?v=298"></script>
  
 </body>
 </html>

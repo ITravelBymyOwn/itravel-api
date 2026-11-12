@@ -231,6 +231,14 @@
       "dest": "/public/ads-affiliates-en.html"
     },
     {
+      "src": "^/planner/?$",
+      "dest": "/public/planner.html"
+    },
+    {
+      "src": "^/trip-workspace/?$",
+      "dest": "/public/trip-workspace.html"
+    },
+    {
       "src": "^/destinos/(paris|roma|santorini|islandia|estambul|rio-de-janeiro|bariloche|egipto|tromso|patagonia)/?$",
       "dest": "/public/destino-$1.html"
     },

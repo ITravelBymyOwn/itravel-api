@@ -624,10 +624,30 @@ async function handlePasswordLogin(req, res, body) {
     });
   }
 
-  const authData = await authFetch("/token?grant_type=password", {
-    method: "POST",
-    body: JSON.stringify({ email, password })
-  });
+  let authData;
+  try {
+    authData = await authFetch("/token?grant_type=password", {
+      method: "POST",
+      body: JSON.stringify({ email, password })
+    });
+  } catch (error) {
+    const authCode = String(error?.data?.code || "").toLowerCase();
+    const authMessage = String(
+      error?.data?.msg || error?.data?.message || error?.data?.error_description || ""
+    ).toLowerCase();
+    if (authCode === "email_not_confirmed" || authMessage.includes("email not confirmed")) {
+      return res.status(403).json({
+        ok: false,
+        code: "EMAIL_NOT_CONFIRMED",
+        confirmation_required: true,
+        email
+      });
+    }
+    if (error?.status === 400 || error?.status === 401) {
+      return res.status(401).json({ ok: false, error: "Invalid email or password" });
+    }
+    throw error;
+  }
 
   const authUser = authData?.user || null;
 
@@ -712,6 +732,31 @@ async function handlePasswordLogin(req, res, body) {
     session_token: rawToken,
     session_expires_at: session?.expires_at || null
   });
+}
+
+async function handleResendConfirmation(req, res, body) {
+  const email = normalizeEmail(body.email);
+  if (!email || !validEmail(email)) {
+    return res.status(400).json({ ok: false, error: "Valid email is required" });
+  }
+
+  const redirectTo = resolveRedirectUrl(body, "/auth-confirmed.html");
+  try {
+    await authFetch(`/resend?redirect_to=${encodeURIComponent(redirectTo)}`, {
+      method: "POST",
+      body: JSON.stringify({ type: "signup", email })
+    });
+  } catch (error) {
+    // Do not reveal whether an address exists. Rate-limit responses are safe to
+    // surface so the interface can ask the traveler to wait before retrying.
+    if (error?.status === 429) {
+      return res.status(429).json({ ok: false, code: "RESEND_RATE_LIMITED" });
+    }
+    const authCode = String(error?.data?.code || "").toLowerCase();
+    if (authCode !== "email_not_confirmed" && error?.status >= 500) throw error;
+  }
+
+  return res.status(200).json({ ok: true, action: "resend_confirmation" });
 }
 
 async function handleForgotPassword(req, res, body) {
@@ -1295,6 +1340,10 @@ export default async function handler(req, res) {
 
     if (action === "sign_in") {
       return await handlePasswordLogin(req, res, body);
+    }
+
+    if (action === "resend_confirmation") {
+      return await handleResendConfirmation(req, res, body);
     }
 
     if (action === "forgot_password") {

@@ -77,12 +77,34 @@
     const script=document.createElement('script');script.src=config.support.web_chat.script_url;script.async=true;
     script.dataset.itbmoWebChat=config.support.web_chat.provider;script.onerror=()=>track('support_channel_unavailable',{channel:'web_chat'});document.head.appendChild(script);
   }
+  function metaPixel(config){
+    const id=String(config?.analytics?.meta_pixel_id||'').trim();
+    const productionHost=['itravelbymyown.com','www.itravelbymyown.com'].includes(location.hostname.toLowerCase());
+    if(!productionHost||!config?.analytics?.meta_pixel_enabled||!/^\d{5,30}$/.test(id)||window.__ITBMO_META_PIXEL__)return;
+    window.__ITBMO_META_PIXEL__=id;
+    const fbq=window.fbq=function(){fbq.callMethod?fbq.callMethod.apply(fbq,arguments):fbq.queue.push(arguments);};
+    if(!window._fbq)window._fbq=fbq;
+    fbq.push=fbq;fbq.loaded=true;fbq.version='2.0';fbq.queue=[];
+    const script=document.createElement('script');script.async=true;script.src='https://connect.facebook.net/en_US/fbevents.js';document.head.appendChild(script);
+    fbq('init',id);fbq('track','PageView');
+    const original=window.ITBMOFoundation?.track;
+    if(typeof original==='function'&&!original.__metaWrapped){
+      const standard={sign_up:'CompleteRegistration',checkout_opened:'InitiateCheckout',payment_approved:'Purchase',partner_offer_view:'ViewContent',partner_offer_click:'Lead',generation_completed:'SubmitApplication'};
+      const wrapped=function(name,properties={}){
+        const eventId=original.call(window.ITBMOFoundation,name,properties);
+        const metaEvent=standard[String(name||'')];
+        if(metaEvent){const payload={};if(properties?.currency)payload.currency=String(properties.currency);fbq('track',metaEvent,payload,{eventID:eventId||undefined});}
+        return eventId;
+      };
+      wrapped.__metaWrapped=true;window.ITBMOFoundation.track=wrapped;
+    }
+  }
   async function boot(){
     const lang=document.documentElement.lang?.toLowerCase().startsWith('en')?'en':'es';
     const config=await load()||{ok:false,flags:{},social_accounts:OFFICIAL_SOCIALS,support:{}};
     const accounts=Array.isArray(config.social_accounts)&&config.social_accounts.length?config.social_accounts:OFFICIAL_SOCIALS;
     document.querySelectorAll('[data-itbmo-social-links]').forEach(host=>host.replaceChildren(socialBlock(accounts,lang)));
-    supportActions(config,lang);webChat(config);
+    supportActions(config,lang);webChat(config);metaPixel(config);
     window.ITBMOPlatform={config,track,load,officialSocials:OFFICIAL_SOCIALS};
     document.dispatchEvent(new CustomEvent('itbmo:platform-ready',{detail:config}));
   }

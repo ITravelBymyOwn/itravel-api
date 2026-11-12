@@ -764,6 +764,13 @@ button,a {
   .tw-trip-wide__item .tw-coming{grid-column:2;justify-self:start}
 }
 
+/* V298 preview · clearer workspace actions without changing the product flow. */
+.tw-details-btn{display:inline-flex;align-items:center;min-height:34px;margin-top:8px;padding:7px 10px!important;border:1px solid rgba(89,111,189,.14)!important;border-radius:10px!important;background:#f3f4ff!important;text-decoration:none!important}
+.tw-details-btn:hover{color:#4054ab!important;border-color:rgba(89,111,189,.28)!important;background:#eceeff!important}
+.tw-all-cities{min-height:44px;padding:10px 14px;border:1px solid #cfe1e8;border-radius:999px;color:#315e74;background:#fff;box-shadow:0 8px 20px rgba(22,73,99,.06)}
+.tw-all-cities:hover{border-color:#9fd0da;box-shadow:0 11px 25px rgba(22,73,99,.1)}
+.tw-mode button:focus-visible,.tw-details-btn:focus-visible,.tw-all-cities:focus-visible,.tw-partner-offer button:focus-visible,.tw-partner-option button:focus-visible{outline:3px solid #ffc35d!important;outline-offset:3px!important}
+
 /* Context Intelligence V1.1 · Quality UX */
 .tw-context-loading,.tw-context-error {
   min-height:180px;
@@ -1594,3 +1601,10 @@ body{
 
 /* V230: native Omio feed link matches existing affiliate CTA appearance. */
 .tw-partner-option a.tw-partner-direct-link{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;white-space:nowrap}
+
+/* V298 release-order guard: keep the two primary workspace modes unmistakable. */
+.tw-mode #tw-mode-itinerary{min-height:50px!important;padding:12px 18px!important;border:1px solid rgba(8,126,209,.19)!important;color:#075f82!important;background:linear-gradient(145deg,#fff,#edf8fc)!important;box-shadow:0 9px 22px rgba(8,105,151,.08)!important;font-weight:900!important}
+.tw-mode #tw-mode-itinerary span{display:grid;place-items:center;width:25px;height:25px;border-radius:9px;color:#0875bd!important;background:#e2f3fb!important}
+.tw-mode #tw-mode-itinerary:hover{transform:translateY(-2px)!important;box-shadow:0 14px 30px rgba(8,105,151,.14)!important}
+.tw-mode #tw-mode-itinerary.active{color:#fff!important;border-color:transparent!important;background:linear-gradient(135deg,#087cf2,#16aec6)!important;box-shadow:0 14px 31px rgba(8,111,190,.22)!important}
+.tw-mode #tw-mode-itinerary.active span{color:#0873b5!important;background:#fff!important}

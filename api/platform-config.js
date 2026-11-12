@@ -19,5 +19,6 @@ export default async function handler(req,res){
   socials=DEFAULT_SOCIALS.map(([platform,label,url])=>configured.get(platform)||{platform,label,url});
   const whatsappUrl=safeHttpsUrl(process.env.ITBMO_WHATSAPP_URL);
   const webChatScript=safeHttpsUrl(process.env.ITBMO_WEB_CHAT_SCRIPT_URL);
-  res.status(200).json({ok:true,version:'V295',flags,social_accounts:socials,support:{email:'support@itravelbymyown.com',whatsapp_url:whatsappUrl,web_chat:webChatScript?{provider:String(process.env.ITBMO_WEB_CHAT_PROVIDER||'custom').slice(0,40),script_url:webChatScript}:null},live:{gateway_configured:Boolean(safeHttpsUrl(process.env.ITBMO_LIVE_GATEWAY_URL)),location_persisted:false}});
+  const metaPixelId=/^\d{5,30}$/.test(String(process.env.META_PIXEL_ID||'').trim())?String(process.env.META_PIXEL_ID).trim():'';
+  res.status(200).json({ok:true,version:'V298',flags,social_accounts:socials,support:{email:'support@itravelbymyown.com',whatsapp_url:whatsappUrl,web_chat:webChatScript?{provider:String(process.env.ITBMO_WEB_CHAT_PROVIDER||'custom').slice(0,40),script_url:webChatScript}:null},analytics:{meta_pixel_id:metaPixelId,meta_pixel_enabled:Boolean(metaPixelId)},live:{gateway_configured:Boolean(safeHttpsUrl(process.env.ITBMO_LIVE_GATEWAY_URL)),location_persisted:false}});
 }
