@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V297.4';
-const ITBMO_RUNTIME_ASSET='planner.js?v=297.4';
+const ITBMO_RUNTIME_BUILD='V299.0-preview';
+const ITBMO_RUNTIME_ASSET='planner.js?v=299';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -1933,14 +1933,34 @@ async function saveTripRecord(list, travelerState){
     api_version:'v65'
   };
 
-  const response = await fetch(TRIP_API_URL, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)
-  });
+  const send=async payload=>{
+    const response=await fetch(TRIP_API_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    let data={};
+    try{data=await response.json();}catch(_){}
+    return {response,data};
+  };
 
-  let data = {};
-  try{ data = await response.json(); }catch(_){}
+  let {response,data}=await send(body);
+
+  /* A stale pointer can survive after a generated trip was opened in this tab.
+     The API is authoritative: detach it and create a fresh trip exactly once,
+     instead of ever overwriting a paid or completed journey. */
+  if(
+    body.action==='update' &&
+    response.status===409 &&
+    data?.code==='TRIP_NOT_EDITABLE'
+  ){
+    storeActiveTripId(null);
+    currentTripId=null;
+    hasSavedOnce=false;
+    const freshBody={...body,action:'create'};
+    delete freshBody.trip_id;
+    ({response,data}=await send(freshBody));
+  }
 
   if(!response.ok || !data?.ok || !data?.trip?.id){
     if(response.status === 401){
@@ -3380,7 +3400,25 @@ async function startV2PaidGeneration(){
     $preferencesGenerateV2.setAttribute('aria-disabled','true');
     $preferencesGenerateV2.textContent=getLang()==='es'?'Generando…':'Generating…';
   }
-  await _persistPostPaymentProgress_('generation_requested');
+  showWOW(true,getLang()==='es'
+    ? 'Preparando y protegiendo tu generación…'
+    : 'Preparing and protecting your generation…');
+  try{
+    await _persistPostPaymentProgress_('generation_requested');
+  }catch(err){
+    console.error('[ITBMO GENERATION START] checkpoint failed',err);
+    showWOW(false);
+    _travelV2()?.setLocked?.(false);
+    if($preferencesGenerateV2){
+      $preferencesGenerateV2.disabled=false;
+      $preferencesGenerateV2.removeAttribute('aria-disabled');
+      $preferencesGenerateV2.textContent=getLang()==='es'?'Generar mi itinerario ✨':'Generate my itinerary ✨';
+    }
+    alert(getLang()==='es'
+      ? 'No pudimos iniciar la generación todavía. Tu información sigue guardada; inténtalo nuevamente.'
+      : 'We could not start generation yet. Your information is still saved; please try again.');
+    return;
+  }
   requestAnimationFrame(()=>smoothAdvanceTo('#planner-post-generation',{gap:104,center:false}));
   setTimeout(()=>runPaidGeneration(),120);
 }
@@ -12022,7 +12060,7 @@ function bindJourneyHome(){
 function _plannerOwnsAutomaticGenerationRecovery_(){
   // V281: Planner also operates inside Webflow/Vercel iframe. Authenticated
   // recovery is permitted there; never run this on unrelated HTML pages.
-  return /(?:^|\/)planner\.html$/i.test(String(window.location.pathname||''));
+  return /(?:^|\/)planner(?:\.html)?\/?$/i.test(String(window.location.pathname||''));
 }
 
 let paidGenerationRecoveryDiscoveryRunning=false;

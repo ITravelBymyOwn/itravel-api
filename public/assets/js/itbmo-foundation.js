@@ -80,7 +80,18 @@
   function sessionToken(){
     try{return sessionStorage.getItem(SESSION_KEYS[0])||localStorage.getItem(SESSION_KEYS[1])||'';}catch(_){return '';}
   }
-  function activeTripId(){try{return localStorage.getItem('itbmo_active_trip_id')||'';}catch(_){return '';}}
+  function activeTripId(){
+    try{
+      const raw=String(sessionStorage.getItem('itbmo_active_trip_id_tab_v2') || localStorage.getItem('itbmo_active_trip_id') || '').trim();
+      if(!raw)return '';
+      try{
+        const pointer=JSON.parse(raw);
+        return pointer && typeof pointer==='object' && !Array.isArray(pointer)
+          ? String(pointer.trip_id || '').trim()
+          : '';
+      }catch(_){return raw;}
+    }catch(_){return '';}
+  }
 
   function normalizeTouch(raw={}){
     const output={};

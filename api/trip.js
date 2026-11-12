@@ -491,7 +491,7 @@ async function handleUpdate(res, body, session) {
   }
 
   const existingTrips = await supabaseFetch(
-    `/trips?select=id,user_id,status&` +
+    `/trips?select=id,user_id,status,generated_at,itinerary_data,planner_input&` +
     `id=eq.${encodeURIComponent(tripId)}&` +
     `user_id=eq.${encodeURIComponent(session.user_id)}&limit=1`,
     { method: "GET" }
@@ -505,6 +505,21 @@ async function handleUpdate(res, body, session) {
     return res.status(404).json({
       ok: false,
       error: "Trip not found"
+    });
+  }
+
+  const terminal = tripTerminalState(existingTrip);
+  const existingStatus = String(existingTrip.status || "").trim().toLowerCase();
+  const postPaymentProgress = generationCheckpoint(existingTrip.planner_input).post_payment_progress;
+  if (
+    terminal.terminal ||
+    !["draft", "saved"].includes(existingStatus) ||
+    (postPaymentProgress && typeof postPaymentProgress === "object")
+  ) {
+    return res.status(409).json({
+      ok: false,
+      code: "TRIP_NOT_EDITABLE",
+      error: "This trip can no longer be overwritten. Start a new trip instead."
     });
   }
 
@@ -666,7 +681,8 @@ async function handleUpdate(res, body, session) {
 
   const updatedTrips = await supabaseFetch(
     `/trips?id=eq.${encodeURIComponent(tripId)}&` +
-    `user_id=eq.${encodeURIComponent(session.user_id)}`,
+    `user_id=eq.${encodeURIComponent(session.user_id)}&` +
+    `status=in.(draft,saved)`,
     {
       method: "PATCH",
       headers: {
@@ -679,6 +695,14 @@ async function handleUpdate(res, body, session) {
   const trip = Array.isArray(updatedTrips)
     ? updatedTrips[0] || null
     : null;
+
+  if (!trip) {
+    return res.status(409).json({
+      ok: false,
+      code: "TRIP_NOT_EDITABLE",
+      error: "This trip changed while it was being saved. Start a new trip instead."
+    });
+  }
 
   return res.status(200).json({
     ok: true,
@@ -1027,8 +1051,13 @@ async function handlePostPaymentCheckpoint(res, body, session) {
   if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
     return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
   }
-  if (trip.status === "archived") {
-    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
+  const terminal = tripTerminalState(trip);
+  if (terminal.terminal) {
+    return res.status(409).json({
+      ok:false,
+      code:terminal.kind === "archived" ? "GENERATION_ARCHIVED" : "TRIP_NOT_EDITABLE",
+      error:terminal.kind === "archived" ? "Trip archived" : "Generated trips cannot receive a new personalization checkpoint"
+    });
   }
 
   const plannerInput = generationCheckpoint(trip.planner_input);

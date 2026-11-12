@@ -272,7 +272,9 @@
       const photo=media.getBoundingClientRect();
       const topGap=16;
       const bottomGap=16;
-      const desired=Math.max(0,-photo.top+topGap);
+      const header=document.querySelector('.g-header');
+      const headerBottom=Math.max(0,Number(header?.getBoundingClientRect?.().bottom || 0));
+      const desired=Math.max(0,headerBottom-photo.top+topGap);
       const limit=Math.max(0,photo.height-caption.offsetHeight-topGap-bottomGap);
       caption.style.setProperty('--caption-travel',`${Math.min(desired,limit)}px`);
     };
