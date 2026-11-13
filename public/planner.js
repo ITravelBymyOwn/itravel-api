@@ -13851,30 +13851,52 @@ async function exportItineraryToPDF(options={}){
     doc.setFillColor(239,246,255);doc.roundedRect(W-114,18,80,46,10,10,'F');doc.setTextColor(8,35,65);
     font('bold',10);doc.text(`${es?'Día':'Day'} ${day.globalDay}`,W-74,37,{align:'center'});
     font('normal',7.5);doc.text(_itbmoPdfSafeText_(day.date),W-74,52,{align:'center'});
+    // Measure every heading before placing cards: route and destination names
+    // can wrap to multiple lines in any supported destination/language.
+    let headingBottom=114;
+    const headingText=(text,style,size,x,y,maxWidth,align='left')=>{
+      const lines=wrapped(text,style,size,maxWidth);
+      const lineHeight=size*1.15;
+      doc.text(lines,x,y,{align,lineHeightFactor:1.15});
+      return y+Math.max(0,lines.length-1)*lineHeight+size*.3;
+    };
     if(dayTrip){
-      doc.setFillColor(246,250,255);doc.roundedRect(34,114,W-68,57,9,9,'F');
       const semantic=_v106PdfSemanticDayTitle_(day);
-      if(semantic){font('bold',14);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(semantic),W/2,132,{align:'center',maxWidth:260});}
-      font('bold',10.5);doc.setTextColor(8,35,65);doc.text(_itbmoPdfSafeText_(dayTrip.base),48,148,{maxWidth:145});
-      doc.text(_itbmoPdfSafeText_(dayTrip.destination),W-48,148,{align:'right',maxWidth:145});
-      doc.setDrawColor(8,123,250);doc.setLineWidth(1.4);doc.line(W/2-36,146,W/2+36,146);
-      font('bold',6.6);doc.setTextColor(32,122,145);doc.text(es?'IDA Y VUELTA · EXCURSIÓN':'ROUND TRIP · DAY TRIP',W/2,162,{align:'center'});
+      const titleLines=semantic?wrapped(semantic,'bold',14,W-96):[];
+      const titleBottom=titleLines.length?132+(titleLines.length-1)*16.1+4.2:120;
+      const placesY=titleBottom+16;
+      const baseLines=wrapped(dayTrip.base,'bold',10.5,145);
+      const destLines=wrapped(dayTrip.destination,'bold',10.5,145);
+      const placesBottom=placesY+(Math.max(baseLines.length,destLines.length)-1)*12.075+3.15;
+      const labelY=placesBottom+14;
+      headingBottom=labelY+9;
+      doc.setFillColor(246,250,255);doc.roundedRect(34,114,W-68,headingBottom-114,9,9,'F');
+      doc.setTextColor(11,35,65);
+      if(semantic)headingText(semantic,'bold',14,W/2,132,W-96,'center');
+      doc.setTextColor(8,35,65);
+      headingText(dayTrip.base,'bold',10.5,48,placesY,145);
+      headingText(dayTrip.destination,'bold',10.5,W-48,placesY,145,'right');
+      doc.setDrawColor(8,123,250);doc.setLineWidth(1.4);doc.line(W/2-36,placesY-2,W/2+36,placesY-2);
+      font('bold',6.6);doc.setTextColor(32,122,145);doc.text(es?'IDA Y VUELTA · EXCURSIÓN':'ROUND TRIP · DAY TRIP',W/2,labelY,{align:'center'});
     }else{
       const base=pdfBaseForDay(day);
       const transfer=pdfTransferForDay(day);
       const semantic=transfer?transfer.chain.join(' → '):(_v106PdfSemanticDayTitle_(day)||route);
       const different=base&&semantic&&!_arePoiAliases_(base,semantic);
+      doc.setTextColor(11,35,65);
       if(transfer){
-        font('bold',14);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(semantic),34,135,{maxWidth:W-68});
+        headingBottom=headingText(semantic,'bold',14,34,135,W-68);
       }else if(different){
-        font('bold',13);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(base),34,125,{maxWidth:W-68});
-        font('normal',10);doc.setTextColor(73,94,115);doc.text(_itbmoPdfSafeText_(semantic),34,141,{maxWidth:W-68});
+        const baseBottom=headingText(base,'bold',13,34,125,W-68);
+        doc.setTextColor(73,94,115);
+        headingBottom=headingText(semantic,'normal',10,34,baseBottom+14,W-68);
       }else{
-        font('bold',15);doc.setTextColor(11,35,65);doc.text(_itbmoPdfSafeText_(base||semantic),34,135,{maxWidth:W-68});
+        headingBottom=headingText(base||semantic,'bold',15,34,135,W-68);
       }
     }
     if(_v106PdfAuroraContext_(day,pdfAuroraRoots)){doc.setFillColor(249,252,255);doc.rect(W-225,76,191,20,'F');font('bold',7.2);doc.setTextColor(32,122,145);doc.text(es?'ZONA Y ÉPOCA DE AURORAS BOREALES':'NORTHERN LIGHTS AREA & SEASON',W-34,88,{align:'right',maxWidth:185});}
-    if(continued){font('normal',7);doc.text(es?'Continuación':'Continued',W-34,154,{align:'right'});}
+    if(continued){font('normal',7);headingBottom+=12;doc.text(es?'Continuación':'Continued',W-34,headingBottom,{align:'right'});}
+    return headingBottom+12;
   };
   const paint=(card,x,y)=>{
     const {row,activity,route,transport,notes,height,size,line}=card;
@@ -13892,10 +13914,9 @@ async function exportItineraryToPDF(options={}){
     if(i)doc.addPage('a4','portrait');
     const day=days[i],rows=day.rows.slice().sort(_v114LogicalRowCompare_);
     const dayTrip=pdfDayTripForDay(day),route=dayTrip?`${dayTrip.base}  <->  ${dayTrip.destination}`:day.destinations.join('  →  ');
-    let start=dayTrip?178:150,available=footer-start;
+    const start=header(day,dayTrip,route),available=footer-start;
     let choice=null;
     for(const size of [9.0,8.7,8.4,8.1]){const candidate=layout(rows,size);if(candidate.max<=available){choice=candidate;break;}}
-    header(day,dayTrip,route);
     if(choice){
       let y=start;choice.cards.slice(0,choice.split).forEach(c=>{paint(c,left,y);y+=c.height+4;});
       y=start;choice.cards.slice(choice.split).forEach(c=>{paint(c,left+width+gap,y);y+=c.height+4;});
@@ -13905,7 +13926,8 @@ async function exportItineraryToPDF(options={}){
       // one-card orphan whenever a clean two-card continuation is possible.
       const cards=layout(rows,8.1).cards;let offset=0,pageIndex=0;
       while(offset<cards.length){
-        const pageStart=pageIndex===0?start:(dayTrip?178:165);
+        if(pageIndex>0)doc.addPage('a4','portrait');
+        const pageStart=pageIndex===0?start:header(day,dayTrip,route,true);
         const pageAvailable=footer-pageStart;
         let take=0,best=null;
         for(let n=1;n<=cards.length-offset;n++){
@@ -13930,7 +13952,6 @@ async function exportItineraryToPDF(options={}){
             const max=Math.max(a,b);if(!best||max<best.max)best={split,max};
           }
         }
-        if(pageIndex>0){doc.addPage('a4','portrait');header(day,dayTrip,route,true);}
         const subset=cards.slice(offset,offset+take);
         let y=pageStart;subset.slice(0,best.split).forEach(c=>{paint(c,left,y);y+=c.height+4;});
         y=pageStart;subset.slice(best.split).forEach(c=>{paint(c,left+width+gap,y);y+=c.height+4;});
