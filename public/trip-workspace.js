@@ -1460,7 +1460,11 @@ async function fetchContext(cityName){
   // Therefore Day Trip workspaces (Segovia, Versailles, etc.) must be analyzed
   // by their own destination identity, not suppressed because their source
   // generation unit was Madrid or Paris.
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),60000);
+  try{
   const response=await fetch('/api/context',{
+    signal:controller.signal,
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
@@ -1482,15 +1486,19 @@ async function fetchContext(cityName){
   }
 
   return Array.isArray(payload.needs) ? payload.needs : [];
+  }finally{clearTimeout(timeout);}
 }
 
-function ensureContext(cityName){
-  if(contextByCity.has(cityName)) return Promise.resolve(contextByCity.get(cityName));
+function ensureContext(cityName,{retry=false}={}){
   if(contextRequests.has(cityName)) return contextRequests.get(cityName);
+  if(contextByCity.has(cityName)&&!retry) return Promise.resolve(contextByCity.get(cityName));
+  contextByCity.set(cityName,{status:'loading',needs:[]});
 
   const request=fetchContext(cityName)
     .then(needs=>{
       contextByCity.set(cityName,{status:'ready',needs});
+      // Offers must be resolved again with the completed analysis, not a partial fallback.
+      partnerOffersByCity.delete(cityName);
       contextRequests.delete(cityName);
       if(city===cityName && mode==='prepare') renderPrepare();
       return needs;
@@ -1820,33 +1828,20 @@ function renderPrepare(){
     });
     bindPartnerOffers();return;
   }
-  const state=contextByCity.get(city);
-
-  if(!state){
-    $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
-      <span class="tw-prepare-mark">✦</span>
-      <span class="tw-kicker">${c}</span>
-      <h2>${esc(t.prepareT)}</h2>
-      <p>${esc(t.prepareC)}</p>
-    </section>
-    <div class="tw-context-loading"><span class="tw-context-spinner"></span><b>${esc(t.contextLoading)}</b></div>`;
-    ensureContext(city);
-    return;
-  }
-
-  if(state.status==='error'){
-    $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
-      <span class="tw-prepare-mark">✦</span>
-      <span class="tw-kicker">${c}</span>
-      <h2>${esc(t.prepareT)}</h2>
-      <p>${esc(t.prepareC)}</p>
-    </section>
-    <div class="tw-context-error">${esc(t.contextError)}</div>`;
-    return;
-  }
+  // Keep the city sections available on slow/mobile connections. The local
+  // itinerary already carries ticket, tour and journey evidence.
+  if(!contextByCity.has(city))ensureContext(city);
+  const state=contextByCity.get(city)||{status:'loading',needs:[]};
+  const pending=state.status==='loading';
+  const failed=state.status==='error';
+  const statusNotice=pending
+    ? `<div class="tw-context-loading" role="status"><span class="tw-context-spinner"></span><b>${esc(t.contextLoading)}</b></div>`
+    : failed
+      ? `<div class="tw-context-error" role="status">${esc(t.contextError)} <button id="tw-context-retry" type="button" class="tw-context-toggle">${lang==='es'?'Reintentar':'Try again'}</button></div>`
+      : '';
 
   const needs=contextualNeedsForCity(city,Array.isArray(state.needs)?state.needs:[]);
-  if(!partnerOffersByCity.has(city)){partnerOffersByCity.set(city,[]);fetchPartnerOffers('resolve_city',needs).then(offers=>{partnerOffersByCity.set(city,offers);if(mode==='prepare')renderPrepare()}).catch(()=>{});}
+  if(!pending&&!partnerOffersByCity.has(city)){partnerOffersByCity.set(city,[]);fetchPartnerOffers('resolve_city',needs).then(offers=>{partnerOffersByCity.set(city,offers);if(mode==='prepare')renderPrepare()}).catch(()=>{});}
   const tickets=needs.filter(item=>item.category==='tickets');
   const tours=needs.filter(item=>item.category==='tours');
   const transport=needs.filter(item=>item.category==='transport');
@@ -1858,15 +1853,18 @@ function renderPrepare(){
   // the same contextual card as the authoritative A→B route. Local/POI mobility
   // remains informational because the server resolver only emits eligible routes.
   const transportOffers=cityOffers.filter(x=>x.placement==='city_transport'||x.placement==='city_car_rental');
+  const renderSection=(icon,title,description,items,offers,id,type)=>
+    contextSection(icon,title,description,items,offers,id,type) ||
+    `<section id="${esc(id)}" class="tw-context-section"><div class="tw-context-section-head"><div class="tw-context-section-title"><h3>${esc(title)}</h3></div></div><p class="tw-context-empty">${esc(pending?t.contextLoading:failed?(lang==='es'?'Reintenta el análisis para consultar las opciones de esta sección.':'Try the analysis again to view options in this section.'):t.contextEmpty)}</p></section>`;
   const activeSections=[
-    contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets','tickets'),
-    contextSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours','tours'),
-    contextSection('↗',t.move,t.moveC,transport,transportOffers,'tw-context-move','transport')
-  ].filter(Boolean).join('');
+    renderSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets','tickets'),
+    renderSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours','tours'),
+    renderSection('↗',t.move,t.moveC,transport,transportOffers,'tw-context-move','transport')
+  ].join('');
   const jumpNav=`<nav class="tw-prepare-jump-nav" aria-label="${esc(lang==='es'?'Secciones de Para tu viaje':'For your trip sections')}">
-    <button type="button" data-tw-jump="tw-context-tickets" ${tickets.length?'':'disabled'}>${esc(t.tickets)}</button>
-    <button type="button" data-tw-jump="tw-context-tours" ${tours.length?'':'disabled'}>${esc(t.tours)}</button>
-    <button type="button" data-tw-jump="tw-context-move" ${transport.length?'':'disabled'}>${esc(t.move)}</button>
+    <button type="button" data-tw-jump="tw-context-tickets">${esc(t.tickets)}</button>
+    <button type="button" data-tw-jump="tw-context-tours">${esc(t.tours)}</button>
+    <button type="button" data-tw-jump="tw-context-move">${esc(t.move)}</button>
   </nav>`;
 
   $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
@@ -1876,6 +1874,7 @@ function renderPrepare(){
     <p>${esc(t.prepareC)}</p>
   </section>
   ${jumpNav}
+  ${statusNotice}
   <div class="tw-context-sections">
     ${activeSections || `<div class="tw-context-empty tw-context-empty-page">${esc(t.contextEmpty)}</div>`}
     <section class="tw-context-more">
@@ -1889,6 +1888,12 @@ function renderPrepare(){
       <small>${esc(t.next)}</small>
     </section>
   </div>`;
+  const retryButton=$('#tw-context-retry');
+  if(retryButton)retryButton.onclick=()=>{
+    partnerOffersByCity.delete(city);
+    ensureContext(city,{retry:true});
+    renderPrepare();
+  };
   document.querySelectorAll('[data-tw-jump]').forEach(button=>{
     button.onclick=()=>{
       const target=document.getElementById(button.dataset.twJump||'');
