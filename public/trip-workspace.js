@@ -1806,6 +1806,16 @@ function renderTripPartnerOffers(){
   });
   bindPartnerOffers();
 }
+// V304: a context request failure is actionable only when no option cards
+// are actually visible. Section headings and collapsed/hidden cards do not count.
+function syncContextFailureNotice(root,failed){
+  if(!failed||!root?.querySelector('.tw-context-sections .tw-context-item:not([hidden])'))return;
+  root.querySelector('.tw-context-error')?.remove();
+  root.querySelectorAll('[data-context-empty]').forEach(node=>{
+    node.textContent=t.contextEmpty;
+  });
+}
+
 function renderPrepare(){
   const c=esc(city);
   if(journeyTransitOnly(city)){
@@ -1855,7 +1865,7 @@ function renderPrepare(){
   const transportOffers=cityOffers.filter(x=>x.placement==='city_transport'||x.placement==='city_car_rental');
   const renderSection=(icon,title,description,items,offers,id,type)=>
     contextSection(icon,title,description,items,offers,id,type) ||
-    `<section id="${esc(id)}" class="tw-context-section"><div class="tw-context-section-head"><div class="tw-context-section-title"><h3>${esc(title)}</h3></div></div><p class="tw-context-empty">${esc(pending?t.contextLoading:failed?(lang==='es'?'Reintenta el análisis para consultar las opciones de esta sección.':'Try the analysis again to view options in this section.'):t.contextEmpty)}</p></section>`;
+    `<section id="${esc(id)}" class="tw-context-section"><div class="tw-context-section-head"><div class="tw-context-section-title"><h3>${esc(title)}</h3></div></div><p class="tw-context-empty" data-context-empty>${esc(pending?t.contextLoading:failed?(lang==='es'?'Reintenta el análisis para consultar las opciones de esta sección.':'Try the analysis again to view options in this section.'):t.contextEmpty)}</p></section>`;
   const activeSections=[
     renderSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets','tickets'),
     renderSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours','tours'),
@@ -1888,6 +1898,7 @@ function renderPrepare(){
       <small>${esc(t.next)}</small>
     </section>
   </div>`;
+  syncContextFailureNotice($('#tw-content'),failed);
   const retryButton=$('#tw-context-retry');
   if(retryButton)retryButton.onclick=()=>{
     partnerOffersByCity.delete(city);
