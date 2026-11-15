@@ -29,4 +29,4 @@ Use native recapture when a baked-in cursor overlaps a label or control. Automat
 - 844 × 390: main video height is constrained below the header; floating EN playback fits (x=375…803, y=125…364). Modal bounds fit entirely in the viewport (top≈8, bottom≈382) without restarting playback.
 - Mobile chapters form two visible columns, with chapter 05 on the last full-width row.
 
-The temporary `public/_qa/tutorial-player.html` file is a viewport-only test harness and should be removed after the final check. It does not render fake application UI; its frames load the actual ES/EN pages.
+The temporary viewport-only test harness was removed after validation. Its frames loaded the actual ES/EN pages. Final landscape main-player bounds: x=21…808, y≈85…366 in 844×390, with native video content centered and all controls in view.
