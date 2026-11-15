@@ -91,6 +91,9 @@ const plannerUrl=`./planner.html?lang=${encodeURIComponent(lang)}`;
 const homeUrl=lang==='en'?'./preview-home-en.html':'./preview-home.html';
 try{ localStorage.setItem('itbmo_site_language',lang); }catch(_){ }
 const brand=$('.tw-brand');if(brand)brand.setAttribute('href',homeUrl);
+const backPlanner=$('#tw-back-planner');if(backPlanner){backPlanner.href=plannerUrl;backPlanner.querySelector('b').textContent=t.back;}
+const home=$('#tw-home');if(home){home.href=homeUrl;home.querySelector('b').textContent=lang==='en'?'Home':'Inicio';}
+const siteNav=$('.tw-site-nav');if(siteNav)siteNav.setAttribute('aria-label',lang==='en'?'Trip navigation':'Navegación del viaje');
 const badge=$('#tw-prepare-badge');if(badge)badge.textContent=t.prepareBadge;
 
 $('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
@@ -2321,6 +2324,16 @@ function showEmpty(){
 function handoffToPlanner(){
   try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
 }
+function setupWorkspaceNavigation(){
+  // Native same-tab links preserve browser Back/Forward. Capture the existing
+  // trip before leaving and use the existing short Planner handoff.
+  const preserve=event=>{
+    if(event.defaultPrevented || event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)return;
+    cacheWorkspaceSnapshot(data);
+    handoffToPlanner();
+  };
+  ['#tw-back-planner','#tw-home','.tw-brand'].forEach(selector=>$(selector)?.addEventListener('click',preserve));
+}
 function setupAllCitiesFloating(){
   const source=$('#tw-all-cities');
   const floating=$('#tw-floating-all-cities');
@@ -2399,6 +2412,7 @@ async function boot(){
     : (cached?.lang==='en'?'en':'es');
   t=copy[lang];
   setText();
+  setupWorkspaceNavigation();
   setupWorkspaceAuthGate();
 
   const status=$('#tw-status-label');
@@ -2460,4 +2474,5 @@ async function boot(){
 
 boot();
 })();
+
 
