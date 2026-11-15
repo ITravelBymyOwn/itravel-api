@@ -10,6 +10,7 @@
  let selected=0;
  function select(index,updateUrl=true){
   resetDock();
+  end.hidden=true;
   selected=Math.max(0,Math.min(buttons.length-1,index));
   const lesson=buttons[selected];
   video.pause();
@@ -33,7 +34,7 @@
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('tutorial',String(selected+1));url.hash='tutoriales';history.replaceState(null,'',url);if(window.matchMedia('(max-width:1000px)').matches)gallery.querySelector('.tg-feature').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth',block:'start'});}
  }
  function play(){
-  revealPlayer();
+  end.hidden=true;  revealPlayer();
   const lesson=buttons[selected];
   error.hidden=true;
   if(!video.getAttribute('src')){
@@ -50,8 +51,8 @@
  previous.addEventListener('click',()=>select(selected-1));
  next.addEventListener('click',()=>select(selected+1));
  watch.addEventListener('click',play);
- video.addEventListener('playing',()=>{watch.hidden=true;error.hidden=true;});
- video.addEventListener('ended',()=>{watch.hidden=false;});
+ video.addEventListener('playing',()=>{watch.hidden=true;end.hidden=true;error.hidden=true;});
+ video.addEventListener('ended',()=>{watch.hidden=true;updateEnd();end.hidden=false;});
  video.addEventListener('error',()=>{if(video.getAttribute('src')){error.hidden=false;watch.hidden=false;}});
  gallery.querySelector('#tg-retry').addEventListener('click',()=>{select(selected,false);play();});
  gallery.querySelector('[data-jump-result]').addEventListener('click',()=>select(3));
@@ -64,15 +65,33 @@
  const back=document.createElement('button'),dismiss=document.createElement('button');back.type=dismiss.type='button';
  back.textContent=es?'Volver al video':'Back to video';dismiss.textContent='×';dismiss.setAttribute('aria-label',es?'Cerrar reproductor flotante':'Close floating player');
  tools.append(back,dismiss);screen.append(tools);
+ const end=document.createElement('div');end.className='tg-end';end.hidden=true;
+ const endInner=document.createElement('div');endInner.className='tg-end-inner';
+ const endHeading=document.createElement('p');endHeading.className='tg-end-heading';endHeading.setAttribute('aria-live','polite');
+ const endActions=document.createElement('div');endActions.className='tg-end-actions';endActions.setAttribute('role','group');endActions.setAttribute('aria-label',es?'Opciones al terminar el tutorial':'Options after the tutorial');
+ function endButton(label){const button=document.createElement('button');button.type='button';const kicker=document.createElement('span');kicker.className='tg-end-kicker';kicker.textContent=label;const title=document.createElement('strong'),description=document.createElement('small');button.append(kicker,title,description);endActions.append(button);return {button,title,description};}
+ const endPrevious=endButton(es?'Anterior':'Previous'),endReplay=endButton(es?'Ver de nuevo':'Watch again'),endNext=endButton(es?'Siguiente':'Next');
+ endReplay.button.className='is-replay';endInner.append(endHeading,endActions);end.append(endInner);screen.append(end);
+ function lessonSummary(index,control,missingTitle,missingDescription){const lesson=buttons[index];control.button.disabled=!lesson;control.title.textContent=lesson?lesson.querySelector('.tg-lesson-copy strong').textContent:missingTitle;control.description.textContent=lesson?lesson.dataset.description:missingDescription;}
+ function updateEnd(){
+  endHeading.textContent=es?'Tutorial completado. ¿Cómo quieres continuar?':'Tutorial complete. What would you like to do next?';
+  lessonSummary(selected-1,endPrevious,es?'Primer tutorial':'First tutorial',es?'Estás al inicio del recorrido.':'You are at the start of the walkthrough.');
+  lessonSummary(selected+1,endNext,es?'Recorrido completo':'Walkthrough complete',es?'Este es el último tutorial.':'This is the last tutorial.');
+  endReplay.title.textContent=buttons[selected].querySelector('.tg-lesson-copy strong').textContent;endReplay.description.textContent=es?'Repetir este tutorial desde el inicio.':'Replay this tutorial from the beginning.';
+ }
+ endPrevious.button.addEventListener('click',()=>{if(selected>0){select(selected-1);play();}});
+ endNext.button.addEventListener('click',()=>{if(selected<buttons.length-1){select(selected+1);play();}});
+ endReplay.button.addEventListener('click',()=>{video.currentTime=0;play();});
+
  let hasPlayed=false,dockDismissed=false,visibleRatio=1;
  const reduced=()=>window.matchMedia('(prefers-reduced-motion:reduce)').matches;
  function headerOffset(){const header=document.querySelector('header');return Math.max(12,Math.ceil(header?header.getBoundingClientRect().bottom:68)+12);}
  function syncDock(){
-  const docked=hasPlayed&&!dockDismissed&&!video.ended&&!modal.open&&!document.fullscreenElement&&visibleRatio<.55;
+  const docked=hasPlayed&&!dockDismissed&&!modal.open&&!document.fullscreenElement&&visibleRatio<.55;
   screen.classList.toggle('is-docked',docked);
  }
  function resetDock(){hasPlayed=false;dockDismissed=false;screen.classList.remove('is-docked');}
- function revealPlayer(){dockDismissed=false;slot.scrollIntoView({behavior:reduced()?'auto':'smooth',block:'start'});}
+ function revealPlayer(){dockDismissed=false;if(!modal.open)slot.scrollIntoView({behavior:reduced()?'auto':'smooth',block:'start'});}
  let observer;
  function watchVisibility(){
   const offset=headerOffset();gallery.style.setProperty('--tg-header-offset',offset+'px');
@@ -93,4 +112,5 @@
  const initial=Number(new URLSearchParams(location.search).get('tutorial'));
  select(Number.isInteger(initial)&&initial>=1&&initial<=5?initial-1:0,false);
 })();
+
 
