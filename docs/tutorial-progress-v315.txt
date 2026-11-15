@@ -1,0 +1,43 @@
+ITBMO V315 — Tutorial 05 ES/EN y limpieza final del tutorial 01
+
+Trabajo realizado exclusivamente con el material existente, sin nuevas cuentas,
+pagos, códigos ni generación de itinerarios. Publicación solamente en preview.
+
+Tutorial 05:
+- ES/EN comparten 12 escenas, 28 acciones, formato y duración de 136,3 s (2:16).
+- Se recalculan todos los destinos del cursor según las dimensiones reales.
+- La captura EN de movilidad era una página completa de 4642 px de alto:
+  se utiliza únicamente su sección pertinente y se corrigen sus coordenadas.
+- Se sustituyen las capturas EN que no mostraban la pestaña descrita. Los
+  detalles abiertos, Barcelona y Mis viajes usan la captura ES correspondiente
+  con traducción limitada a los textos nativos; se conserva su estructura.
+- Los clics se muestran en el encuadre completo. Durante la pausa posterior
+  se amplía el contenido pertinente y se retira suavemente el cursor de lectura.
+- Se conservan las opciones y textos nativos de las capturas utilizadas.
+- Los selectores de ruta animan solamente su texto interior, sin recuadros
+  añadidos sobre controles o etiquetas.
+- La música es una sola pista continua, con fundidos únicamente al inicio/final.
+
+Tutorial 01:
+- Se conserva el video aprobado, su escritura, clics, duración de 51 s y audio.
+- Se retira el cursor negro residual y su halo de la superficie vacía de la
+  escena final (155 fotogramas por idioma); el cursor blanco animado permanece.
+
+Validación local:
+- Decodificación completa de los cuatro MP4.
+- Sin silencios interiores de 0,35 s a -50 dB.
+- 20 estados de selectores: cero modificaciones fuera de las zonas de texto.
+- Coordenadas visibles durante todas las acciones del render del 05.
+- Revisión de fotogramas codificados y de las zonas retocadas ampliadas.
+
+Versiones en la web: 01-v315 / 02-v311 / 03-v314 / 04-v313 / 05-v315.
+El reproductor amplio, sus tres controles y la posibilidad de cerrar/reabrir
+permanecen en la versión 312 ya verificada.
+
+Siguiente bloque: navegación desde el workspace a Planner e Inicio, también
+en móvil, respetando el idioma y usando el mecanismo existente de continuidad.
+
+El ZIP contiene archivos nuevos/modificados, fuentes de este bloque y pruebas;
+no es un proyecto completo. La fuente original del tutorial 01 se conserva en
+el respaldo ITBMO_TUTORIALES_ES_EN_10_VIDEOS.zip. No se redistribuye audio aislado.
+Música: Driving Ambition, Ahjay Stelino, Mixkit item 32, misma licencia existente.
