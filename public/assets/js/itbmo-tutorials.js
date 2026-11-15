@@ -53,7 +53,13 @@
  video.addEventListener('error',()=>{if(video.getAttribute('src')){error.hidden=false;watch.hidden=false;}});
  gallery.querySelector('#tg-retry').addEventListener('click',()=>{select(selected,false);play();});
  gallery.querySelector('[data-jump-result]').addEventListener('click',()=>select(3));
- gallery.querySelector('#tg-fullscreen').addEventListener('click',async()=>{try{if(video.requestFullscreen)await video.requestFullscreen();else if(video.webkitEnterFullscreen)video.webkitEnterFullscreen();}catch(_){}});
+ const screen=gallery.querySelector('.tg-screen'),screenHome=screen.parentElement;
+ const modal=document.createElement('dialog');modal.className='tg-modal';modal.setAttribute('aria-label',es?'Video ampliado':'Enlarged video');
+ const close=document.createElement('button');close.type='button';close.className='tg-modal-close';close.textContent=es?'Cerrar ×':'Close ×';close.setAttribute('aria-label',es?'Cerrar video ampliado':'Close enlarged video');
+ modal.append(close);gallery.append(modal);
+ close.addEventListener('click',()=>modal.close());
+ modal.addEventListener('close',()=>screenHome.prepend(screen));
+ gallery.querySelector('#tg-fullscreen').addEventListener('click',()=>{modal.append(screen);modal.showModal();});
  window.addEventListener('pagehide',()=>video.pause());
  document.addEventListener('visibilitychange',()=>{if(document.hidden)video.pause();});
  const initial=Number(new URLSearchParams(location.search).get('tutorial'));
