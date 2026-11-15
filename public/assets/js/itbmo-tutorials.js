@@ -24,6 +24,7 @@
   gallery.querySelector('#tg-step').textContent=`${es?'PASO':'STEP'} ${String(selected+1).padStart(2,'0')} / 05`;
   gallery.querySelector('#tg-title').textContent=lesson.dataset.title;
   gallery.querySelector('#tg-description').textContent=lesson.dataset.description;
+  gallery.querySelector('#tg-hint').textContent=lesson.dataset.hint;
   gallery.querySelector('#tg-direct').href=lesson.dataset.src;
   buttons.forEach((button,i)=>{button.classList.toggle('is-active',i===selected);button.setAttribute('aria-current',i===selected?'step':'false');});
   previous.disabled=selected===0;
@@ -48,9 +49,11 @@
  next.addEventListener('click',()=>select(selected+1));
  watch.addEventListener('click',play);
  video.addEventListener('playing',()=>{watch.hidden=true;error.hidden=true;});
+ video.addEventListener('ended',()=>{watch.hidden=false;});
  video.addEventListener('error',()=>{if(video.getAttribute('src')){error.hidden=false;watch.hidden=false;}});
  gallery.querySelector('#tg-retry').addEventListener('click',()=>{select(selected,false);play();});
  gallery.querySelector('[data-jump-result]').addEventListener('click',()=>select(3));
+ gallery.querySelector('#tg-fullscreen').addEventListener('click',async()=>{try{if(video.requestFullscreen)await video.requestFullscreen();else if(video.webkitEnterFullscreen)video.webkitEnterFullscreen();}catch(_){}});
  window.addEventListener('pagehide',()=>video.pause());
  document.addEventListener('visibilitychange',()=>{if(document.hidden)video.pause();});
  const initial=Number(new URLSearchParams(location.search).get('tutorial'));
