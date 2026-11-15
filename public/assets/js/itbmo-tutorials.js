@@ -76,6 +76,7 @@
  let observer;
  function watchVisibility(){
   const offset=headerOffset();gallery.style.setProperty('--tg-header-offset',offset+'px');
+  gallery.style.setProperty('--tg-dock-max-width',Math.min(480,Math.max(100,(window.innerHeight-offset-62)*16/9))+'px');
   if(observer)observer.disconnect();
   observer=new IntersectionObserver(entries=>{visibleRatio=entries[0].intersectionRatio;syncDock();},{rootMargin:`-${offset}px 0px 0px 0px`,threshold:[0,.25,.55,1]});observer.observe(slot);
  }
