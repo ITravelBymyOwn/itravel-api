@@ -1,0 +1,25 @@
+ITBMO V314 — Tutorial 03 ES/EN: personalización e Info Chat
+
+Corrección realizada exclusivamente con las capturas existentes. No requiere nuevos accesos, pagos, códigos promocionales ni generación de itinerarios.
+
+Cambios de este bloque:
+- Se sustituyen las zonas de escritura por máscaras limitadas al interior del control, con fondo nativo limpio. No se añaden rectángulos de enfoque sobre las etiquetas.
+- Se conservan los textos del ejemplo; EN mantiene sus traducciones y el formato de los controles originales.
+- Se limpian los punteros grabados en preferencias, selectores y generación. Se conserva un único cursor animado con destinos recalculados para cada captura/idioma.
+- Info Chat se presenta completo, con su cabecera, campo de escritura y botón de envío visibles; se restaura la conversación original al simular el envío.
+- Se encuadra completo el panel de generación para evitar cortar su texto.
+- ES y EN comparten diez escenas, veinte acciones y duración de 121,85 s (2:02 en la web). Se usa revisión del idioma seguida de la confirmación de personalización guardada en ambos idiomas, porque el set EN no contiene una captura separada del resumen.
+- Se alargan las pausas de lectura y se mantiene una sola pista musical continua, con fundidos únicamente al inicio/final.
+
+Validación:
+- 48 estados de campos comprobados: cero píxeles de animación modificados fuera de las zonas de texto confirmadas.
+- Decodificación completa de ambos MP4 y revisión de fotogramas codificados.
+- Sin silencios interiores de 0,35 s a -50 dB.
+- La publicación se limita a preview; main queda intacto.
+
+Pendiente después de este bloque:
+1. Tutorial 05 ES/EN: revisar punteros, encuadres y ritmo; validación final del tutorial 01.
+2. Navegación móvil desde workspaces: botones claros «Volver al planner» e «Inicio» en el propio workspace; preservar el viaje y el idioma, sin depender de la gestión de pestañas. Implementar después de cerrar los tutoriales.
+
+El ZIP incluye solamente archivos nuevos/modificados del bloque y el material de revisión; no es un proyecto completo. El audio musical independiente no se redistribuye.
+Música: Driving Ambition, Ahjay Stelino, Mixkit item 32, Mixkit Stock Music Free License; misma pista licenciada de las versiones anteriores.
