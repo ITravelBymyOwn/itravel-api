@@ -13,3 +13,5 @@
 @media(max-width:640px){.tg-playlist ol{grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;gap:10px}.tg-playlist li:last-child{grid-column:1/-1}.tg-lesson{min-height:138px;padding:16px 13px 29px;grid-template-columns:29px minmax(0,1fr);gap:9px;border-radius:15px}.tg-lesson-number{width:29px;height:29px;font-size:12px}.tg-lesson-copy strong{font-size:15px}.tg-lesson-copy small{font-size:12px}.tg-playlist li:last-child .tg-lesson{min-height:100px}.tg-screen.is-docked{inset:calc(var(--tg-header-offset,82px) + 37px) 12px auto auto;width:min(calc(100% - 24px),var(--tg-dock-max-width,480px));max-width:480px}.tg-dock-tools button{font-size:12px}}
 
 @media(max-height:540px){.tg-video-slot{max-height:calc(100vh - var(--tg-header-offset,82px) - 24px);max-height:calc(100dvh - var(--tg-header-offset,82px) - 24px)}.tg-video-slot>.tg-screen:not(.is-docked){height:100%;aspect-ratio:auto}}
+
+.tg-video-slot{width:100%}
