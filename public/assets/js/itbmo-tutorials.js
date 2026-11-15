@@ -9,6 +9,7 @@
  const error=gallery.querySelector('#tg-error');
  let selected=0;
  function select(index,updateUrl=true){
+  resetDock();
   selected=Math.max(0,Math.min(buttons.length-1,index));
   const lesson=buttons[selected];
   video.pause();
@@ -32,6 +33,7 @@
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('tutorial',String(selected+1));url.hash='tutoriales';history.replaceState(null,'',url);if(window.matchMedia('(max-width:1000px)').matches)gallery.querySelector('.tg-feature').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth',block:'start'});}
  }
  function play(){
+  revealPlayer();
   const lesson=buttons[selected];
   error.hidden=true;
   if(!video.getAttribute('src')){
@@ -53,15 +55,41 @@
  video.addEventListener('error',()=>{if(video.getAttribute('src')){error.hidden=false;watch.hidden=false;}});
  gallery.querySelector('#tg-retry').addEventListener('click',()=>{select(selected,false);play();});
  gallery.querySelector('[data-jump-result]').addEventListener('click',()=>select(3));
- const screen=gallery.querySelector('.tg-screen'),screenHome=screen.parentElement;
+ const screen=gallery.querySelector('.tg-screen');
+ const slot=document.createElement('div');slot.className='tg-video-slot';screen.before(slot);slot.append(screen);
  const modal=document.createElement('dialog');modal.className='tg-modal';modal.setAttribute('aria-label',es?'Video ampliado':'Enlarged video');
  const close=document.createElement('button');close.type='button';close.className='tg-modal-close';close.textContent=es?'Cerrar ×':'Close ×';close.setAttribute('aria-label',es?'Cerrar video ampliado':'Close enlarged video');
  modal.append(close);gallery.append(modal);
+ const tools=document.createElement('div');tools.className='tg-dock-tools';
+ const back=document.createElement('button'),dismiss=document.createElement('button');back.type=dismiss.type='button';
+ back.textContent=es?'Volver al video':'Back to video';dismiss.textContent='×';dismiss.setAttribute('aria-label',es?'Cerrar reproductor flotante':'Close floating player');
+ tools.append(back,dismiss);screen.append(tools);
+ let hasPlayed=false,dockDismissed=false,visibleRatio=1;
+ const reduced=()=>window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+ function headerOffset(){const header=document.querySelector('header');return Math.max(12,Math.ceil(header?header.getBoundingClientRect().bottom:68)+12);}
+ function syncDock(){
+  const docked=hasPlayed&&!dockDismissed&&!video.ended&&!modal.open&&!document.fullscreenElement&&visibleRatio<.55;
+  screen.classList.toggle('is-docked',docked);
+ }
+ function resetDock(){hasPlayed=false;dockDismissed=false;screen.classList.remove('is-docked');}
+ function revealPlayer(){dockDismissed=false;slot.scrollIntoView({behavior:reduced()?'auto':'smooth',block:'start'});}
+ let observer;
+ function watchVisibility(){
+  const offset=headerOffset();gallery.style.setProperty('--tg-header-offset',offset+'px');
+  if(observer)observer.disconnect();
+  observer=new IntersectionObserver(entries=>{visibleRatio=entries[0].intersectionRatio;syncDock();},{rootMargin:`-${offset}px 0px 0px 0px`,threshold:[0,.25,.55,1]});observer.observe(slot);
+ }
+ watchVisibility();window.addEventListener('resize',watchVisibility);
+ video.addEventListener('playing',()=>{hasPlayed=true;dockDismissed=false;syncDock();});
+ video.addEventListener('ended',syncDock);document.addEventListener('fullscreenchange',syncDock);
+ back.addEventListener('click',revealPlayer);
+ dismiss.addEventListener('click',()=>{dockDismissed=true;video.pause();syncDock();});
  close.addEventListener('click',()=>modal.close());
- modal.addEventListener('close',()=>screenHome.prepend(screen));
- gallery.querySelector('#tg-fullscreen').addEventListener('click',()=>{modal.append(screen);modal.showModal();});
+ modal.addEventListener('close',()=>{slot.append(screen);syncDock();});
+ gallery.querySelector('#tg-fullscreen').addEventListener('click',()=>{screen.classList.remove('is-docked');modal.append(screen);modal.showModal();});
  window.addEventListener('pagehide',()=>video.pause());
  document.addEventListener('visibilitychange',()=>{if(document.hidden)video.pause();});
  const initial=Number(new URLSearchParams(location.search).get('tutorial'));
  select(Number.isInteger(initial)&&initial>=1&&initial<=5?initial-1:0,false);
 })();
+
