@@ -1,0 +1,182 @@
+{
+  "version": "V321",
+  "tested_commit": "c09866e5dce9af1853c6a31d7a5c05c903b2c634",
+  "cases": [
+    {
+      "lang": "es",
+      "viewport": [
+        320,
+        640
+      ],
+      "modalOpen": true,
+      "src": "/videos/tutorial-03-es-v314.mp4",
+      "pageOverflow": 1,
+      "cards": 4,
+      "chat": "04Decide con Info ChatConsulta zonas de hospedaje, cómo moverte, imperdibles y tours de un día. Si una excursión te interesa, solicítala en Personalización, aunque no la hayas añadido al recorrido.",
+      "modal": {
+        "x": 8,
+        "y": 182.0625,
+        "right": 312,
+        "bottom": 457.9375
+      },
+      "screen": {
+        "width": 302,
+        "height": 169.875
+      },
+      "overflow": 0,
+      "lessonColors": [
+        "#168bd3",
+        "#079eab",
+        "#dc7947",
+        "#5e83c1",
+        "#189b91"
+      ],
+      "pass": true
+    },
+    {
+      "lang": "es",
+      "viewport": [
+        844,
+        390
+      ],
+      "modalOpen": true,
+      "src": "/videos/tutorial-03-es-v314.mp4",
+      "pageOverflow": 0,
+      "cards": 4,
+      "chat": "04Decide con Info ChatConsulta zonas de hospedaje, cómo moverte, imperdibles y tours de un día. Si una excursión te interesa, solicítala en Personalización, aunque no la hayas añadido al recorrido.",
+      "modal": {
+        "x": 173.109375,
+        "y": 8.5625,
+        "right": 670.875,
+        "bottom": 381.421875
+      },
+      "screen": {
+        "width": 495.765625,
+        "height": 278.859375
+      },
+      "overflow": 0,
+      "lessonColors": [
+        "#168bd3",
+        "#079eab",
+        "#dc7947",
+        "#5e83c1",
+        "#189b91"
+      ],
+      "pass": true
+    },
+    {
+      "lang": "es",
+      "viewport": [
+        1440,
+        900
+      ],
+      "modalOpen": true,
+      "src": "/videos/tutorial-03-es-v314.mp4",
+      "pageOverflow": 0,
+      "cards": 4,
+      "chat": "04Decide con Info ChatConsulta zonas de hospedaje, cómo moverte, imperdibles y tours de un día. Si una excursión te interesa, solicítala en Personalización, aunque no la hayas añadido al recorrido.",
+      "modal": {
+        "x": 28.4375,
+        "y": 8.5625,
+        "right": 1411.546875,
+        "bottom": 891.421875
+      },
+      "screen": {
+        "width": 1381.109375,
+        "height": 776.859375
+      },
+      "overflow": 0,
+      "lessonColors": [
+        "#168bd3",
+        "#079eab",
+        "#dc7947",
+        "#5e83c1",
+        "#189b91"
+      ],
+      "pass": true
+    },
+    {
+      "lang": "en",
+      "viewport": [
+        390,
+        844
+      ],
+      "modalOpen": true,
+      "src": "/videos/tutorial-03-en-v314.mp4",
+      "pageOverflow": 0,
+      "cards": 4,
+      "chat": "04Decide with Info ChatAsk about areas to stay, transport, must-see places and day tours. If an excursion interests you, request it in Personalization, even if you have not added it to your route.",
+      "modal": {
+        "x": 8,
+        "y": 264.375,
+        "right": 382,
+        "bottom": 579.625
+      },
+      "screen": {
+        "width": 372,
+        "height": 209.25
+      },
+      "overflow": 0,
+      "lessonColors": [
+        "#168bd3",
+        "#079eab",
+        "#dc7947",
+        "#5e83c1",
+        "#189b91"
+      ],
+      "pass": true
+    },
+    {
+      "lang": "en",
+      "viewport": [
+        1440,
+        900
+      ],
+      "modalOpen": true,
+      "src": "/videos/tutorial-03-en-v314.mp4",
+      "pageOverflow": 0,
+      "cards": 4,
+      "chat": "04Decide with Info ChatAsk about areas to stay, transport, must-see places and day tours. If an excursion interests you, request it in Personalization, even if you have not added it to your route.",
+      "modal": {
+        "x": 28.4375,
+        "y": 8.5625,
+        "right": 1411.546875,
+        "bottom": 891.421875
+      },
+      "screen": {
+        "width": 1381.109375,
+        "height": 776.859375
+      },
+      "overflow": 0,
+      "lessonColors": [
+        "#168bd3",
+        "#079eab",
+        "#dc7947",
+        "#5e83c1",
+        "#189b91"
+      ],
+      "pass": true
+    }
+  ],
+  "playback": {
+    "es": {
+      "duration": 162,
+      "readyState": 4,
+      "error": null
+    },
+    "en": {
+      "duration": 170,
+      "readyState": 4,
+      "error": null
+    }
+  },
+  "chapterSelection": {
+    "opensModal": true,
+    "pointerAndKeyboardVerified": true
+  },
+  "nativeCaptureContentUnchanged": true,
+  "musicTreatmentUnchanged": true,
+  "deferred": [
+    7
+  ]
+}

@@ -1,0 +1,15 @@
+V321 — ajustes autorizados 1, 2, 3, 5 y 6
+
+1. Cada tarjeta de paso selecciona su tutorial y abre el reproductor ampliado con reproducción directa. Verificado por clic en escritorio y mediante la página de prueba en móvil/horizontal; teclado también comprobado.
+2. Acentos suaves por capítulo, fondos claros cian/azul y toques cálidos; panel inferior y consejos con más contraste visual.
+3. Detalle de Catedral de Segovia ES reducido de 25 a 17 s. Duración total ES: 162 s (2:42). EN mantiene 170 s (2:50).
+5. Cuarta tarjeta «Decide con Info Chat» / «Decide with Info Chat», con hospedaje, transporte, imperdibles y tours de un día solicitables en Personalización aunque no estén en el recorrido. Cuatro tarjetas adaptables.
+6. Zoom ES/EN sobre Usar mi ubicación, Preparar ruta y la aparición de Google Maps/Waze. Se conserva el cursor animado blanco y el contenido nativo de las capturas; no se obtiene ubicación real en las capturas.
+
+Punto 4 sin cambios de tratamiento musical. Punto 7 (clasificación de entradas/Acueducto) pendiente deliberadamente, sin modificar reglas, API, motor ni datos del viaje.
+
+Validación: decodificación completa de los dos MP4 sin errores; duraciones exactas verificadas. Cinco pruebas de pantalla/idioma aprobadas (320×640 ES, 844×390 ES, 1440×900 ES, 390×844 EN y 1440×900 EN), cuatro tarjetas Info Chat incluidas, modal dentro de pantalla y sin scroll interno. Reproducción ES/EN readyState=4 sin error. Otros ocho tutoriales conservados byte por byte en el ZIP.
+
+Entregas guardadas: ITBMO_V321_TUTORIALES_ES_EN_10_VIDEOS_ACTUALIZADOS.zip (libfile_2d7ae956e4ac81919e1bea87ca6c6c4b, versión 2), ITBMO_V321_FUENTES_TUTORIAL05_ES_EN.zip (libfile_aa291bab31888191ad6001851179b88f, versión 1).
+
+Solo preview/site-evolution-2026-11-12. Main sigue ec9edc6849fb77511d119a0aed17214bbfa47381, sin cambios. Siguiente: retomar punto 7 con el usuario; promoción a main pendiente de autorización.
