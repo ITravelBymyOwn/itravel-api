@@ -1,0 +1,10 @@
+V320 — tutoriales 05 ES/EN y reproductor ampliado
+
+Finalizado: ES V318 y EN V319, ambos 170 s y 1920×1080. Capturas nativas; cursor negro fuera del encuadre; cursor animado blanco conservado. Mismo formato y música continua del tutorial 02 aprobado. Recorrido continuo: Mis viajes, tarjeta correcta, todas las ciudades, conectividad/seguros, Segovia, ruta, mañana, detalle completo de Catedral una sola vez (25 s), tarde y regreso, Para tu viaje/entradas/tours/movilidad y cierre motivador. No regresa a Mis viajes al final.
+
+ZIP de diez videos actualizado (Library libfile_2d7ae956e4ac81919e1bea87ca6c6c4b, versión 1, nombre ITBMO_V320_TUTORIALES_ES_EN_10_VIDEOS_ACTUALIZADOS.zip). Los otros ocho videos permanecen byte por byte idénticos. Fuentes y capturas de edición guardadas en ITBMO_V320_FUENTES_TUTORIAL05_ES_EN.zip (libfile_aa291bab31888191ad6001851179b88f).
+
+Validación: decodificación completa de ambos MP4 sin errores; música sin silencios internos detectados. Reproducción web ES/EN con duración 170 s y readyState 4. Cerrar y volver a ampliar mantiene tiempo y reproducción. Cinco tamaños de pantalla aprobados: 320×640, 390×844, 844×390, 1440×900, 1920×1080. Sin scroll interno ni recorte; proporción 16:9. El límite anterior de 1500 px se elimina (video 1701 px a 1920×1080).
+
+Solo preview/site-evolution-2026-11-12. Main no se ha modificado.
+Pendiente: revisión visual del usuario en preview y posterior promoción a main cuando la autorice. Después, reel/anuncio para redes y configuración de Meta (ID/API), según el plan previo. Navegación móvil ya trabajada en V316/V317; no forma parte de esta modificación.

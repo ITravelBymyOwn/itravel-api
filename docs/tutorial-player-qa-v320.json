@@ -1,0 +1,101 @@
+{
+  "version": "V320",
+  "tested_commit": "d2f2d252d131a3633b921f6db2dbfd0567399611",
+  "responsive": [
+    {
+      "viewport": [
+        320,
+        640
+      ],
+      "screen": {
+        "x": 9,
+        "y": 223.0625,
+        "width": 302,
+        "height": 169.875,
+        "bottom": 392.9375,
+        "right": 311
+      },
+      "overflow": 0,
+      "pass": true
+    },
+    {
+      "viewport": [
+        390,
+        844
+      ],
+      "screen": {
+        "x": 9,
+        "y": 305.375,
+        "width": 372,
+        "height": 209.25,
+        "bottom": 514.625,
+        "right": 381
+      },
+      "overflow": 0,
+      "pass": true
+    },
+    {
+      "viewport": [
+        844,
+        390
+      ],
+      "screen": {
+        "x": 174.109375,
+        "y": 45.5625,
+        "width": 495.765625,
+        "height": 278.859375,
+        "bottom": 324.421875,
+        "right": 669.875
+      },
+      "overflow": 0,
+      "pass": true
+    },
+    {
+      "viewport": [
+        1440,
+        900
+      ],
+      "screen": {
+        "x": 29.4375,
+        "y": 49.5625,
+        "width": 1381.109375,
+        "height": 776.859375,
+        "bottom": 826.421875,
+        "right": 1410.546875
+      },
+      "overflow": 0,
+      "pass": true
+    },
+    {
+      "viewport": [
+        1920,
+        1080
+      ],
+      "screen": {
+        "x": 109.4375,
+        "y": 49.5625,
+        "width": 1701.109375,
+        "height": 956.859375,
+        "bottom": 1006.421875,
+        "right": 1810.546875
+      },
+      "overflow": 0,
+      "pass": true
+    }
+  ],
+  "playback": {
+    "es": {
+      "file": "tutorial-05-es-v318.mp4",
+      "duration": 170,
+      "readyState": 4,
+      "error": null
+    },
+    "en": {
+      "file": "tutorial-05-en-v319.mp4",
+      "duration": 170,
+      "readyState": 4,
+      "error": null
+    }
+  },
+  "resize_reparent_preserves_time": true
+}
