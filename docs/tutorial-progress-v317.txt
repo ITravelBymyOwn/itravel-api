@@ -11,6 +11,9 @@ Cambios:
 - La escena 058 usa la cabecera original de la captura EN equivalente,
   conservando exactamente los botones y sus degradados.
 - Se ajusta la extensión de borrado para evitar restos de texto español.
+- Las correcciones en botones se limitan al contorno convexo del fondo nativo;
+  así se conserva su forma redondeada. Se revisan día 2, Preparar ruta,
+  Barcelona y Mis viajes después de codificar las escenas finales.
 - La pista de audio del video V315 se copia sin recodificación ni nuevos fades.
 - La página EN apunta a tutorial-05-en-v317.mp4; las otras lecciones mantienen
   las versiones verificadas 01-v315 / 02-v311 / 03-v314 / 04-v313 / 05 ES-v315.
