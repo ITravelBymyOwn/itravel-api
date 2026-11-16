@@ -260,7 +260,7 @@ function normalizeWorkspaceEntity(value){
     .replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
 }
 function workspaceEntityCore(value){
-  return normalizeWorkspaceEntity(value).replace(/\b(city tour|tour panoramico|highlights tour|guided tour|visita guiada|tour de|entrada|ticket|interior|torres?|tower|patios?|salones?|apartamentos? reales?|royal apartments?)\b/g,' ').replace(/\s+/g,' ').trim();
+  return normalizeWorkspaceEntity(value).replace(/\b(city tour|tour panoramico|highlights tour|guided tour|visita guiada|tour de|entrada|ticket|interior)\b/g,' ').replace(/\s+/g,' ').trim();
 }
 function workspaceEntityTokens(value){
   const stop=new Set(['de','del','la','las','el','los','y','and','the','of','en','in','conjunto','complex','sitio','site','templo','temple']);
@@ -269,15 +269,15 @@ function workspaceEntityTokens(value){
 function sameWorkspaceEntity(a,b){
   const x=workspaceEntityCore(a),y=workspaceEntityCore(b);
   if(!x||!y)return false;
-  if(x===y||(Math.min(x.length,y.length)>=7&&(x.includes(y)||y.includes(x))))return true;
-  // Canonical aliases such as “Qorikancha y conjunto de Santo Domingo” versus
-  // “Templo del Qorikancha” must collapse into one commercial decision without
-  // changing either itinerary row. Require a strong distinctive-token overlap.
+  if(x===y)return true;
+  // Shared destination words alone cannot identify an attraction. Match all
+  // meaningful tokens, retaining narrow single-name aliases such as Qorikancha.
   const xt=workspaceEntityTokens(a),yt=workspaceEntityTokens(b);
   if(!xt.length||!yt.length)return false;
-  const shared=xt.filter(token=>yt.includes(token));
-  const shortest=Math.min(xt.length,yt.length);
-  return shared.some(token=>token.length>=6) && shared.length/shortest>=0.5;
+  const subset=(short,long)=>short.every(token=>long.includes(token));
+  if(subset(xt,yt)&&subset(yt,xt))return true;
+  const short=xt.length<=yt.length?xt:yt,long=xt.length<=yt.length?yt:xt;
+  return short.length===1&&short[0].length>=6&&long.includes(short[0]);
 }
 
 // V198 · Admission-equivalence guard. A named attraction and a descriptive
@@ -712,12 +712,17 @@ function contextualNeedBelongsToCitySlice(item,cityName){
 function workspaceRowsMatchingNeed(item,cityName){
   const entity=normalizeWorkspaceEntity(item?.entity_name||'');
   const source=normalizeWorkspaceEntity(String(item?.source_activity||'').replace(/^rev:\s*/i,''));
-  return workspaceRowsForCity(cityName).filter(({row})=>{
-    const activity=normalizeWorkspaceEntity(String(row?.activity||'').replace(/^rev:\s*/i,''));
+  const facts=workspaceRowsForCity(cityName);
+  // Source activity is the binding authority. Do not borrow admission evidence
+  // from another monument reached by a fuzzy name/destination match.
+  if(source){
+    const exact=facts.filter(({row})=>normalizeWorkspaceEntity(String(row?.activity||'').replace(/^rev:\s*/i,''))===source);
+    if(exact.length)return exact;
+  }
+  return facts.filter(({row})=>{
     const canonical=normalizeWorkspaceEntity(row?.commerce_context?.canonical_place||'');
-    const to=normalizeWorkspaceEntity(row?.to||'');
-    const values=[activity,canonical,to].filter(Boolean);
-    return values.some(v=>(entity&&sameWorkspaceEntity(entity,v))||(source&&sameWorkspaceEntity(source,v))||(entity&&v.includes(entity))||(source&&v.includes(source)));
+    const activity=normalizeWorkspaceEntity(String(row?.activity||'').replace(/^rev:\s*/i,''));
+    return entity&&sameWorkspaceEntity(entity,canonical||activity);
   });
 }
 function contextPresentationForNeed(item,cityName){
@@ -742,7 +747,7 @@ function admissionEvidenceFromText(value=''){
   // V162 · explicit contradiction wins. Keep the expressions broad enough for
   // natural itinerary prose ("no se presupone una parada concreta ni una reserva")
   // without turning generic words such as "confirmar" into admission evidence.
-  const negative=/\b(acceso libre|entrada gratuita|free admission|no ticket|sin entrada|no requiere entrada|no necesita entrada|sin necesidad de entrada)\b|\bno se presupone\b.{0,90}\b(parada|reserva|reservacion|entrada|ticket|booking)\b|\b(no requiere|no necesita|sin necesidad de)\b.{0,45}\b(reserva|reservacion|ticket|entrada|booking)\b/i.test(text);
+  const negative=/\b(acceso libre|entrada gratuita|entrada libre|free admission|free entry|admission is free|entry is free|no admission (?:is )?required|no entry (?:ticket|fee) (?:is )?(?:needed|required)|(?:tickets?|admission|entry tickets?) (?:is |are )?not (?:needed|required)|does not require (?:an? )?(?:ticket|admission)|no ticket|sin entrada|no requiere entrada|no necesita entrada|sin necesidad de entrada)\b|\bno se presupone\b.{0,90}\b(parada|reserva|reservacion|entrada|ticket|booking)\b|\b(no requiere|no necesita|sin necesidad de)\b.{0,45}\b(reserva|reservacion|ticket|entrada|booking)\b/i.test(text);
   const positive=/\b(entrada|ticket|billete|boleto|admission|acceso)\b.{0,65}\b(de pago|pago|necesari|required|obligatori|requiere|requerid|reserva|reserv|anticipad|confirm|verific)\b|\b(requiere|requires?|necesita|necesaria|necesario|es necesaria|es necesario|debe comprar|hay que comprar)\b.{0,45}\b(entrada|ticket|billete|boleto|admission|acceso)\b|\b(entrada|ticket|boleto|admission)\s+(?:es\s+)?(?:necesaria|necesario|obligatoria|obligatorio|required)\b/i.test(text);
   return {positive,negative};
 }
@@ -751,14 +756,15 @@ function rowHasAdmissionEvidence(row){
   const semantic=String(cc?.semantic_type||'').toUpperCase();
   const ticket=String(cc?.ticket_need||'').toLowerCase();
   const evidence=admissionEvidenceFromText(`${row?.activity||''} ${cc?.canonical_place||''} ${row?.notes||''}`);
-  if(evidence.negative)return false;
+  if(cc.commercial_eligible===false||evidence.negative)return false;
+  if(semantic==='FREE_SIGHT'&&!['required','recommended'].includes(ticket))return false;
+  if(/\b(exterior|outside|photo stop|parada fotografica|fachada)\b/.test(normalizeWorkspaceEntity(row?.activity||'')))return false;
   const infrastructureText=normalizeWorkspaceEntity(`${row?.activity||''} ${cc?.canonical_place||''} ${row?.from||''} ${row?.to||''}`);
   const transportText=normalizeWorkspaceEntity(row?.transport||'');
   const accessToTransport=/\b(acceso|access|llegada|arrival|salida|departure|traslado|transfer)\b/.test(infrastructureText)&&/\b(tren|train|rail|metro|subway|bus|autobus|taxi|aeropuerto|airport|estacion|station|terminal)\b/.test(`${infrastructureText} ${transportText}`);
   if(accessToTransport)return false;
-  // Hard semantic exclusions cannot be overridden by incidental reservation
-  // language. FREE_SIGHT may be a classifier miss, so explicit admission prose
-  // is allowed to correct it deterministically.
+  // Hard exclusions cannot be overridden by incidental reservation language.
+  // Only a specific required/recommended access decision can repair FREE_SIGHT.
   if(['RESTAURANT','NONE'].includes(semantic))return false;
   // V163 Required Admission Recovery: explicit itinerary evidence may repair a
   // stale LOGISTICS/TRANSPORT semantic label, but only when the row itself is
@@ -785,13 +791,10 @@ function contextualCommerceNeedIsSane(item,cityName){
   if(/\b(paisaje agricola|agricultural landscape|corredor paisajistico|scenic corridor)\b/i.test(text)&&item?.need_type!=='guided_tour_optional')return false;
   const matches=workspaceRowsMatchingNeed(item,cityName);
   if(item?.need_type==='ticket_required'||item?.need_type==='reservation_recommended'){
-    // V162 · admission cards are itinerary-bound. If Context cannot bind the
-    // opportunity to a physical row, require strong admission evidence in the
-    // opportunity itself; otherwise fail closed instead of preserving a false
-    // positive merely because the server emitted it.
+    // Admission cards must bind to itinerary evidence. A generated message
+    // cannot justify its own commercial eligibility.
     if(!matches.length){
-      const evidence=admissionEvidenceFromText(`${item?.entity_name||''} ${item?.source_activity||''} ${item?.user_message||''}`);
-      return evidence.positive&&!evidence.negative;
+      return false; // Generated card copy is not independent itinerary evidence.
     }
     return matches.some(({row})=>rowHasAdmissionEvidence(row));
   }
@@ -832,6 +835,7 @@ function localTicketNeedsForCity(cityName,existing=[]){
   const existingKeys=new Set((existing||[]).filter(x=>x?.need_type==='ticket_required'||x?.need_type==='reservation_recommended').map(x=>normalizeWorkspaceEntity(x?.entity_name||x?.source_activity||'')));
   const out=[];
   workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
+    if(!rowHasAdmissionEvidence(row))return;
     const cc=row?.commerce_context||{};
     const semantic=String(cc?.semantic_type||'').toUpperCase();
     const ticket=String(cc?.ticket_need||'').toLowerCase();
@@ -843,7 +847,7 @@ function localTicketNeedsForCity(cityName,existing=[]){
     const evidence=admissionEvidenceFromText(`${activity} ${canonical} ${notes}`);
     // Deterministic contradiction guard: explicit free/no-reservation prose wins
     // over model metadata. Logistics/restaurants remain hard exclusions.
-    if(evidence.negative)return;
+    if(cc.commercial_eligible===false||evidence.negative)return;
     if(['RESTAURANT','NONE'].includes(semantic))return;
     const activityKey=normalizeWorkspaceEntity(activity);
     const movementOnly=/^(traslado|transfer|tren|train|bus|vuelo|flight|ferry|taxi|conduccion|drive|salida|departure|llegada|arrival|acceso ferroviario|railway access)\b/i.test(normalizeWorkspaceEntity(`${activity} ${canonical}`));

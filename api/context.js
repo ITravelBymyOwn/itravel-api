@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.10-v195-context-refresh";
+const CONTEXT_VERSION = "1.11-v323-admission-binding";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -184,8 +184,22 @@ function compactAdmissionText(value) {
     .trim();
 }
 
+// V323: source facts outrank incidental ticket words and generated messages.
+// An exterior fallback in a paid visit's notes is not a contradiction.
+function admissionSourceBlocked(source) {
+  const cc = source?.commerce_context || {};
+  const semantic = String(source?.commerce_semantic_type || cc.semantic_type || "").toUpperCase();
+  const ticket = String(source?.commerce_ticket_need || cc.ticket_need || "").toLowerCase();
+  const eligible = source?.commerce_commercial_eligible ?? cc.commercial_eligible;
+  if (eligible === false) return true;
+  if (["RESTAURANT", "NONE"].includes(semantic)) return true;
+  if (semantic === "FREE_SIGHT" && !["required", "recommended"].includes(ticket)) return true;
+  const text = compactAdmissionText(`${source?.activity || source?.source_activity || ""} ${source?.notes || ""}`);
+  return /\b(acceso libre|entrada gratuita|entrada libre|free admission|free entry|admission is free|entry is free|sin entrada|sin necesidad de entrada|no requiere entrada|no necesita entrada|no ticket|no admission (?:is )?required|no entry (?:ticket|fee) (?:is )?(?:needed|required)|(?:tickets?|admission|entry tickets?) (?:is |are )?not (?:needed|required)|does not require (?:an? )?(?:ticket|admission))\b/.test(text);
+}
+
 function blocksAttractionAdmission(source, entityName = "", entityType = "other") {
-  if (!source) return true;
+  if (!source || admissionSourceBlocked(source)) return true;
   if (entityType === "transport" || entityType === "route") return true;
 
   const entity = normalizedAdmissionText(entityName || source.entity_hint || source.activity);
@@ -233,27 +247,23 @@ function blocksAttractionAdmission(source, entityName = "", entityType = "other"
   return false;
 }
 
-function filterUnsafeAdmissionNeeds(needs) {
+function filterUnsafeAdmissionNeeds(needs, candidates = []) {
+  const byId = new Map(candidates.map(source => [source.candidate_id, source]));
   return (Array.isArray(needs) ? needs : []).filter(item => {
     if (!item || (item.need_type !== "ticket_required" && item.need_type !== "reservation_recommended")) {
       return true;
     }
 
-    return !blocksAttractionAdmission(
-      {
-        activity: item.source_activity,
-        source_activity: item.source_activity,
-        source_route: item.source_route,
-        transport: item.transport,
-        entity_hint: item.entity_name
-      },
-      item.entity_name,
-      item.entity_type
-    );
+    const candidateId = item.candidate_id || String(item.id || "").split(":")[0];
+    const source = byId.get(candidateId) || candidates.find(candidate =>
+      compactAdmissionText(candidate.activity) === compactAdmissionText(item.source_activity));
+    // Cached cards must still bind to their own itinerary activity.
+    if (!source) return false;
+    return !blocksAttractionAdmission(source, item.entity_name, item.entity_type);
   });
 }
 
-async function getPersistedContext(trip, city, contextVersion) {
+async function getPersistedContext(trip, city, contextVersion, candidates) {
   const runs = await supabaseFetch(
     `/trip_context_runs?select=id,context_version,source_trip_updated_at,candidate_count,visible_count,generated_at&` +
     `trip_id=eq.${encodeURIComponent(trip.id)}&city=eq.${encodeURIComponent(city)}&limit=1`,
@@ -276,7 +286,7 @@ async function getPersistedContext(trip, city, contextVersion) {
     Array.isArray(needs) ? needs.map(item => ({
       ...item,
       id: `${item.candidate_id}:${item.need_type}`
-    })) : []
+    })) : [], candidates
   );
 
   return {
@@ -522,12 +532,13 @@ function explicitTourHint(row) {
 }
 
 function accessEvidence(row) {
+  if (admissionSourceBlocked(row)) return { hint: "", evidence: "" };
   const activity = clean(row?.activity, 240);
   const notes = clean(row?.notes, 520);
   const source = `${activity} ${notes}`
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, " ");
+    .replace(/[\u0300-\u036f]/g, "");
 
   const conditional =
     /\b(considera|si quieres|si deseas|si es posible|segun entradas|segun ticket(?:s)?|opcional|optional|if you want|if desired|if possible|depending on (?:the )?ticket(?:s)?|where possible|consider|wenn du|falls du|wenn moglich|je nach ticket|si vous|si possible|selon (?:les )?billets|facultatif|se vuoi|se desideri|se possibile|in base (?:al|ai) bigliett(?:o|i)|opzionale|se quiser|se possivel)\b/i
@@ -622,11 +633,15 @@ function buildCandidates(trip, requestedCity) {
         const candidateId=`${normalizeEntityKey(sourceCity)||'unit'}-${day}-${index+1}`;
         const destination=clean(row.to,180);
         const entityHint=clean(cc.canonical_place,180)||destination||activity;
-        const ownNotes=clean(row.notes,320).replace(/^valid:\s*/i,"");
+        const ownNotes=clean(row.notes,1200).replace(/^valid:\s*/i,"");
         const pendingKey=`${sourceCity}:${day}`;
         const contextNotes=clean(`${pendingContextNotes.get(pendingKey)||""} ${ownNotes}`,620);
         pendingContextNotes.delete(pendingKey);
-        const evidence=accessEvidence({activity,notes:contextNotes});
+        // Access belongs to this activity; transfer notes must not leak into it.
+        const accessSource={activity,notes:ownNotes,commerce_context:cc};
+        const evidence=accessEvidence(accessSource);
+        const ticketNeed=clean(cc.ticket_need,40).toLowerCase();
+        const structuredHint=admissionSourceBlocked(accessSource)?'':ticketNeed==='required'?'ticket_required':ticketNeed==='recommended'?'reservation_recommended':'';
         candidates.push({
           candidate_id:candidateId,day,activity,entity_hint:entityHint,notes:ownNotes,context_notes:contextNotes,
           from:clean(row.from,160),to:destination,transport:clean(row.transport,120),
@@ -634,11 +649,12 @@ function buildCandidates(trip, requestedCity) {
           intercity_hint:transportInfo.intercity,transport_arrangement_hint:transportInfo.significant,
           explicit_tour_hint:explicitTourHint(row),
           commerce_semantic_type:semantic,
+          commerce_commercial_eligible:cc.commercial_eligible,
           commerce_ticket_need:clean(cc.ticket_need,40).toLowerCase(),
           commerce_guided_tour_value:clean(cc.guided_tour_value,40).toLowerCase(),
           destination_priority:clean(cc.destination_priority,40).toLowerCase(),
           commerce_canonical_place:clean(cc.canonical_place,180),
-          access_hint:evidence.hint||(semantic==='ATTRACTION_TICKET'?(String(cc.ticket_need||'').toLowerCase()==='required'?'ticket_required':'reservation_recommended'):''),
+          access_hint:structuredHint||evidence.hint,
           access_evidence:evidence.evidence||clean(cc.canonical_place||row.activity,260),
           route_resolution:plain(cc.route_resolution)
         });
@@ -1171,7 +1187,7 @@ export default async function handler(req, res) {
 
     // Persistence is a cache of derived context only. The generated itinerary remains the source of truth.
     try {
-      const persisted = await getPersistedContext(trip, city, contextVersion);
+      const persisted = await getPersistedContext(trip, city, contextVersion, candidates);
       if (persisted) {
         return res.status(200).json({
           ok: true,
@@ -1182,7 +1198,7 @@ export default async function handler(req, res) {
           needs: persisted.needs,
           meta: {
             candidate_count: persisted.run.candidate_count,
-            visible_count: persisted.run.visible_count,
+            visible_count: persisted.needs.length,
             persisted: true,
             cache_hit: true
           }
@@ -1205,7 +1221,7 @@ export default async function handler(req, res) {
       needs = consolidateOptionalTours(candidates, needs, city, uiLanguage);
       needs = ensureEvidenceBackedAccessNeeds(candidates, needs, city, uiLanguage);
       needs = ensureGuidedAdmissionAlternatives(candidates, needs, city, uiLanguage);
-      needs = dedupeSemanticNeeds(needs);
+      needs = filterUnsafeAdmissionNeeds(dedupeSemanticNeeds(needs), candidates);
     }
 
     let persisted = false;
