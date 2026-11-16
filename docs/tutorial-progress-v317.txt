@@ -1,0 +1,42 @@
+ITBMO V317 — Cierre del retoque del tutorial 05 EN y navegación del workspace
+
+Rama exclusiva: preview/site-evolution-2026-11-12.
+Main al comenzar: ec9edc6849fb77511d119a0aed17214bbfa47381.
+Base: V316, 3f2ba90a98b0753a4d262153ca769c8d3eb5a8dc.
+
+Cambios:
+- Tutorial 05 EN: se eliminan fondos rectangulares de las traducciones.
+  Se sustituyen únicamente los píxeles de los glifos por una reconstrucción
+  suave del fondo local; no se repinta el rectángulo completo.
+- La escena 058 usa la cabecera original de la captura EN equivalente,
+  conservando exactamente los botones y sus degradados.
+- Se ajusta la extensión de borrado para evitar restos de texto español.
+- La pista de audio del video V315 se copia sin recodificación ni nuevos fades.
+- La página EN apunta a tutorial-05-en-v317.mp4; las otras lecciones mantienen
+  las versiones verificadas 01-v315 / 02-v311 / 03-v314 / 04-v313 / 05 ES-v315.
+- Se retira la página temporal workspace-navigation-qa-v316.html.
+
+Validación de video: decodificación completa sin errores; duración 136,300 s;
+paquetes de audio idénticos byte a byte a V315 (SHA-256 comprobado).
+
+Navegación V316 comprobada en preview:
+- Vista de comprobación 320 px ES, 390 px EN y 844 px ES: ambos accesos
+  dentro del ancho disponible y altura táctil de 44 px.
+- Clic real en Volver al Planner ES abre Planner ES en el mismo contexto.
+- Clic real en Home EN abre la Home EN en el mismo contexto.
+- Prueba aislada del código real de handoff y lifecycle: los tres enlaces
+  guardan trip_id/snapshot y conservan la sesión al regresar al Planner;
+  los clics modificados no alteran el estado; un handoff vencido no evita
+  el cierre de sesión previsto. No se utilizó una cuenta ni un viaje nuevos.
+- La prueba visual usa datos de ejemplo. No sustituye una prueba de sesión
+  con una cuenta real en teléfono físico.
+
+No hay cambios en motor de generación, pagos ni afiliados.
+No hay promoción a main. El trabajo queda listo para revisión en preview.
+
+Fuentes de reproducción: respaldo V315 y capturas ES/EN 001-090 existentes.
+El ZIP V317 conserva scripts corregidos y material de comprobación.
+
+Continuidad para siguientes chats: leer este archivo y la cabecera de rama;
+no volver a imprimir árboles, código completo ni binarios/base64 en el chat.
+Procesar un bloque y registrar su resultado antes del siguiente.
