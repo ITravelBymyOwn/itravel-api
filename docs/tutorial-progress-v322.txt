@@ -1,0 +1,11 @@
+V322 — punto 1 de la revisión del usuario
+
+Solo se modifica tutorial 05 EN. En All your cities, el paneo termina en y=330 en vez de 395, manteniendo completo el bloque Prepare the essentials for your trip y See what I may need cuando aparece el clic. Capturas nativas intactas; no se reemplazan textos ni se reconstruye la interfaz.
+
+El detalle de Catedral EN baja de 25 a 17 segundos. Ambos tutoriales 05, ES y EN, duran 162 segundos (2:42). ES conserva exactamente el MP4 V321. La música y los demás tutoriales no se modifican. La página EN apunta a los archivos tutorial-05-en-v322 (MP4/poster/VTT) y muestra 2:42.
+
+Verificación local: decodificación completa del MP4 sin errores, duración exacta 162 s, detalle 17 s, fotograma codificado en 26.5 s con banner y botón completos. ZIP de diez tutoriales actualizado conservando los otros nueve videos byte por byte.
+
+Pendiente, sin iniciar: punto 2 — revisar la otra tarjeta ES generada y comprobar opciones de entradas Catedral/Alcázar (también en EN si Alcázar forma parte del itinerario), para elegir una captura coherente y sustituir solamente esa imagen. No se accedió a las tarjetas ni se modificaron reglas, motor, API o datos del viaje en V322.
+
+Solo preview/site-evolution-2026-11-12. Main sin cambios.
