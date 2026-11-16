@@ -35,3 +35,24 @@
 .tg-modal button:focus-visible{outline:3px solid #f1a76a;outline-offset:2px}
 @media(max-width:640px){.tg-modal{border-radius:12px}.tg-modal-nav{gap:6px}.tg-modal-nav button{padding:6px;font-size:12px}.tg-modal-nav small{font-size:10px}}
 @media(max-height:500px){.tg-modal{--tg-controls-height:94px;padding-top:36px}.tg-modal-close{top:2px}.tg-modal-nav{padding:6px;gap:6px}.tg-modal-nav button{height:44px;min-height:44px;align-content:center}.tg-modal-nav small{display:none}}
+
+/* V321: warmer chapter accents and a distinct Info Chat guide. */
+.tg-section{background:radial-gradient(ellipse at 95% 8%,#c9f5ee 0,transparent 46%),radial-gradient(ellipse at 1% 48%,#e0efff 0,transparent 48%),linear-gradient(180deg,#f8fdff,#edf8ff)}
+.tg-lesson{--tg-accent:#168bd3;--tg-tint:#edf7ff;--tg-line:#b5d7ef;background:linear-gradient(145deg,#fff,var(--tg-tint));border-color:var(--tg-line);border-top:4px solid var(--tg-accent)}
+.tg-playlist li:nth-child(2) .tg-lesson{--tg-accent:#079eab;--tg-tint:#e8faf9;--tg-line:#9ddfdc}
+.tg-playlist li:nth-child(3) .tg-lesson{--tg-accent:#dc7947;--tg-tint:#fff3e9;--tg-line:#efc6a8}
+.tg-playlist li:nth-child(4) .tg-lesson{--tg-accent:#5e83c1;--tg-tint:#edf1fd;--tg-line:#c1cfee}
+.tg-playlist li:nth-child(5) .tg-lesson{--tg-accent:#189b91;--tg-tint:#e6f9f1;--tg-line:#a4dcc8}
+.tg-lesson .tg-lesson-number{background:var(--tg-tint);box-shadow:inset 0 0 0 1px var(--tg-line)}
+.tg-lesson.is-active{border-color:var(--tg-accent);background:linear-gradient(130deg,#fff,var(--tg-tint));box-shadow:inset 0 -5px var(--tg-accent),0 10px 26px #087da51b}
+.tg-lesson.is-active .tg-lesson-number{background:var(--tg-accent);color:#fff;box-shadow:none}
+.tg-lesson:hover{border-color:var(--tg-accent)}
+.tg-feature{border-color:#a9d9e8;box-shadow:0 25px 70px #1d658421}
+.tg-insight:nth-child(2){background:linear-gradient(145deg,#fff,#eaf9f5);border-color:#c9e9de}
+.tg-insight:nth-child(3){background:linear-gradient(145deg,#fff,#fff3e8);border-color:#f0dac3}
+.tg-insight--chat{background:linear-gradient(125deg,#e4f6ff,#e3faf4);border:2px solid #91d7dc}
+.tg-insight--chat>span{background:linear-gradient(125deg,#078df0,#0aafbc);color:#fff}
+@media(min-width:901px){.tg-insights-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tg-feature-info{background:linear-gradient(115deg,#fafdff,#ecfaf7)}
+.tg-feature-info .tg-kicker{display:inline-flex;padding:5px 9px;border:1px solid #b8e2ee;border-radius:999px;background:#e6f5ff;color:#087e9d}
+.tg-tip{border-left:4px solid #e89164;background:linear-gradient(115deg,#f0fbff,#fff8f0)}

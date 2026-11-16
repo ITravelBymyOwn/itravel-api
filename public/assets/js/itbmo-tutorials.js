@@ -48,7 +48,7 @@
   const promise=video.play();
   if(promise)promise.catch(()=>{watch.hidden=false;});
  }
- buttons.forEach((button,i)=>button.addEventListener('click',()=>select(i)));
+ buttons.forEach((button,i)=>button.addEventListener('click',()=>{select(i);play(true);}));
  previous.addEventListener('click',()=>{select(selected-1);play();});
  next.addEventListener('click',()=>{select(selected+1);play();});
  watch.addEventListener('click',()=>play(true));
