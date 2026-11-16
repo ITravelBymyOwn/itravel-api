@@ -1,0 +1,1 @@
+V324 — Tutorial 05 ES/EN actualizado con capturas nativas de Segovia tras corrección V323: Catedral y Alcázar, sin entrada para el Acueducto. Videos de 162 segundos, 1920x1080, 20 fps. Audio original V322 conservado. Resto de tutoriales intactos. Rama preview/site-evolution-2026-11-16. ZIP de diez tutoriales, capturas ES/EN y fuentes actualizados. Main permanece en V322.
