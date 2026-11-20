@@ -22,13 +22,143 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V299.0-preview';
-const ITBMO_RUNTIME_ASSET='planner.js?v=299';
+const ITBMO_RUNTIME_BUILD='V325.0-preview';
+const ITBMO_RUNTIME_ASSET='planner.js?v=325';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
+
+const instagramCampaign = {
+  token: '',
+  session: '',
+  statusRequest: null,
+  expiresAt: '',
+  message: '',
+  claimInProgress: false
+};
+
+try { instagramCampaign.token = sessionStorage.getItem('itbmo_instagram_campaign') || ''; } catch (_) {}
+
+function instagramCampaignCopy() {
+  return getLang() === 'es' ? {
+    title: 'Tienes 1 itinerario gratis',
+    available: 'Podrás usarlo al confirmar la ruta de tu viaje.',
+    pending: 'Activa tu itinerario gratis con tu cuenta de ITBMO.',
+    signIn: 'Iniciar sesión',
+    register: 'Crear cuenta',
+    claim: 'Activar mi beneficio',
+    verifyEmail: 'Verifica el correo de tu cuenta ITBMO para activar el beneficio.',
+    invalid: 'Este enlace venció o ya se utilizó. Si la campaña sigue abierta, vuelve al DM de Instagram.',
+    closed: 'La campaña ya cerró.',
+    full: 'Se agotaron los cupos de la campaña.',
+    newOnly: 'Esta campaña está disponible para cuentas ITBMO creadas durante la promoción.',
+    claimed: 'Esta cuenta ya recibió un beneficio de esta campaña.',
+    retry: 'No pudimos completar la solicitud. Inténtalo nuevamente.',
+    free: 'Generar gratis',
+    review: 'Usarás tu itinerario gratis para esta ruta. Una vez confirmados, los viajeros, destinos, fechas y horarios quedarán guardados para este viaje.',
+    cancel: 'Cancelar y revisar',
+    preparing: 'Aplicando tu beneficio…',
+    success: 'Tu itinerario gratis está confirmado',
+    paymentPending: 'Ya hay un pago pendiente para esta ruta. Resuélvelo antes de usar un beneficio.',
+    unavailable: 'El beneficio ya no está disponible para este viaje. Vuelve a revisar tu ruta.'
+  } : {
+    title: 'You have 1 free itinerary',
+    available: 'You can use it when you confirm your trip route.',
+    pending: 'Activate your free itinerary with your ITBMO account.',
+    signIn: 'Sign in',
+    register: 'Create account',
+    claim: 'Activate my benefit',
+    verifyEmail: 'Verify your ITBMO account email to activate your benefit.',
+    invalid: 'This link expired or was already used. If the campaign is open, return to your Instagram DM.',
+    closed: 'The campaign has ended.',
+    full: 'All campaign spots have been claimed.',
+    newOnly: 'This campaign is available to ITBMO accounts created during the promotion.',
+    claimed: 'This account has already received a benefit from this campaign.',
+    retry: 'We could not complete your request. Please try again.',
+    free: 'Generate for free',
+    review: 'You will use your free itinerary for this route. Once you confirm, the travelers, destinations, dates and times will be saved for this trip.',
+    cancel: 'Cancel and review',
+    preparing: 'Applying your benefit…',
+    success: 'Your free itinerary is confirmed',
+    paymentPending: 'This trip already has a pending payment. Resolve it before using a benefit.',
+    unavailable: 'The benefit is no longer available for this trip. Please review your route.'
+  };
+}
+
+function renderInstagramCampaign() {
+  const section = qs('#instagram-campaign-benefit');
+  if (!section) return;
+  const copy = instagramCampaignCopy();
+  const available = Date.parse(instagramCampaign.expiresAt) > Date.now();
+  const pending = Boolean(instagramCampaign.token);
+  const registered = Boolean(currentUser?.is_registered && getStoredSessionToken());
+  section.hidden = !available && !pending && !instagramCampaign.message;
+  qs('#instagram-campaign-title').textContent = available ? copy.title : copy.pending;
+  qs('#instagram-campaign-copy').textContent = copy[instagramCampaign.message] ||
+    (available ? copy.available : '');
+  const login = qs('#instagram-campaign-login');
+  const register = qs('#instagram-campaign-register');
+  const claim = qs('#instagram-campaign-claim');
+  login.hidden = !pending || registered || Boolean(currentUser);
+  login.textContent = copy.signIn;
+  register.hidden = !pending || registered;
+  register.textContent = copy.register;
+  claim.hidden = !pending || !registered;
+  claim.disabled = instagramCampaign.claimInProgress;
+  claim.textContent = copy.claim;
+}
+
+function refreshInstagramCampaignStatus({ force = false } = {}) {
+  const session = currentUser?.is_registered ? getStoredSessionToken() : '';
+  if (instagramCampaign.session === session && !force) {
+    renderInstagramCampaign();
+    return instagramCampaign.statusRequest;
+  }
+  if (instagramCampaign.session !== session) {
+    instagramCampaign.expiresAt = '';
+    instagramCampaign.message = '';
+  }
+  instagramCampaign.session = session;
+  renderInstagramCampaign();
+  instagramCampaign.statusRequest = session ? promotionApi({ action: 'instagram_status', session_token: session })
+    .then(result => {
+      if (instagramCampaign.session !== session) return;
+      instagramCampaign.expiresAt = result.available ? result.expires_at : '';
+      renderInstagramCampaign();
+    })
+    .catch(() => {
+      if (instagramCampaign.session === session) instagramCampaign.session = '';
+    }) : null;
+  return instagramCampaign.statusRequest;
+}
+
+async function claimInstagramBenefit() {
+  const session = getStoredSessionToken();
+  if (instagramCampaign.claimInProgress || !session || !instagramCampaign.token) return;
+  instagramCampaign.claimInProgress = true;
+  renderInstagramCampaign();
+  try {
+    const result = await promotionApi({ action: 'instagram_claim', session_token: session, token: instagramCampaign.token });
+    if (session !== getStoredSessionToken()) return;
+    instagramCampaign.expiresAt = result.expires_at || '';
+    instagramCampaign.message = '';
+    instagramCampaign.token = '';
+    try { sessionStorage.removeItem('itbmo_instagram_campaign'); } catch (_) {}
+    void refreshInstagramCampaignStatus({ force: true });
+  } catch (error) {
+    if (session !== getStoredSessionToken()) return;
+    instagramCampaign.message = {
+      LINK_INVALID: 'invalid', CAMPAIGN_CLOSED: 'closed', CAMPAIGN_FULL: 'full',
+      VERIFIED_ACCOUNT_REQUIRED: 'verifyEmail', NEW_ACCOUNT_REQUIRED: 'newOnly',
+      ALREADY_CLAIMED: 'claimed', CAMPAIGN_UNAVAILABLE: 'closed'
+    }[error.code] || 'retry';
+  } finally {
+    instagramCampaign.claimInProgress = false;
+    renderInstagramCampaign();
+  }
+}
 
 /* ---------- Analytics bridge: Planner (Vercel) -> Webflow -> GTM/GA4 ----------
    Sends only allow-listed, non-personal operational data. */
@@ -1282,6 +1412,7 @@ function renderAuthState(){
   syncPendingVerificationWatch(pending);
   updateSaveAvailability();
   if(logged && !pending) scheduleAstraCoach('travelers','#travelers-box',520);
+  void refreshInstagramCampaignStatus();
 }
 
 function setLegalLanguage(containerSel, termsSel, privacySel){
@@ -15342,7 +15473,7 @@ function _removePaymentPreparingOverlaysNow_(){
   qsa('.itbmo-payment-preparing-overlay').forEach(el=>el.remove());
 }
 
-function showPostPaymentWelcome(){
+function showPostPaymentWelcome({ instagramBenefit=false }={}){
   _removePaymentPreparingOverlaysNow_();
   document.querySelector('.itbmo-postpay-overlay')?.remove();
   const es=getLang()==='es';
@@ -15352,7 +15483,7 @@ function showPostPaymentWelcome(){
   overlay.style.zIndex='62000';
   overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true">
     <div class="itbmo-postpay-icon">✓</div>
-    <h3>${es?'¡Gracias por tu pago!':'Thank you for your payment!'}</h3>
+    <h3>${instagramBenefit ? instagramCampaignCopy().success : (es?'¡Gracias por tu pago!':'Thank you for your payment!')}</h3>
     <p>${es
       ? 'El Asistente de viaje ya está habilitado para ayudarte a investigar y resolver dudas sobre tu viaje. Antes de generar el itinerario, te pediremos algunos datos de hospedaje, transporte, preferencias y restricciones para personalizar cada destino y estancia.'
       : 'Travel Concierge is now enabled to help you research and answer questions about your trip. Before generating the itinerary, we will ask for a few lodging, transport, preference and restriction details to personalize each destination and stay.'}</p>
@@ -15365,7 +15496,7 @@ function showPostPaymentWelcome(){
   });
 }
 
-async function completePaymentGate(successMessage=''){
+async function completePaymentGate(successMessage='', { instagramBenefit=false }={}){
   paymentGateSatisfiedTripId = currentTripId || paymentGateSatisfiedTripId;
   setPostPaymentTripConfigurationLocked(true);
   setCheckoutStatus(successMessage || _commerceCopy_().paid,'success');
@@ -15377,10 +15508,19 @@ async function completePaymentGate(successMessage=''){
     }
   }catch(err){console.warn('[INFO CHAT ENTITLEMENT AFTER PAYMENT]',err);}
   await _persistPostPaymentProgress_('preferences');
-  setTimeout(()=>{closeCheckoutModal();showPostPaymentWelcome();},420);
+  setTimeout(()=>{closeCheckoutModal();showPostPaymentWelcome({ instagramBenefit });},420);
 }
 
+let planningAdmissionInProgress = false;
+
 async function requestPlanningStart(){
+  if (planningAdmissionInProgress) return;
+  planningAdmissionInProgress = true;
+  try { await confirmPlanningStart(); }
+  finally { planningAdmissionInProgress = false; }
+}
+
+async function confirmPlanningStart(){
   if(!validateBaseDatesDMY()) return;
 
   if(!ITBMO_COMMERCE_CONFIG.commerceEnabled){
@@ -15388,7 +15528,20 @@ async function requestPlanningStart(){
     return;
   }
 
-  if(paymentGateSatisfiedTripId !== currentTripId && paymentWarningAcceptedTripId !== currentTripId){
+  const tripAtEntry = currentTripId;
+  await refreshInstagramCampaignStatus();
+  if (currentTripId !== tripAtEntry) return;
+  const instagramBenefit = Boolean(currentTripId && paymentGateSatisfiedTripId !== currentTripId &&
+    Date.parse(instagramCampaign.expiresAt) > Date.now());
+  const instagramCopy = instagramCampaignCopy();
+
+  if (instagramBenefit) {
+    const confirmed = await showPlannerDecision({
+      title: instagramCopy.title, message: instagramCopy.review,
+      confirmLabel: instagramCopy.free, cancelLabel: instagramCopy.cancel
+    });
+    if (!confirmed || currentTripId !== tripAtEntry) return;
+  } else if(paymentGateSatisfiedTripId !== currentTripId && paymentWarningAcceptedTripId !== currentTripId){
     const es=getLang()==='es';
     const confirmed=await showPlannerDecision({
       title:es?'Última revisión antes del pago':'Final review before payment',
@@ -15406,7 +15559,7 @@ async function requestPlanningStart(){
   const previousLabel=$start?.textContent || '';
   if($start){
     $start.disabled=true;
-    $start.textContent=getLang()==='es'?'Preparando pago seguro…':'Preparing secure payment…';
+    $start.textContent=instagramBenefit ? instagramCopy.preparing : (getLang()==='es'?'Preparando pago seguro…':'Preparing secure payment…');
     $start.classList.add('is-busy');
   }
   // V54: immediate visual acknowledgement after “Continuar al pago”. Show this
@@ -15416,12 +15569,35 @@ async function requestPlanningStart(){
 
   try{
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
+    if (currentTripId !== tripAtEntry) return;
     if(alreadyPaid){
       await _persistPostPaymentProgress_('preferences');
       // V103: end the blocking payment-status layer before the next modal is
       // mounted. Do not rely on the 220 ms exit animation for modal handoff.
       _removePaymentPreparingOverlaysNow_();
       showPostPaymentWelcome();
+      return;
+    }
+    if (instagramBenefit && currentTripId === tripAtEntry) {
+      try {
+        const result = await promotionApi({
+          action: 'instagram_redeem', session_token: getStoredSessionToken(), trip_id: tripAtEntry
+        });
+        if (currentTripId !== tripAtEntry) return;
+        if (result.code === 'TRIP_AUTHORIZED' && !await hasValidPaymentForCurrentTrip()) {
+          throw new Error('TRIP_AUTHORIZED');
+        }
+        closePaymentPreparing();
+        void refreshInstagramCampaignStatus({ force: true });
+        const redeemed = result.code === 'REDEEMED';
+        await completePaymentGate(redeemed ? instagramCopy.success : '', { instagramBenefit: redeemed });
+      } catch (error) {
+        closePaymentPreparing();
+        void refreshInstagramCampaignStatus({ force: true });
+        const message = { BENEFIT_UNAVAILABLE: 'unavailable', TRIP_UNAVAILABLE: 'unavailable',
+          PAYMENT_PENDING: 'paymentPending' }[error.code] || 'retry';
+        setStatus(instagramCopy[message], 'error');
+      }
       return;
     }
     trackITBMOEvent('checkout_opened',{
@@ -15573,6 +15749,12 @@ async function beginTilopayCheckout(){
 
 function initCommerceAndSupport(){
   applyCommerceI18n();
+  qs('#instagram-campaign-login')?.addEventListener('click', () => openAccountDialog('login'));
+  qs('#instagram-campaign-register')?.addEventListener('click', () => {
+    if (currentUser && !currentUser.is_registered) openGuestAccountUpgrade();
+    else openAccountDialog('register');
+  });
+  qs('#instagram-campaign-claim')?.addEventListener('click', claimInstagramBenefit);
 
   $needHelp?.addEventListener('click',openSupportModal);
   $supportClose?.addEventListener('click',closeSupportModal);

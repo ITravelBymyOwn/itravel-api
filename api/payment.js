@@ -678,6 +678,17 @@ async function handlePayPalCaptureOrder(res, body, session) {
     });
   }
 
+  if (process.env.ITBMO_INSTAGRAM_CAMPAIGN_ENABLED === 'true') {
+    const entitlements = await supabaseFetch(
+      `/promo_redemptions?select=id&trip_id=eq.${encodeURIComponent(trip.id)}&` +
+      `user_id=eq.${encodeURIComponent(session.user_id)}&status=eq.consumed&final_amount=eq.0&` +
+      'metadata->>source=eq.instagram_campaign&limit=1'
+    );
+    if (entitlements?.length) {
+      return res.status(200).json({ ok: true, paid: true, entitlement_source: 'promotion' });
+    }
+  }
+
   try {
     const order = await paypalRequest(
       `/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`,

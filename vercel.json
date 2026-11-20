@@ -107,6 +107,10 @@
       "dest": "/api/payment.js"
     },
     {
+      "src": "/api/instagram-campaign-webhook",
+      "dest": "/api/promotions.js?endpoint=instagram-campaign-webhook"
+    },
+    {
       "src": "/api/promotions",
       "dest": "/api/promotions.js"
     },

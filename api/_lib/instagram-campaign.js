@@ -1,0 +1,281 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
+import { commercePricing } from './promo-engine.js';
+
+const HOUR = 3_600_000;
+const MAX_BODY = 256_000;
+const instagramId = /^[0-9]{1,40}$/;
+const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/;
+const claimToken = /^([\da-f-]{36})\.(\d{13})\.([a-zA-Z0-9_-]{43})$/;
+const campaignCopy = {
+  es: {
+    intro: '¡Gracias por participar en ITBMO! Responde CONFIRMAR a este mensaje para que podamos verificar tu participación.',
+    follow: 'Sigue a @itravelbymyown y vuelve a responder CONFIRMAR cuando hayas terminado.',
+    link: '¡Participación verificada! Abre este enlace e inicia sesión o crea una cuenta ITBMO para activar tu itinerario gratis:'
+  },
+  en: {
+    intro: 'Thanks for joining the ITBMO campaign! Reply CONFIRM to this message so we can verify your entry.',
+    follow: 'Follow @itravelbymyown, then reply CONFIRM again when you’re ready.',
+    link: 'Your entry is verified! Open this link and sign in or create an ITBMO account to activate your free itinerary:'
+  }
+};
+
+function environment() {
+  const value = process.env.VERCEL_ENV || 'preview';
+  return process.env.ITBMO_INSTAGRAM_CAMPAIGN_ENABLED === 'true' &&
+    ['preview', 'production'].includes(value) ? value : null;
+}
+
+function webhookConfig() {
+  const config = {
+    environment: environment(),
+    account: process.env.ITBMO_INSTAGRAM_ACCOUNT_ID,
+    accessToken: process.env.ITBMO_INSTAGRAM_ACCESS_TOKEN,
+    appSecret: process.env.ITBMO_INSTAGRAM_APP_SECRET,
+    verifyToken: process.env.ITBMO_INSTAGRAM_VERIFY_TOKEN,
+    signingKey: process.env.ITBMO_INSTAGRAM_CLAIM_SECRET,
+    version: process.env.ITBMO_INSTAGRAM_GRAPH_VERSION,
+    origin: process.env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN
+  };
+  if (!config.environment || !instagramId.test(config.account || '') || !config.accessToken ||
+      !config.appSecret || !config.verifyToken || !(config.signingKey?.length >= 32) ||
+      !/^v\d+\.0$/.test(config.version || '') || !config.origin) return null;
+  try {
+    const origin = new URL(config.origin);
+    if (origin.protocol !== 'https:' || origin.origin !== config.origin) return null;
+  } catch { return null; }
+  return config;
+}
+
+function hmac(value, key, encoding) {
+  return createHmac('sha256', key).update(value).digest(encoding);
+}
+
+function equal(left, right) {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export function countMentions(text, author) {
+  const excluded = new Set(['itravelbymyown', String(author || '').toLowerCase()]);
+  const matches = String(text || '').matchAll(/(?:^|[^\p{L}\p{N}_.@])@([a-z0-9_](?:[a-z0-9._]{0,28}[a-z0-9_])?)(?![\p{L}\p{N}_]|\.[a-z0-9_.])/giu);
+  return new Set(Array.from(matches, match => match[1].toLowerCase()).filter(name => !excluded.has(name))).size;
+}
+
+async function instagramRequest(config, path, body) {
+  const response = await fetch(`https://graph.instagram.com/${config.version}/${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { Authorization: `Bearer ${config.accessToken}`, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(8_000)
+  });
+  if (!response.ok) {
+    const error = new Error(`Instagram API: ${response.status}`);
+    error.instagramError = (await response.json().catch(() => null))?.error;
+    throw error;
+  }
+  return response.json();
+}
+
+function sendInstagramMessage(config, recipient, text) {
+  return instagramRequest(config, `${config.account}/messages`, { recipient, message: { text } });
+}
+
+async function getSetting(campaignId, scope) {
+  const rows = await supabaseFetch(`/instagram_campaign_settings?select=campaign_id,campaigns(status,starts_at,ends_at)&campaign_id=eq.${campaignId}&environment=eq.${scope}&limit=1`);
+  return rows?.[0]?.campaigns;
+}
+
+function campaignIsOpen(campaign, moment = Date.now()) {
+  return campaign?.status === 'active' && Date.parse(campaign.starts_at) <= moment &&
+    moment < Date.parse(campaign.ends_at);
+}
+
+function patchParticipation(query, data) {
+  return supabaseFetch(`/instagram_campaign_participation?${query}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(data)
+  });
+}
+
+async function withOutboundLease(row, filter, delivery) {
+  const now = new Date().toISOString();
+  const lease = new Date(Date.now() + 30_000).toISOString();
+  const rows = await patchParticipation(
+    `id=eq.${row.id}&or=(outbound_lease_until.is.null,outbound_lease_until.lt.${encodeURIComponent(now)})&${filter}`,
+    { outbound_lease_until: lease }
+  );
+  if (!rows?.length) {
+    const latest = await supabaseFetch(`/instagram_campaign_participation?id=eq.${row.id}&${filter}&limit=1`);
+    if (latest?.length) throw new Error('DELIVERY_IN_PROGRESS');
+    return;
+  }
+  const locked = rows[0];
+  const condition = `id=eq.${row.id}&outbound_lease_until=eq.${encodeURIComponent(lease)}`;
+  try {
+    const patch = await delivery(locked, condition);
+    await patchParticipation(condition, { ...patch, outbound_lease_until: null });
+  } catch (error) {
+    await patchParticipation(condition, { outbound_lease_until: null });
+    throw error;
+  }
+}
+
+async function handleComment(config, comment, eventTime) {
+  const actor = comment?.from?.id;
+  const media = comment?.media?.id;
+  const commentId = comment?.id;
+  if (comment?.parent_id || actor === config.account ||
+      ![actor, media, commentId].every(value => typeof value === 'string' && instagramId.test(value)) ||
+      countMentions(comment.text, comment.from.username) < 2) return;
+
+  const reels = await supabaseFetch(`/instagram_campaign_reels?select=campaign_id,language,test_keyword&environment=eq.${config.environment}&media_id=eq.${media}&limit=1`);
+  const reel = reels?.[0];
+  if (!reel || (reel.test_keyword && !String(comment.text).split(/\s+/).some(
+    word => word.toUpperCase() === reel.test_keyword.toUpperCase()))) return;
+  const campaign = await getSetting(reel.campaign_id, config.environment);
+  if (!campaignIsOpen(campaign) || !campaignIsOpen(campaign, eventTime)) return;
+
+  await supabaseFetch('/instagram_campaign_participation?on_conflict=campaign_id,instagram_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=ignore-duplicates' },
+    body: JSON.stringify({ campaign_id: reel.campaign_id, instagram_id: actor, comment_id: commentId, language: reel.language })
+  });
+  const rows = await supabaseFetch(`/instagram_campaign_participation?campaign_id=eq.${reel.campaign_id}&instagram_id=eq.${actor}&limit=1`);
+  const row = rows?.[0];
+  if (!row || row.intro_sent_at) return;
+  await withOutboundLease(row, 'intro_sent_at=is.null', async locked => {
+    await sendInstagramMessage(config, { comment_id: locked.comment_id }, campaignCopy[locked.language].intro);
+    return { intro_sent_at: new Date().toISOString() };
+  });
+}
+
+async function handleConfirmation(config, event) {
+  const actor = event?.sender?.id;
+  const messageId = event?.message?.mid;
+  if (typeof actor !== 'string' || actor === config.account || !instagramId.test(actor) ||
+      event?.recipient?.id !== config.account || event?.message?.is_echo ||
+      typeof messageId !== 'string' || messageId.length > 300 ||
+      !/^(CONFIRM|CONFIRMAR)$/i.test(String(event?.message?.text || '').trim()) ||
+      (Number.isFinite(event.timestamp) && Date.now() - event.timestamp >= 24 * HOUR)) return;
+
+  const pending = await supabaseFetch(`/instagram_campaign_participation?select=*,instagram_campaign_settings!inner(environment)&instagram_id=eq.${actor}&instagram_campaign_settings.environment=eq.${config.environment}&user_id=is.null&order=created_at.desc&limit=5`);
+  for (const row of pending || []) {
+    const campaign = await getSetting(row.campaign_id, config.environment);
+    if (!campaignIsOpen(campaign) || row.last_message_id === messageId) continue;
+    await withOutboundLease(row, 'user_id=is.null', async (locked, condition) => {
+      if (locked.last_message_id === messageId ||
+          (locked.link_sent_at && Date.parse(locked.link_expires_at) > Date.now())) return {};
+      const profile = await instagramRequest(config, `${actor}?fields=is_user_follow_business`);
+      if (typeof profile.is_user_follow_business !== 'boolean') throw new Error('FOLLOW_STATUS_UNAVAILABLE');
+      const copy = campaignCopy[locked.language];
+      if (!profile.is_user_follow_business) {
+        await sendInstagramMessage(config, { id: actor }, copy.follow);
+        return { last_message_id: messageId };
+      }
+      const expiry = Date.parse(locked.link_expires_at) > Date.now() ?
+        Date.parse(locked.link_expires_at) : Date.now() + HOUR;
+      const expiresAt = new Date(expiry).toISOString();
+      await patchParticipation(condition, { link_expires_at: expiresAt });
+      const value = `${locked.id}.${expiry}`;
+      const token = `${value}.${hmac(value, config.signingKey, 'base64url')}`;
+      const link = `${config.origin}/planner.html?lang=${locked.language}#itbmo_campaign=${token}`;
+      await sendInstagramMessage(config, { id: actor }, `${copy.link}\n${link}`);
+      return { last_message_id: messageId, link_sent_at: new Date().toISOString() };
+    });
+    return;
+  }
+}
+
+export async function instagramCampaignWebhook(req, res) {
+  const config = webhookConfig();
+  res.setHeader('Cache-Control', 'no-store');
+  if (!config) return res.status(404).end();
+  if (req.method === 'GET') {
+    const query = req.query || {};
+    const token = query['hub.verify_token'];
+    const challenge = query['hub.challenge'];
+    if (query['hub.mode'] !== 'subscribe' || typeof token !== 'string' ||
+        !equal(token, config.verifyToken) || typeof challenge !== 'string' || !/^\d+$/.test(challenge)) {
+      return res.status(403).end();
+    }
+    return res.status(200).send(challenge);
+  }
+  if (req.method !== 'POST') return res.status(405).end();
+  const signature = req.headers['x-hub-signature-256'];
+  if (typeof signature !== 'string' || !/^sha256=[\da-f]{64}$/.test(signature)) return res.status(403).end();
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_BODY) return res.status(413).end();
+    chunks.push(buffer);
+  }
+  const raw = Buffer.concat(chunks);
+  if (!equal(signature, `sha256=${hmac(raw, config.appSecret, 'hex')}`)) return res.status(403).end();
+  let payload;
+  try { payload = JSON.parse(raw.toString('utf8')); }
+  catch { return res.status(400).end(); }
+  if (payload?.object !== 'instagram' || !Array.isArray(payload.entry)) return res.status(200).end();
+  try {
+    for (const entry of payload.entry || []) {
+      if (entry.id !== config.account) continue;
+      const time = Number(entry.time);
+      const eventTime = Number.isFinite(time) && time > 0 ? (time < 1e12 ? time * 1000 : time) : Date.now();
+      if (Date.now() - eventTime < 7 * 24 * HOUR) {
+        for (const event of entry.changes || []) {
+          if (event.field === 'comments') await handleComment(config, event.value, eventTime);
+          if (event.field === 'messages') await handleConfirmation(config, event.value);
+        }
+      }
+      for (const event of entry.messaging || []) await handleConfirmation(config, event);
+    }
+    return res.status(200).end();
+  } catch (error) {
+    console.error('ITBMO Instagram campaign delivery failed', error.message);
+    return res.status(503).end();
+  }
+}
+
+export async function instagramCampaignAction(action, body, sessionToken) {
+  const scope = environment();
+  if (!scope) return action === 'instagram_status' ? { ok: true, available: false } : { ok: false, code: 'CAMPAIGN_UNAVAILABLE' };
+  const session = await resolveSession(sessionToken);
+  if (!session || session.auth_level !== 'supabase_auth') {
+    return action === 'instagram_status' ? { ok: true, available: false } : { ok: false, code: 'VERIFIED_ACCOUNT_REQUIRED' };
+  }
+  if (action === 'instagram_status') {
+    const rows = await supabaseFetch(`/instagram_campaign_participation?select=benefit_expires_at,instagram_campaign_settings!inner(environment)&user_id=eq.${session.user_id}&instagram_campaign_settings.environment=eq.${scope}&redemption_id=is.null&benefit_expires_at=gt.${encodeURIComponent(new Date().toISOString())}&order=benefit_expires_at.asc&limit=1`);
+    return { ok: true, available: Boolean(rows?.length), expires_at: rows?.[0]?.benefit_expires_at || null };
+  }
+  let result;
+  if (action === 'instagram_claim') {
+    const token = typeof body.token === 'string' ? body.token.match(claimToken) : null;
+    const key = process.env.ITBMO_INSTAGRAM_CLAIM_SECRET;
+    if (!token || !uuid.test(token[1]) || !(key?.length >= 32) ||
+        !equal(token[3], hmac(`${token[1]}.${token[2]}`, key, 'base64url'))) {
+      return { ok: false, code: 'LINK_INVALID' };
+    }
+    result = await supabaseFetch('/rpc/itbmo_instagram_campaign_claim', {
+      method: 'POST',
+      body: JSON.stringify({
+        p_participation: token[1], p_link_expires_at: new Date(Number(token[2])).toISOString(),
+        p_user: session.user_id, p_environment: scope
+      })
+    });
+  } else {
+    if (typeof body.trip_id !== 'string' || !uuid.test(body.trip_id)) return { ok: false, code: 'TRIP_UNAVAILABLE' };
+    const price = commercePricing();
+    result = await supabaseFetch('/rpc/itbmo_instagram_campaign_redeem', {
+      method: 'POST',
+      body: JSON.stringify({
+        p_user: session.user_id, p_session: session.id, p_trip: body.trip_id,
+        p_environment: scope, p_base: price.base_price, p_currency: price.currency
+      })
+    });
+  }
+  return { ...result, ok: ['CLAIMED', 'REDEEMED', 'TRIP_AUTHORIZED'].includes(result?.code) };
+}

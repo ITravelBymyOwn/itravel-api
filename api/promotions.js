@@ -1,13 +1,21 @@
 import { reservePromotion, consumePromotion, getPromotionReservation } from './_lib/promo-engine.js';
 import { resolveSession } from './_lib/itbmo-foundation.js';
+import { instagramCampaignAction, instagramCampaignWebhook } from './_lib/instagram-campaign.js';
 
 export default async function handler(req, res) {
+  if (req.query?.endpoint === 'instagram-campaign-webhook') return instagramCampaignWebhook(req, res);
   if (req.method !== 'POST') return res.status(405).json({ ok:false, code:'METHOD_NOT_ALLOWED' });
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const action = String(body.action || '').trim().toLowerCase();
     const sessionToken = String(body.session_token || '').trim();
+
+    if (['instagram_claim', 'instagram_status', 'instagram_redeem'].includes(action)) {
+      res.setHeader('Cache-Control', 'no-store');
+      const result = await instagramCampaignAction(action, body, sessionToken);
+      return res.status(result.ok ? 200 : 400).json(result);
+    }
 
     if (action === 'reserve') {
       const result = await reservePromotion({

@@ -1,0 +1,133 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { createHmac } = require('node:crypto');
+const { Readable } = require('node:stream');
+
+const campaignId = 'a1200000-0000-4000-8000-000000000000';
+const participationId = 'a3200000-0000-4000-8000-000000000000';
+const profileId = 'b0000000-0000-4000-8000-000000000000';
+const sessionId = 'c0000000-0000-4000-8000-000000000000';
+const testSecret = 'fixture-secret';
+const env = {
+  VERCEL_ENV: 'preview',
+  SUPABASE_URL: 'https://fixture.supabase.invalid',
+  SUPABASE_SECRET_KEY: 'fixture',
+  ITBMO_INSTAGRAM_CAMPAIGN_ENABLED: 'true',
+  ITBMO_INSTAGRAM_ACCOUNT_ID: '100',
+  ITBMO_INSTAGRAM_ACCESS_TOKEN: 'fixture',
+  ITBMO_INSTAGRAM_APP_SECRET: testSecret,
+  ITBMO_INSTAGRAM_VERIFY_TOKEN: 'fixture-verification',
+  ITBMO_INSTAGRAM_CLAIM_SECRET: 'fixture-signing-key-at-least-32-bytes',
+  ITBMO_INSTAGRAM_GRAPH_VERSION: 'v27.0',
+  ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN: 'https://preview.example.test'
+};
+const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+
+function response() {
+  return {
+    code: null,
+    setHeader() {},
+    status(code) { this.code = code; return this; },
+    send(value) { this.value = value; return this; },
+    end() { return this; }
+  };
+}
+
+test('Instagram delivery respects scope, language, consent, deduplication and signed claims', async (t) => {
+  Object.assign(process.env, env);
+  const { countMentions, instagramCampaignAction, instagramCampaignWebhook } = await import('../api/_lib/instagram-campaign.js');
+  const messages = [];
+  const participants = new Map();
+  let follows = false;
+  let claimInput = null;
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(input);
+    const body = init?.body && JSON.parse(init.body);
+    if (url.hostname === 'graph.instagram.com') {
+      if (init.method === 'POST') {
+        messages.push(body);
+        return json({ message_id: String(messages.length) });
+      }
+      return json({ is_user_follow_business: follows });
+    }
+    if (url.pathname.endsWith('/instagram_campaign_reels')) {
+      const media = url.searchParams.get('media_id');
+      return json(['eq.42', 'eq.43'].includes(media) ? [{
+        campaign_id: campaignId, language: media === 'eq.42' ? 'es' : 'en', test_keyword: 'PRUEBAITBMO'
+      }] : []);
+    }
+    if (url.pathname.endsWith('/instagram_campaign_settings')) {
+      return json([{ campaigns: {
+        status: 'active', starts_at: new Date(Date.now() - 600_000).toISOString(),
+        ends_at: new Date(Date.now() + 600_000).toISOString()
+      } }]);
+    }
+    if (url.pathname.endsWith('/instagram_campaign_participation')) {
+      if (init.method === 'POST') {
+        if (!participants.has(body.instagram_id)) participants.set(body.instagram_id, { id: participationId, ...body });
+        return json([]);
+      }
+      const row = url.searchParams.has('instagram_id') ?
+        participants.get(url.searchParams.get('instagram_id').slice(3)) : [...participants.values()].at(-1);
+      if (!row) return json([]);
+      if (init.method === 'PATCH') Object.assign(row, body);
+      return json([row]);
+    }
+    if (url.pathname.endsWith('/user_sessions')) return json([{
+      id: sessionId, user_id: profileId, auth_level: 'supabase_auth'
+    }]);
+    if (url.pathname.endsWith('/itbmo_instagram_campaign_claim')) {
+      claimInput = body;
+      return json({ code: 'CLAIMED', expires_at: '2026-12-20T00:00:00Z' });
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  });
+  async function deliver(entry, { secret = testSecret } = {}) {
+    const body = Buffer.from(JSON.stringify({ object: 'instagram', entry: [{ id: '100', time: Date.now(), ...entry }] }));
+    const req = Readable.from([body.subarray(0, 20), body.subarray(20)]);
+    req.method = 'POST';
+    req.headers = { 'x-hub-signature-256': 'sha256=' + createHmac('sha256', secret).update(body).digest('hex') };
+    const res = response();
+    await instagramCampaignWebhook(req, res);
+    return res.code;
+  }
+  const comment = (text, media = '42', actor = '20') => ({
+    changes: [{ field: 'comments', value: { id: '50', media: { id: media }, from: { id: actor, username: 'self' }, text } }]
+  });
+  const reply = (mid, text = 'CONFIRMAR') => ({
+    messaging: [{ timestamp: Date.now(), sender: { id: '20' }, recipient: { id: '100' }, message: { mid, text } }]
+  });
+
+  assert.equal(countMentions('@Friend, @friend, @self and not@test.com.', 'self'), 1);
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other'), { secret: 'wrong' }), 403);
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @friend.')), 200);
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '999')), 200);
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 200);
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 200);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].message.text, /Responde CONFIRMAR/);
+  assert.equal(await deliver(reply('1', 'otro mensaje')), 200);
+  assert.equal(messages.length, 1);
+  assert.equal(await deliver(reply('2')), 200);
+  assert.match(messages[1].message.text, /Sigue a @itravelbymyown/);
+
+  follows = true;
+  assert.equal(await deliver(reply('3')), 200);
+  const link = new URL(messages[2].message.text.split('\n').at(-1));
+  assert.equal(link.searchParams.get('lang'), 'es');
+  const token = new URLSearchParams(link.hash.slice(1)).get('itbmo_campaign');
+  const claim = await instagramCampaignAction('instagram_claim', { token }, 'fixture-session');
+  assert.equal(claim.ok, true);
+  assert.equal(claimInput.p_user, profileId);
+  assert.equal(claimInput.p_environment, 'preview');
+  assert.equal(claimInput.p_participation, participationId);
+  assert.equal((await instagramCampaignAction('instagram_claim', { token: token + 'x' }, 'fixture-session')).code, 'LINK_INVALID');
+  assert.equal(await deliver(reply('3')), 200);
+  assert.equal(messages.length, 3);
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '30')), 200);
+  assert.match(messages[3].message.text, /Reply CONFIRM/);
+
+  process.env.ITBMO_INSTAGRAM_CAMPAIGN_ENABLED = 'false';
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 404);
+  assert.deepEqual(await instagramCampaignAction('instagram_status', {}, 'fixture-session'), { ok: true, available: false });
+});
