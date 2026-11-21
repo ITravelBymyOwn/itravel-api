@@ -7,6 +7,10 @@ const MAX_BODY = 256_000;
 const instagramId = /^[0-9]{1,40}$/;
 const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/;
 const claimToken = /^([\da-f-]{36})\.(\d{13})\.([a-zA-Z0-9_-]{43})$/;
+const graphHosts = new Map([
+  ['instagram_login', 'graph.instagram.com'],
+  ['unified_login', 'graph.facebook.com']
+]);
 const campaignCopy = {
   es: {
     intro: '¡Gracias por participar en ITBMO! Responde CONFIRMAR a este mensaje para que podamos verificar tu participación.',
@@ -35,11 +39,12 @@ function webhookConfig() {
     verifyToken: process.env.ITBMO_INSTAGRAM_VERIFY_TOKEN,
     signingKey: process.env.ITBMO_INSTAGRAM_CLAIM_SECRET,
     version: process.env.ITBMO_INSTAGRAM_GRAPH_VERSION,
+    graphHost: graphHosts.get(process.env.ITBMO_INSTAGRAM_LOGIN_MODE ?? 'instagram_login'),
     origin: process.env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN
   };
   if (!config.environment || !instagramId.test(config.account || '') || !config.accessToken ||
       !config.appSecret || !config.verifyToken || !(config.signingKey?.length >= 32) ||
-      !/^v\d+\.0$/.test(config.version || '') || !config.origin) return null;
+      !/^v\d+\.0$/.test(config.version || '') || !config.graphHost || !config.origin) return null;
   try {
     const origin = new URL(config.origin);
     if (origin.protocol !== 'https:' || origin.origin !== config.origin) return null;
@@ -64,7 +69,7 @@ export function countMentions(text, author) {
 }
 
 async function instagramRequest(config, path, body) {
-  const response = await fetch(`https://graph.instagram.com/${config.version}/${path}`, {
+  const response = await fetch(`https://${config.graphHost}/${config.version}/${path}`, {
     method: body ? 'POST' : 'GET',
     headers: { Authorization: `Bearer ${config.accessToken}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,

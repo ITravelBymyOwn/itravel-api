@@ -1,8 +1,8 @@
-ITBMO V325 · Campañas de itinerarios por Instagram
+ITBMO V326 · Campañas de itinerarios por Instagram
 
 Estado
 La funcionalidad viene apagada. La prueba previa de Manychat solo confirmó
-comentario → DM → web. La V325 usa una aplicación de Meta para comprobar las
+comentario → DM → web. La campaña usa una aplicación de Meta para comprobar las
 menciones, verificar seguimiento y enviar el enlace personal. Mantener apagada
 la automatización de Manychat del reel que procese la nueva aplicación.
 
@@ -12,19 +12,22 @@ Configurar la prueba
    campañas ni modifica cupones existentes. Si la Preview usa la misma base
    que producción, usar una base de pruebas aislada para QA o autorizar
    explícitamente la migración compartida antes de aplicarla.
-2. En Meta for Developers configurar Instagram API with Instagram Login
-   para la cuenta profesional de ITBMO. Autorizar instagram_business_basic,
-   instagram_business_manage_comments e instagram_business_manage_messages.
-   Suscribir el evento comments y los mensajes entrantes messages.
-   Comprobar el alcance de la aplicación con una cuenta externa al equipo.
+2. En Meta for Developers configurar Instagram API with Unified Login
+   para la cuenta profesional de ITBMO. Solicitar instagram_basic,
+   instagram_manage_comments e instagram_manage_messages.
+   Agregar la cuenta como evaluadora y aceptar la invitación en Instagram.
+   Generar un Business Integration System User Access Token y comprobar la
+   cuenta profesional con GET /me/assigned_instagram_accounts en graph.facebook.com.
+   Conservar el ID profesional devuelto para identificar la cuenta de campaña.
 3. En Vercel configurar únicamente Preview y la rama de campañas.
    ITBMO_INSTAGRAM_CAMPAIGN_ENABLED=true
    ITBMO_INSTAGRAM_ACCOUNT_ID             ID de la cuenta profesional
-   ITBMO_INSTAGRAM_ACCESS_TOKEN           Token de acceso de Instagram
+   ITBMO_INSTAGRAM_ACCESS_TOKEN           Token de acceso de la modalidad elegida
    ITBMO_INSTAGRAM_APP_SECRET             Secreto de la aplicación de Meta
    ITBMO_INSTAGRAM_VERIFY_TOKEN           Secreto independiente para la suscripción
    ITBMO_INSTAGRAM_CLAIM_SECRET           Secreto independiente de 32 bytes o más
    ITBMO_INSTAGRAM_GRAPH_VERSION          Versión vNN.0 habilitada en Meta
+   ITBMO_INSTAGRAM_LOGIN_MODE=unified_login
    ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN        Origen HTTPS de Preview sin / al final
    Separar todos los secretos de ambientes posteriores. No ponerlos en Git.
 4. En Meta registrar el webhook /api/instagram-campaign-webhook de ese origen.
@@ -32,6 +35,10 @@ Configurar la prueba
    abrir el Planner de prueba. Si Preview tiene autenticación de Vercel, acordar
    un destino de QA accesible para Meta antes de registrar la suscripción.
    El webhook valida el secreto de suscripción y las firmas de Meta.
+   Para Unified Login, seleccionar el objeto Instagram en Webhooks y suscribir
+   comments y messages. Con el token de la cuenta, suscribir también la app
+   desde POST /{ig-user-id}/subscribed_apps en graph.facebook.com.
+   Validar un comentario y un mensaje reales con cuentas de prueba.
 5. Cargar una fila en campaigns, inicialmente draft, con starts_at y ends_at
    explícitos y un campaign_key único. Cargar su configuración en
    instagram_campaign_settings (campaign_id, environment, quota, benefit_days,
@@ -41,6 +48,12 @@ Configurar la prueba
    se puede usar test_keyword para limitar el disparador a comentarios de prueba.
    El estado active admite registros dentro de las fechas. El estado closed
    detiene las nuevas asignaciones y conserva los beneficios ya emitidos.
+
+Compatibilidad
+Las instalaciones que ya usen Instagram Login conservan graph.instagram.com
+cuando ITBMO_INSTAGRAM_LOGIN_MODE se omite o vale instagram_login. Un token de
+ese modo no funciona en Unified Login. Confirmar en vivo la lectura del
+estado de seguimiento antes de activar los reels de la campaña.
 
 Validar
 - ES y EN con dos cuentas Instagram de prueba y cuentas ITBMO verificadas.

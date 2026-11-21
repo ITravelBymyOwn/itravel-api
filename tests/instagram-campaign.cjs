@@ -18,6 +18,7 @@ const env = {
   ITBMO_INSTAGRAM_APP_SECRET: testSecret,
   ITBMO_INSTAGRAM_VERIFY_TOKEN: 'fixture-verification',
   ITBMO_INSTAGRAM_CLAIM_SECRET: 'fixture-signing-key-at-least-32-bytes',
+  ITBMO_INSTAGRAM_LOGIN_MODE: 'instagram_login',
   ITBMO_INSTAGRAM_GRAPH_VERSION: 'v27.0',
   ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN: 'https://preview.example.test'
 };
@@ -37,13 +38,15 @@ test('Instagram delivery respects scope, language, consent, deduplication and si
   Object.assign(process.env, env);
   const { countMentions, instagramCampaignAction, instagramCampaignWebhook } = await import('../api/_lib/instagram-campaign.js');
   const messages = [];
+  const graphRequests = [];
   const participants = new Map();
   let follows = false;
   let claimInput = null;
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = new URL(input);
     const body = init?.body && JSON.parse(init.body);
-    if (url.hostname === 'graph.instagram.com') {
+    if (['graph.instagram.com', 'graph.facebook.com'].includes(url.hostname)) {
+      graphRequests.push({ host: url.hostname, path: url.pathname, body });
       if (init.method === 'POST') {
         messages.push(body);
         return json({ message_id: String(messages.length) });
@@ -126,6 +129,25 @@ test('Instagram delivery respects scope, language, consent, deduplication and si
   assert.equal(messages.length, 3);
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '30')), 200);
   assert.match(messages[3].message.text, /Reply CONFIRM/);
+  assert.ok(graphRequests.every(request => request.host === 'graph.instagram.com'));
+
+  process.env.ITBMO_INSTAGRAM_LOGIN_MODE = 'unified_login';
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '31')), 200);
+  assert.deepEqual(graphRequests.at(-1), {
+    host: 'graph.facebook.com',
+    path: '/v27.0/100/messages',
+    body: messages[4]
+  });
+  assert.deepEqual(messages[4].recipient, { comment_id: '50' });
+  assert.equal(await deliver(reply('4')), 200);
+  assert.deepEqual(graphRequests.slice(-2).map(({ host, path }) => ({ host, path })), [
+    { host: 'graph.facebook.com', path: '/v27.0/20' },
+    { host: 'graph.facebook.com', path: '/v27.0/100/messages' }
+  ]);
+
+  process.env.ITBMO_INSTAGRAM_LOGIN_MODE = 'invalid';
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 404);
+  process.env.ITBMO_INSTAGRAM_LOGIN_MODE = 'unified_login';
 
   process.env.ITBMO_INSTAGRAM_CAMPAIGN_ENABLED = 'false';
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 404);
