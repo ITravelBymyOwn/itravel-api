@@ -195,9 +195,14 @@ async function handleConfirmation(config, event) {
 }
 
 export async function instagramCampaignWebhook(req, res) {
-  const config = webhookConfig();
+  const verifyOnly = process.env.VERCEL_ENV === 'preview' &&
+    process.env.ITBMO_INSTAGRAM_WEBHOOK_VERIFY_ONLY === 'true';
+  const config = verifyOnly ? {
+    appSecret: process.env.ITBMO_INSTAGRAM_APP_SECRET,
+    verifyToken: process.env.ITBMO_INSTAGRAM_VERIFY_TOKEN
+  } : webhookConfig();
   res.setHeader('Cache-Control', 'no-store');
-  if (!config) return res.status(404).end();
+  if (!config?.appSecret || !config?.verifyToken) return res.status(404).end();
   if (req.method === 'GET') {
     const query = req.query || {};
     const token = query['hub.verify_token'];
@@ -224,7 +229,9 @@ export async function instagramCampaignWebhook(req, res) {
   let payload;
   try { payload = JSON.parse(raw.toString('utf8')); }
   catch { return res.status(400).end(); }
-  if (payload?.object !== 'instagram' || !Array.isArray(payload.entry)) return res.status(200).end();
+  if (verifyOnly || payload?.object !== 'instagram' || !Array.isArray(payload.entry)) {
+    return res.status(200).end();
+  }
   try {
     for (const entry of payload.entry || []) {
       if (entry.id !== config.account) continue;

@@ -152,4 +152,28 @@ test('Instagram delivery respects scope, language, consent, deduplication and si
   process.env.ITBMO_INSTAGRAM_CAMPAIGN_ENABLED = 'false';
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 404);
   assert.deepEqual(await instagramCampaignAction('instagram_status', {}, 'fixture-session'), { ok: true, available: false });
+
+  process.env.ITBMO_INSTAGRAM_WEBHOOK_VERIFY_ONLY = 'true';
+  const originalRequests = graphRequests.length;
+  const originalParticipants = participants.size;
+  const handshake = response();
+  await instagramCampaignWebhook({
+    method: 'GET',
+    query: {
+      'hub.mode': 'subscribe',
+      'hub.verify_token': env.ITBMO_INSTAGRAM_VERIFY_TOKEN,
+      'hub.challenge': '4242'
+    }
+  }, handshake);
+  assert.equal(handshake.code, 200);
+  assert.equal(handshake.value, '4242');
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '42', '99')), 200);
+  assert.equal(await deliver(reply('5')), 200);
+  assert.equal(await deliver(reply('6'), { secret: 'wrong' }), 403);
+  assert.equal(graphRequests.length, originalRequests);
+  assert.equal(participants.size, originalParticipants);
+  assert.equal((await instagramCampaignAction('instagram_claim', { token }, 'fixture-session')).code, 'CAMPAIGN_UNAVAILABLE');
+
+  process.env.VERCEL_ENV = 'production';
+  assert.equal(await deliver(reply('7')), 404);
 });
