@@ -25,10 +25,11 @@ const REST_URL = `${SUPABASE_URL}/rest/v1`;
    - No card data is ever accepted by this endpoint.
 ========================================================= */
 
+const pricing = commercePricing();
 const COMMERCE = {
-  currency: "USD",
-  regularPrice: 7.99,
-  launchPrice: 2.99
+  currency: pricing.currency,
+  regularPrice: Number(pricing.regular_price),
+  basePrice: Number(pricing.base_price)
 };
 
 const PAYPAL_ENV = String(process.env.PAYPAL_ENV || "sandbox").trim().toLowerCase();
@@ -166,11 +167,11 @@ async function getOwnedTrip(tripId, userId) {
 
 function defaultOffer() {
   return {
-    promotionCode: "launch_offer",
+    promotionCode: null,
     promoRedemptionId: null,
-    amount: COMMERCE.launchPrice,
+    amount: COMMERCE.basePrice,
     regularAmount: COMMERCE.regularPrice,
-    baseAmount: COMMERCE.launchPrice,
+    baseAmount: COMMERCE.basePrice,
     discountAmount: 0
   };
 }
@@ -426,15 +427,14 @@ async function paypalRequest(path, options = {}) {
 }
 
 async function handleConfig(res) {
-  const pricing = commercePricing();
   return res.status(200).json({
     ok: true,
     currency: pricing.currency,
     regular_price: pricing.regular_price,
     base_price: pricing.base_price,
     promotion: {
-      code: "launch_offer",
-      active: true,
+      code: null,
+      active: false,
       price: pricing.base_price
     },
     configurable_promotions: true,

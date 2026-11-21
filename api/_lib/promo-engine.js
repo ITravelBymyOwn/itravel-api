@@ -1,8 +1,7 @@
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
 const CURRENCY = 'USD';
-const LAUNCH_PRICE = 2.99;
-const REGULAR_PRICE = 7.99;
+const ITINERARY_PRICE = 7.99;
 
 function clean(value, max = 160) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, max);
@@ -66,8 +65,8 @@ function normalizeReservation(row) {
 export function commercePricing() {
   return {
     currency: CURRENCY,
-    regular_price: money(REGULAR_PRICE),
-    base_price: money(LAUNCH_PRICE)
+    regular_price: money(ITINERARY_PRICE),
+    base_price: money(ITINERARY_PRICE)
   };
 }
 
@@ -96,7 +95,7 @@ export async function reservePromotion({ session_token, trip_id, code }) {
         p_user_id: session.user_id,
         p_trip_id: trip.id,
         p_session_id: session.id,
-        p_base_amount: LAUNCH_PRICE,
+        p_base_amount: ITINERARY_PRICE,
         p_currency: CURRENCY,
         p_is_registered: isRegistered,
         p_is_verified: isVerified

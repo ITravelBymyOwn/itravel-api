@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V325.0-preview';
-const ITBMO_RUNTIME_ASSET='planner.js?v=325';
+const ITBMO_RUNTIME_BUILD='V327.0-preview';
+const ITBMO_RUNTIME_ASSET='planner.js?v=327';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -14976,8 +14976,7 @@ const ITBMO_COMMERCE_CONFIG = {
   requirePayment: true,
 
   currency: 'USD',
-  regularPrice: 7.99,
-  basePrice: 2.99,
+  basePrice: 7.99,
 
   support: {
     enabled: true,
@@ -15142,7 +15141,6 @@ function _commerceCopy_(){
     checkoutEyebrow:'ITBMO Premium Journey',
     checkoutTitle:'Tu viaje está listo para ser creado',
     checkoutSub:'Desbloquea tu itinerario completo y personalizado con ITBMO.',
-    offer:'OFERTA DE LANZAMIENTO · TIEMPO LIMITADO',
     priceNote:'1 pago = 1 itinerario generado · Hasta 30 días · Sin suscripción',
     inc1:'Itinerario personalizado completo',
     inc2:'Inteligencia de viaje de ITBMO',
@@ -15157,12 +15155,12 @@ function _commerceCopy_(){
     supportLink:'¿Necesitas ayuda? Contacta Atención al Cliente',
     preview:'Modo de prueba · Continuar con ITBMO',
     providerSoon:'Este método todavía no está activado.',
-    promoLabel:'¿Tienes un código promocional?',
+    promoLabel:'¿Tienes un código?',
     promoPlaceholder:'Ingresa tu código',
     promoApply:'Aplicar',
     promoApplied:(code)=>`✓ Código ${code} aplicado`,
     promoFree:'Tu itinerario queda cubierto al 100% con este código.',
-    promoDiscount:(amount,final)=>`Descuento US$${amount} · Total US$${final}`,
+    promoTotal:(final)=>`Total US$${final}`,
     promoErrors:{PROMO_CODE_REQUIRED:'Ingresa un código.',PROMO_NOT_FOUND:'Ese código no existe.',PROMO_INACTIVE:'Ese código no está activo.',PROMO_NOT_STARTED:'Este código todavía no está vigente.',PROMO_EXPIRED:'Este código ya venció.',PROMO_EXHAUSTED:'Este código alcanzó su límite de usos.',PROMO_USER_LIMIT:'Ya utilizaste el máximo permitido para este código.',PROMO_REGISTERED_REQUIRED:'Este código requiere una cuenta registrada.',PROMO_VERIFIED_REQUIRED:'Este código requiere una cuenta verificada.',PROMO_RESERVATION_EXPIRED:'La reserva del código venció. Aplícalo nuevamente.',PROMO_UNAVAILABLE:'No pudimos aplicar este código.'},
     processing:'Procesando pago…',
     paid:'✓ Pago confirmado. Todo está listo.',
@@ -15180,7 +15178,6 @@ function _commerceCopy_(){
     checkoutEyebrow:'ITBMO Premium Journey',
     checkoutTitle:'Your journey is ready to be created',
     checkoutSub:'Unlock your complete personalized itinerary with ITBMO.',
-    offer:'LIMITED-TIME LAUNCH OFFER',
     priceNote:'1 payment = 1 generated itinerary · Up to 30 days · No subscription',
     inc1:'Complete personalized itinerary',
     inc2:'ITBMO travel intelligence',
@@ -15195,12 +15192,12 @@ function _commerceCopy_(){
     supportLink:'Need help? Contact Customer Support',
     preview:'Preview mode · Continue to ITBMO',
     providerSoon:'This payment method is not active yet.',
-    promoLabel:'Have a promo code?',
+    promoLabel:'Have a code?',
     promoPlaceholder:'Enter your code',
     promoApply:'Apply',
     promoApplied:(code)=>`✓ Code ${code} applied`,
     promoFree:'This code covers 100% of your itinerary.',
-    promoDiscount:(amount,final)=>`Discount US$${amount} · Total US$${final}`,
+    promoTotal:(final)=>`Total US$${final}`,
     promoErrors:{PROMO_CODE_REQUIRED:'Enter a code.',PROMO_NOT_FOUND:'That code does not exist.',PROMO_INACTIVE:'That code is not active.',PROMO_NOT_STARTED:'This code is not active yet.',PROMO_EXPIRED:'This code has expired.',PROMO_EXHAUSTED:'This code has reached its usage limit.',PROMO_USER_LIMIT:'You already used the maximum allowed for this code.',PROMO_REGISTERED_REQUIRED:'This code requires a registered account.',PROMO_VERIFIED_REQUIRED:'This code requires a verified account.',PROMO_RESERVATION_EXPIRED:'The code reservation expired. Apply it again.',PROMO_UNAVAILABLE:'We could not apply this code.'},
     processing:'Processing payment…',
     paid:'✓ Payment confirmed. Everything is ready.',
@@ -15223,7 +15220,6 @@ function applyCommerceI18n(){
     '#checkout-eyebrow':c.checkoutEyebrow,
     '#checkout-title':c.checkoutTitle,
     '#checkout-subtitle':c.checkoutSub,
-    '#checkout-offer-badge':c.offer,
     '#checkout-price-note':c.priceNote,
     '#checkout-inc-1':c.inc1,
     '#checkout-inc-2':c.inc2,
@@ -15251,12 +15247,9 @@ function applyCommerceI18n(){
   const optionLabels=es?['Problemas al generar el itinerario','Pagos y reembolsos','Ayuda con mi cuenta','Otro']:['Itinerary generation issues','Payments and refunds','Account assistance','Other'];
   Array.from(options).forEach((option,index)=>{if(optionLabels[index])option.textContent=optionLabels[index];});
 
-  const oldP = qs('#checkout-price-old');
   const newP = qs('#checkout-price-new');
-  const regularPrice=Number(commerceServerConfig?.regular_price || ITBMO_COMMERCE_CONFIG.regularPrice);
   const basePrice=Number(commerceServerConfig?.base_price || ITBMO_COMMERCE_CONFIG.basePrice);
   const finalPrice=Number(activePromoReservation?.final_amount ?? basePrice);
-  if(oldP) oldP.textContent = `US$${regularPrice.toFixed(2)}`;
   if(newP) newP.textContent = `US$${finalPrice.toFixed(2)}`;
   if($checkoutPromoLabel) $checkoutPromoLabel.textContent=c.promoLabel;
   if($checkoutPromoInput) $checkoutPromoInput.placeholder=c.promoPlaceholder;
@@ -15266,7 +15259,7 @@ function applyCommerceI18n(){
       $checkoutPromoSummary.hidden=false;
       $checkoutPromoSummary.textContent=activePromoReservation.is_free
         ? c.promoFree
-        : c.promoDiscount(Number(activePromoReservation.discount_amount||0).toFixed(2),Number(activePromoReservation.final_amount||0).toFixed(2));
+        : c.promoTotal(Number(activePromoReservation.final_amount||0).toFixed(2));
     }else{
       $checkoutPromoSummary.hidden=true;
       $checkoutPromoSummary.textContent='';
