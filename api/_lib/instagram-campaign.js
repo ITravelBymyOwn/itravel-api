@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 import { commercePricing } from './promo-engine.js';
 
@@ -195,6 +195,51 @@ async function handleConfirmation(config, event) {
   }
 }
 
+async function inspectPreviewDirectMessage(req, res, config) {
+  const key = req.headers['x-itbmo-qa-key'];
+  if (process.env.VERCEL_ENV !== 'preview' || config?.environment !== 'preview' ||
+      typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key) ||
+      !equal(createHash('sha256').update(key).digest('hex'), 'd91ee547579d47e2bc3790d5cf6dd30f5c8525789aebec9644af142b4458ea96')) {
+    return res.status(404).end();
+  }
+  const rows = await supabaseFetch('/instagram_campaign_participation?select=instagram_id,instagram_campaign_settings!inner(environment)&id=eq.5d917443-def2-4c73-8eaa-107b5a3eef0b&instagram_campaign_settings.environment=eq.preview&limit=1');
+  const actor = rows?.[0]?.instagram_id;
+  if (!instagramId.test(actor || '')) return res.status(404).end();
+
+  const inspect = async (path, assess) => {
+    try { return assess(await instagramRequest(config, path)); }
+    catch (error) {
+      return { error: error.instagramError?.code ?? null, subcode: error.instagramError?.error_subcode ?? null };
+    }
+  };
+
+  const [subscriptions, profile, conversation] = await Promise.all([
+    inspect(`${config.account}/subscribed_apps`, value => ({
+      entries: (value.data || []).map(item => ({
+        keys: Object.keys(item),
+        appMatches: [item.id, item.app_id, item.application?.id, item.instagram_business_account_data?.id, item.instagram_app_data?.id]
+          .some(id => String(id) === '3838127946326224'),
+        fields: item.subscribed_fields || []
+      }))
+    })),
+    inspect(`${actor}?fields=username,is_user_follow_business`, value => ({
+      usernameMatches: value.username === 'erojasabarca',
+      follows: typeof value.is_user_follow_business === 'boolean' ? value.is_user_follow_business : null
+    })),
+    inspect(`${config.account}/conversations?platform=instagram&user_id=${actor}&fields=id,updated_time&limit=1`, async value => {
+      const id = value.data?.[0]?.id;
+      if (typeof id !== 'string' || !/^[a-zA-Z0-9_:-]{1,500}$/.test(id)) return { found: false };
+      return inspect(`${encodeURIComponent(id)}?fields=is_owner,messages.limit(10){id,created_time,from,message}`, data => ({
+        found: true,
+        owner: typeof data.is_owner === 'boolean' ? data.is_owner : null,
+        confirms: (data.messages?.data || []).filter(message =>
+          String(message.from?.id) === actor && /^(CONFIRM|CONFIRMAR)$/i.test(String(message.message || '').trim())).length
+      }));
+    })
+  ]);
+  return res.status(200).json({ subscriptions, profile, conversation });
+}
+
 export async function instagramCampaignWebhook(req, res) {
   const verifyOnly = process.env.VERCEL_ENV === 'preview' &&
     process.env.ITBMO_INSTAGRAM_WEBHOOK_VERIFY_ONLY === 'true';
@@ -203,6 +248,7 @@ export async function instagramCampaignWebhook(req, res) {
     verifyToken: process.env.ITBMO_INSTAGRAM_VERIFY_TOKEN
   } : webhookConfig();
   res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'GET' && req.headers['x-itbmo-qa-key']) return inspectPreviewDirectMessage(req, res, config);
   if (!config?.appSecret || !config?.verifyToken) return res.status(404).end();
   if (req.method === 'GET') {
     const query = req.query || {};
