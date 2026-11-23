@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 import { commercePricing } from './promo-engine.js';
 
@@ -195,6 +195,38 @@ async function handleConfirmation(config, event) {
   }
 }
 
+async function inspectPreviewMessaging(req, res, config) {
+  const key = req.headers['x-itbmo-qa-key'];
+  if (process.env.VERCEL_ENV !== 'preview' || config?.environment !== 'preview' ||
+      Date.now() > 1795469428128 || typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key) ||
+      !equal(createHash('sha256').update(key).digest('hex'), 'b25d0594d2e87e25f472d73a32f9716527935293abc29d584cf5c2f941443686')) return res.status(404).end();
+
+  const appId = '3838127946326224';
+  const auth = { ...config, accessToken: appId + '|' + config.appSecret };
+  const inspect = async (api, path, summarize) => {
+    try { return summarize(await instagramRequest(api, path)); }
+    catch (error) {
+      const graph = error.instagramError;
+      return { code: graph?.code ?? null, subcode: graph?.error_subcode ?? null,
+        detail: String(graph?.message ?? error.message).replace(/https?:\/\/\S+|\b[\w-]{24,}\b|\b\d{5,}\b/g, '[redacted]').slice(0, 260) };
+    }
+  };
+  const [token, webhook, conversation] = await Promise.all([
+    inspect(auth, 'debug_token?input_token=' + encodeURIComponent(config.accessToken), value => ({
+      matchesApp: String(value.data?.app_id) === appId,
+      valid: value.data?.is_valid, type: value.data?.type,
+      scopes: (value.data?.scopes || []).filter(scope => /instagram|pages_messaging|pages_manage_metadata/.test(scope))
+    })),
+    inspect(auth, appId + '/subscriptions', value => (value.data || []).map(item => ({
+      object: item.object, active: item.active, callbackMatches: item.callback_url === config.origin + '/api/instagram-campaign-webhook',
+      fields: (item.fields || []).map(field => typeof field === 'string' ? field : field.name)
+    }))),
+    inspect(config, config.account + '/conversations?platform=instagram&fields=id&limit=1',
+      value => ({ available: Array.isArray(value.data) }))
+  ]);
+  return res.status(200).json({ token, webhook, conversation });
+}
+
 export async function instagramCampaignWebhook(req, res) {
   const verifyOnly = process.env.VERCEL_ENV === 'preview' &&
     process.env.ITBMO_INSTAGRAM_WEBHOOK_VERIFY_ONLY === 'true';
@@ -203,6 +235,7 @@ export async function instagramCampaignWebhook(req, res) {
     verifyToken: process.env.ITBMO_INSTAGRAM_VERIFY_TOKEN
   } : webhookConfig();
   res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'GET' && req.headers['x-itbmo-qa-key']) return inspectPreviewMessaging(req, res, config);
   if (!config?.appSecret || !config?.verifyToken) return res.status(404).end();
   if (req.method === 'GET') {
     const query = req.query || {};
