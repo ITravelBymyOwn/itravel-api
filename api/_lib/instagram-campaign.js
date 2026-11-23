@@ -195,36 +195,49 @@ async function handleConfirmation(config, event) {
   }
 }
 
-async function inspectPreviewMessaging(req, res, config) {
+async function recoverPreviewConfirmation(req, res, config) {
   const key = req.headers['x-itbmo-qa-key'];
   if (process.env.VERCEL_ENV !== 'preview' || config?.environment !== 'preview' ||
-      Date.now() > 1795469428128 || typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key) ||
-      !equal(createHash('sha256').update(key).digest('hex'), 'b25d0594d2e87e25f472d73a32f9716527935293abc29d584cf5c2f941443686')) return res.status(404).end();
+      !['GET', 'POST'].includes(req.method) || Date.now() > 1795469730524 ||
+      typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key) ||
+      !equal(createHash('sha256').update(key).digest('hex'), '4a7f5f374c8b977e58b8314e0d6a30f8dccce7990300e491a9248b4420c0b869')) return res.status(404).end();
+  let stage = 'participation';
+  const rowPath = '/instagram_campaign_participation?select=instagram_id,intro_sent_at,link_sent_at,instagram_campaign_settings!inner(environment)&id=eq.5d917443-def2-4c73-8eaa-107b5a3eef0b&instagram_campaign_settings.environment=eq.preview&limit=1';
+  try {
+    const row = (await supabaseFetch(rowPath))?.[0];
+    const actor = row?.instagram_id;
+    if (!instagramId.test(actor || '') || !row?.intro_sent_at) return res.status(404).end();
+    if (row.link_sent_at) return res.status(200).json({ alreadySent: true });
 
-  const appId = '3838127946326224';
-  const auth = { ...config, accessToken: appId + '|' + config.appSecret };
-  const inspect = async (api, path, summarize) => {
-    try { return summarize(await instagramRequest(api, path)); }
-    catch (error) {
-      const graph = error.instagramError;
-      return { code: graph?.code ?? null, subcode: graph?.error_subcode ?? null,
-        detail: String(graph?.message ?? error.message).replace(/https?:\/\/\S+|\b[\w-]{24,}\b|\b\d{5,}\b/g, '[redacted]').slice(0, 260) };
-    }
-  };
-  const [token, webhook, conversation] = await Promise.all([
-    inspect(auth, 'debug_token?input_token=' + encodeURIComponent(config.accessToken), value => ({
-      matchesApp: String(value.data?.app_id) === appId,
-      valid: value.data?.is_valid, type: value.data?.type,
-      scopes: (value.data?.scopes || []).filter(scope => /instagram|pages_messaging|pages_manage_metadata/.test(scope))
-    })),
-    inspect(auth, appId + '/subscriptions', value => (value.data || []).map(item => ({
-      object: item.object, active: item.active, callbackMatches: item.callback_url === config.origin + '/api/instagram-campaign-webhook',
-      fields: (item.fields || []).map(field => typeof field === 'string' ? field : field.name)
-    }))),
-    inspect(config, config.account + '/conversations?platform=instagram&fields=id&limit=1',
-      value => ({ available: Array.isArray(value.data) }))
-  ]);
-  return res.status(200).json({ token, webhook, conversation });
+    stage = 'conversations';
+    const result = await instagramRequest(config, config.account + '/conversations?platform=instagram&fields=id,participants&limit=25');
+    const conversation = (result.data || []).find(item =>
+      item.participants?.data?.some(person => String(person.id) === actor));
+    if (!conversation?.id) return res.status(200).json({ found: false, available: result.data?.length ?? 0,
+      hasParticipants: (result.data || []).some(item => Array.isArray(item.participants?.data)) });
+    stage = 'messages';
+    const list = await instagramRequest(config, encodeURIComponent(conversation.id) + '/messages?fields=id,created_time,from,message&limit=20');
+    const reply = (list.data || []).find(item => String(item.from?.id) === actor &&
+      typeof item.id === 'string' && Date.parse(item.created_time) > Date.parse(row.intro_sent_at) &&
+      Date.now() - Date.parse(item.created_time) < 24 * HOUR &&
+      /^(CONFIRM|CONFIRMAR)$/i.test(String(item.message || '').trim()));
+    if (!reply || req.method === 'GET') return res.status(200).json({
+      found: true, matchingConfirmation: Boolean(reply), messages: list.data?.length ?? 0
+    });
+
+    stage = 'process';
+    await handleConfirmation(config, {
+      sender: { id: actor }, recipient: { id: config.account }, timestamp: Date.parse(reply.created_time),
+      message: { mid: reply.id, text: reply.message }
+    });
+    const updated = (await supabaseFetch(rowPath))?.[0];
+    return res.status(200).json({ found: true, matchingConfirmation: true, linkSent: Boolean(updated?.link_sent_at) });
+  } catch (error) {
+    return res.status(422).json({ stage, code: error.instagramError?.code ?? null,
+      subcode: error.instagramError?.error_subcode ?? null,
+      detail: String(error.instagramError?.message ?? error.message)
+        .replace(/https?:\/\/\S+|\b[\w-]{24,}\b|\b\d{5,}\b/g, '[redacted]').slice(0, 260) });
+  }
 }
 
 export async function instagramCampaignWebhook(req, res) {
@@ -235,7 +248,7 @@ export async function instagramCampaignWebhook(req, res) {
     verifyToken: process.env.ITBMO_INSTAGRAM_VERIFY_TOKEN
   } : webhookConfig();
   res.setHeader('Cache-Control', 'no-store');
-  if (req.method === 'GET' && req.headers['x-itbmo-qa-key']) return inspectPreviewMessaging(req, res, config);
+  if (req.headers['x-itbmo-qa-key']) return recoverPreviewConfirmation(req, res, config);
   if (!config?.appSecret || !config?.verifyToken) return res.status(404).end();
   if (req.method === 'GET') {
     const query = req.query || {};
