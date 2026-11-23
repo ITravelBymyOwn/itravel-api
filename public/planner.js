@@ -22,8 +22,8 @@
 ========================================================= */
 
 
-const ITBMO_RUNTIME_BUILD='V327.0-preview';
-const ITBMO_RUNTIME_ASSET='planner.js?v=327';
+const ITBMO_RUNTIME_BUILD='V329.0-preview';
+const ITBMO_RUNTIME_ASSET='planner.js?v=329';
 console.info('[ITBMO BUILD]',{version:ITBMO_RUNTIME_BUILD,asset:ITBMO_RUNTIME_ASSET,tie:true,semantic_pdf:true,aurora_hunt:true,experience_inventory:true,semantic_duplicate_guard:true,cross_midnight_clock:true,model_trace:true});
 
 /* ---------- Helpers DOM ---------- */
@@ -14976,7 +14976,6 @@ const ITBMO_COMMERCE_CONFIG = {
   requirePayment: true,
 
   currency: 'USD',
-  basePrice: 7.99,
 
   support: {
     enabled: true,
@@ -15248,9 +15247,9 @@ function applyCommerceI18n(){
   Array.from(options).forEach((option,index)=>{if(optionLabels[index])option.textContent=optionLabels[index];});
 
   const newP = qs('#checkout-price-new');
-  const basePrice=Number(commerceServerConfig?.base_price || ITBMO_COMMERCE_CONFIG.basePrice);
+  const basePrice=Number(commerceServerConfig?.base_price);
   const finalPrice=Number(activePromoReservation?.final_amount ?? basePrice);
-  if(newP) newP.textContent = `US$${finalPrice.toFixed(2)}`;
+  if(newP) newP.textContent = Number.isFinite(finalPrice) ? `US$${finalPrice.toFixed(2)}` : '—';
   if($checkoutPromoLabel) $checkoutPromoLabel.textContent=c.promoLabel;
   if($checkoutPromoInput) $checkoutPromoInput.placeholder=c.promoPlaceholder;
   if($checkoutPromoApply) $checkoutPromoApply.textContent=c.promoApply;
@@ -15325,6 +15324,7 @@ function setCheckoutStatus(message='', type=''){
 }
 
 async function loadCommerceServerConfig(){
+  commerceServerConfig=null;
   try{
     const token=getStoredSessionToken();
     if(!token) return null;
@@ -15660,6 +15660,7 @@ async function renderPayPalButtonsIfAvailable(){
           action:'paypal_create_order',
           session_token:token,
           trip_id:currentTripId,
+          expected_amount:Number(activePromoReservation?.final_amount ?? commerceServerConfig?.base_price).toFixed(2),
           promo_redemption_id:activePromoReservation?.redemption_id || null
         });
         if(!data?.order_id) throw new Error('PAYPAL_ORDER_ID_MISSING');
@@ -15686,7 +15687,15 @@ async function renderPayPalButtonsIfAvailable(){
         trackITBMOEvent('payment_cancelled',{payment_provider:'paypal'});
         setCheckoutStatus('');
       },
-      onError:(err)=>{
+      onError:async(err)=>{
+        if(err?.message==='PRICE_CHANGED'){
+          await loadCommerceServerConfig();
+          applyCommerceI18n();
+          setCheckoutStatus(getLang()==='es'
+            ? 'El precio cambió. Revisa el total actualizado antes de pagar.'
+            : 'The price changed. Review the updated total before paying.', 'error');
+          return;
+        }
         console.error('[PAYPAL]',err);
         trackITBMOEvent('payment_failed',{payment_provider:'paypal',error_stage:'paypal_buttons'});
         setCheckoutStatus(_commerceCopy_().error,'error');

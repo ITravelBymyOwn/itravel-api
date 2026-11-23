@@ -1,0 +1,27 @@
+ITBMO V329 · Precios y tandas de Instagram
+
+Control en Supabase → Table Editor → itbmo_offer_settings. Elige la fila
+del entorno correspondiente. Los importes se editan en centavos de USD.
+regular_price_cents = 799. promotional_price_cents = 299.
+Para usar solo el precio regular, deja promotional_price_cents en NULL.
+
+Para preparar una tanda, crea una campaña en campaigns, con una clave única
+y status draft. Agrega instagram_campaign_settings para el mismo entorno
+con quota 500, benefit_days y new_accounts_only según las bases. Asigna
+los Reels ES y EN de la tanda en instagram_campaign_reels. Si reutilizas un
+Reel, edita su fila para apuntar a la tanda nueva. Conserva las filas de
+participación anteriores y sus beneficios.
+
+Selecciona el ID de la tanda en itbmo_offer_settings.campaign_id. Fija
+starts_at y deja ends_at en NULL para que termine al agotarse los cupos.
+Con el webhook operativo en ese entorno, cambia campaigns.status a active
+para abrir. Cambia a draft para pausar y a active para reanudar. Usa closed
+para cerrar manualmente. El precio público vuelve a la promoción al pausar,
+cerrar o asignar el último cupo. El contador incluye los beneficios
+activados aunque no se hayan utilizado. Los beneficios previos siguen
+canjeables hasta su vencimiento. Una tanda nueva conserva el historial y
+empieza con su propio cupo.
+
+El modo exclusivo de verificación en Preview solo recibe muestras firmadas.
+Completa la prueba integral de Meta de comentarios y mensajes con los Reels
+de cada idioma antes de abrir la campaña al público.

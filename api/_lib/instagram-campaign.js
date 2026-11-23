@@ -88,13 +88,14 @@ function sendInstagramMessage(config, recipient, text) {
 }
 
 async function getSetting(campaignId, scope) {
+  if ((await commercePricing()).campaign_id !== campaignId) return null;
   const rows = await supabaseFetch(`/instagram_campaign_settings?select=campaign_id,campaigns(status,starts_at,ends_at)&campaign_id=eq.${campaignId}&environment=eq.${scope}&limit=1`);
   return rows?.[0]?.campaigns;
 }
 
 function campaignIsOpen(campaign, moment = Date.now()) {
   return campaign?.status === 'active' && Date.parse(campaign.starts_at) <= moment &&
-    moment < Date.parse(campaign.ends_at);
+    (campaign.ends_at == null || moment < Date.parse(campaign.ends_at));
 }
 
 function patchParticipation(query, data) {
@@ -280,12 +281,12 @@ export async function instagramCampaignAction(action, body, sessionToken) {
     });
   } else {
     if (typeof body.trip_id !== 'string' || !uuid.test(body.trip_id)) return { ok: false, code: 'TRIP_UNAVAILABLE' };
-    const price = commercePricing();
+    const price = await commercePricing();
     result = await supabaseFetch('/rpc/itbmo_instagram_campaign_redeem', {
       method: 'POST',
       body: JSON.stringify({
         p_user: session.user_id, p_session: session.id, p_trip: body.trip_id,
-        p_environment: scope, p_base: price.base_price, p_currency: price.currency
+        p_environment: scope, p_base: price.regular_price, p_currency: price.currency
       })
     });
   }

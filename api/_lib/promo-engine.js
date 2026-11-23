@@ -1,7 +1,6 @@
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
 const CURRENCY = 'USD';
-const ITINERARY_PRICE = 7.99;
 
 function clean(value, max = 160) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, max);
@@ -62,11 +61,20 @@ function normalizeReservation(row) {
   };
 }
 
-export function commercePricing() {
+export async function commercePricing() {
+  const environment = process.env.VERCEL_ENV === 'production' ? 'production' : 'preview';
+  const row = await supabaseFetch('/rpc/itbmo_current_offer', {
+    method: 'POST',
+    body: JSON.stringify({ p_environment: environment })
+  });
+  if (!Number.isInteger(row?.regular_price_cents) || !Number.isInteger(row?.base_price_cents)) {
+    throw new Error('OFFER_UNAVAILABLE');
+  }
   return {
     currency: CURRENCY,
-    regular_price: money(ITINERARY_PRICE),
-    base_price: money(ITINERARY_PRICE)
+    regular_price: money(row.regular_price_cents / 100),
+    base_price: money(row.base_price_cents / 100),
+    campaign_id: row.campaign_id
   };
 }
 
@@ -88,6 +96,7 @@ export async function reservePromotion({ session_token, trip_id, code }) {
   const isVerified = Boolean(profile?.email_verified);
 
   try {
+    const pricing = await commercePricing();
     const rows = await supabaseFetch('/rpc/itbmo_reserve_promo', {
       method: 'POST',
       body: JSON.stringify({
@@ -95,7 +104,7 @@ export async function reservePromotion({ session_token, trip_id, code }) {
         p_user_id: session.user_id,
         p_trip_id: trip.id,
         p_session_id: session.id,
-        p_base_amount: ITINERARY_PRICE,
+        p_base_amount: Number(pricing.base_price),
         p_currency: CURRENCY,
         p_is_registered: isRegistered,
         p_is_verified: isVerified

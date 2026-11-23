@@ -25,12 +25,7 @@ const REST_URL = `${SUPABASE_URL}/rest/v1`;
    - No card data is ever accepted by this endpoint.
 ========================================================= */
 
-const pricing = commercePricing();
-const COMMERCE = {
-  currency: pricing.currency,
-  regularPrice: Number(pricing.regular_price),
-  basePrice: Number(pricing.base_price)
-};
+const CURRENCY = "USD";
 
 const PAYPAL_ENV = String(process.env.PAYPAL_ENV || "sandbox").trim().toLowerCase();
 const PAYPAL_CLIENT_ID = String(process.env.PAYPAL_CLIENT_ID || "").trim();
@@ -165,20 +160,23 @@ async function getOwnedTrip(tripId, userId) {
   return Array.isArray(trips) ? trips[0] || null : null;
 }
 
-function defaultOffer() {
+function defaultOffer(pricing) {
+  const price = Number(pricing.base_price);
+  const regular = Number(pricing.regular_price);
   return {
-    promotionCode: null,
+    promotionCode: price < regular ? "site_promotion" : null,
     promoRedemptionId: null,
-    amount: COMMERCE.basePrice,
-    regularAmount: COMMERCE.regularPrice,
-    baseAmount: COMMERCE.basePrice,
+    amount: price,
+    regularAmount: regular,
+    baseAmount: price,
     discountAmount: 0
   };
 }
 
 async function resolveCheckoutOffer(body, session, trip) {
   const redemptionId = normalizeString(body?.promo_redemption_id, 100);
-  if (!redemptionId) return defaultOffer();
+  const pricing = await commercePricing();
+  if (!redemptionId) return defaultOffer(pricing);
 
   const redemption = await getPromotionReservation({
     redemption_id: redemptionId,
@@ -219,7 +217,7 @@ async function resolveCheckoutOffer(body, session, trip) {
     promoRedemptionId: redemption.id,
     promoCodeId: redemption.promo_code_id,
     amount,
-    regularAmount: COMMERCE.regularPrice,
+    regularAmount: Number(pricing.regular_price),
     baseAmount: Number(redemption.base_amount),
     discountAmount: Number(redemption.discount_amount)
   };
@@ -302,7 +300,7 @@ async function createPaymentRow({
       provider_order_id: providerOrderId,
       amount: offer.amount,
       regular_amount: offer.regularAmount,
-      currency: COMMERCE.currency,
+      currency: CURRENCY,
       status,
       promotion_code: offer.promotionCode,
       metadata: {
@@ -427,14 +425,16 @@ async function paypalRequest(path, options = {}) {
 }
 
 async function handleConfig(res) {
+  const pricing = await commercePricing();
+  const discounted = Number(pricing.base_price) < Number(pricing.regular_price);
   return res.status(200).json({
     ok: true,
     currency: pricing.currency,
     regular_price: pricing.regular_price,
     base_price: pricing.base_price,
     promotion: {
-      code: null,
-      active: false,
+      code: discounted ? "site_promotion" : null,
+      active: discounted,
       price: pricing.base_price
     },
     configurable_promotions: true,
@@ -486,7 +486,7 @@ async function handleStatus(res, body, session) {
       code: promoCode?.code ? String(promoCode.code).toUpperCase() : null,
       discount_amount: promoEntitlement.discount_amount,
       final_amount: promoEntitlement.final_amount,
-      currency: promoEntitlement.currency || COMMERCE.currency,
+      currency: promoEntitlement.currency || CURRENCY,
       consumed_at: promoEntitlement.consumed_at
     } : null,
     info_chat_authorized: authorized,
@@ -543,6 +543,9 @@ async function handlePayPalCreateOrder(res, body, session) {
   }
 
   const offer = await resolveCheckoutOffer(body, session, trip);
+  if (body.expected_amount != null && String(body.expected_amount) !== money(offer.amount)) {
+    return res.status(409).json({ ok: false, error: 'PRICE_CHANGED' });
+  }
   const payment = await createPaymentRow({
     session,
     trip,
@@ -568,7 +571,7 @@ async function handlePayPalCreateOrder(res, body, session) {
             custom_id: payment.id,
             description: "ITBMO Premium Journey",
             amount: {
-              currency_code: COMMERCE.currency,
+              currency_code: CURRENCY,
               value: money(offer.amount)
             }
           }
@@ -599,7 +602,7 @@ async function handlePayPalCreateOrder(res, body, session) {
         provider: "paypal",
         payment_id: payment.id,
         amount: offer.amount,
-        currency: COMMERCE.currency,
+        currency: CURRENCY,
         promotion_code: offer.promotionCode,
         promo_redemption_id: offer.promoRedemptionId || null,
         discount_amount: offer.discountAmount || 0
@@ -611,7 +614,7 @@ async function handlePayPalCreateOrder(res, body, session) {
       order_id: paypalOrder.id,
       payment_id: payment.id,
       amount: money(offer.amount),
-      currency: COMMERCE.currency,
+      currency: CURRENCY,
       promotion_code: offer.promotionCode,
       promo_redemption_id: offer.promoRedemptionId || null
     });
@@ -867,6 +870,15 @@ async function handleTilopayCreateCheckout(res, body, session) {
 ========================================================= */
 
 export default async function handler(req, res) {
+  if (req.method === "GET" && req.query?.action === "pricing") {
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const { currency, regular_price, base_price } = await commercePricing();
+      return res.status(200).json({ currency, regular_price, base_price });
+    } catch {
+      return res.status(503).json({ error: "OFFER_UNAVAILABLE" });
+    }
+  }
   if (req.method !== "POST") {
     return res.status(405).json({
       ok: false,

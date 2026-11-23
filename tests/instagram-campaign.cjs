@@ -59,6 +59,9 @@ test('Instagram delivery respects scope, language, consent, deduplication and si
         campaign_id: campaignId, language: media === 'eq.42' ? 'es' : 'en', test_keyword: 'PRUEBAITBMO'
       }] : []);
     }
+    if (url.pathname.endsWith('/itbmo_current_offer')) {
+      return json({ regular_price_cents: 799, base_price_cents: 799, campaign_id: campaignId });
+    }
     if (url.pathname.endsWith('/instagram_campaign_settings')) {
       return json([{ campaigns: {
         status: 'active', starts_at: new Date(Date.now() - 600_000).toISOString(),
