@@ -230,6 +230,22 @@ export async function instagramCampaignWebhook(req, res) {
   let payload;
   try { payload = JSON.parse(raw.toString('utf8')); }
   catch { return res.status(400).end(); }
+  if (config.environment === 'preview' && Array.isArray(payload?.entry)) {
+    const messages = payload.entry.flatMap(entry => [
+      ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
+      ...(Array.isArray(entry?.changes) ? entry.changes
+        .filter(change => change?.field === 'messages').map(change => change.value) : [])
+    ]);
+    if (messages.length) {
+      console.info('ITBMO Instagram Preview message event', {
+        objectMatches: payload.object === 'instagram',
+        accountMatches: payload.entry.some(entry => entry?.id === config.account),
+        recipientMatches: messages.some(event => event?.recipient?.id === config.account),
+        hasConfirmation: messages.some(event => /^(CONFIRM|CONFIRMAR)$/i.test(String(event?.message?.text || '').trim())),
+        hasMessageId: messages.some(event => typeof event?.message?.mid === 'string')
+      });
+    }
+  }
   if (verifyOnly || payload?.object !== 'instagram' || !Array.isArray(payload.entry)) {
     return res.status(200).end();
   }
