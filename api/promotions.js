@@ -2,6 +2,9 @@ import { reservePromotion, consumePromotion, getPromotionReservation } from './_
 import { resolveSession } from './_lib/itbmo-foundation.js';
 import { instagramCampaignAction, instagramCampaignWebhook } from './_lib/instagram-campaign.js';
 
+const sharedCampaignPreview = process.env.VERCEL_ENV === 'preview' &&
+  process.env.ITBMO_CAMPAIGN_SHARED_DATABASE === 'true';
+
 export default async function handler(req, res) {
   if (req.query?.endpoint === 'instagram-campaign-webhook') return instagramCampaignWebhook(req, res);
   if (req.method !== 'POST') return res.status(405).json({ ok:false, code:'METHOD_NOT_ALLOWED' });
@@ -15,6 +18,10 @@ export default async function handler(req, res) {
       res.setHeader('Cache-Control', 'no-store');
       const result = await instagramCampaignAction(action, body, sessionToken);
       return res.status(result.ok ? 200 : 400).json(result);
+    }
+
+    if (sharedCampaignPreview && ['reserve', 'consume_free'].includes(action)) {
+      return res.status(403).json({ ok:false, code:'PREVIEW_PROMO_DISABLED' });
     }
 
     if (action === 'reserve') {

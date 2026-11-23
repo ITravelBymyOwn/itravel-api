@@ -26,6 +26,8 @@ const REST_URL = `${SUPABASE_URL}/rest/v1`;
 ========================================================= */
 
 const CURRENCY = "USD";
+const sharedCampaignPreview = process.env.VERCEL_ENV === "preview" &&
+  process.env.ITBMO_CAMPAIGN_SHARED_DATABASE === "true";
 
 const PAYPAL_ENV = String(process.env.PAYPAL_ENV || "sandbox").trim().toLowerCase();
 const PAYPAL_CLIENT_ID = String(process.env.PAYPAL_CLIENT_ID || "").trim();
@@ -438,10 +440,10 @@ async function handleConfig(res) {
       price: pricing.base_price
     },
     configurable_promotions: true,
-    paypal_enabled: Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET),
-    paypal_client_id: PAYPAL_CLIENT_ID || null,
+    paypal_enabled: !sharedCampaignPreview && Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET),
+    paypal_client_id: sharedCampaignPreview ? null : PAYPAL_CLIENT_ID || null,
     paypal_environment: PAYPAL_ENV,
-    tilopay_enabled: TILOPAY_ENABLED
+    tilopay_enabled: !sharedCampaignPreview && TILOPAY_ENABLED
   });
 }
 
@@ -900,6 +902,9 @@ export default async function handler(req, res) {
         : req.body || {};
 
     const action = String(body.action || "").trim().toLowerCase();
+    if (sharedCampaignPreview && ["paypal_create_order", "paypal_capture_order", "tilopay_create_checkout"].includes(action)) {
+      return res.status(403).json({ ok: false, code: "PREVIEW_CHECKOUT_DISABLED" });
+    }
 
     /*
       config still requires a valid ITBMO session because the checkout
