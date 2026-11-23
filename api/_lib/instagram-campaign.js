@@ -83,6 +83,48 @@ async function instagramRequest(config, path, body) {
   return response.json();
 }
 
+export async function inspectInstagramReels(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'GET' || process.env.VERCEL_ENV !== 'preview' ||
+      process.env.ITBMO_INSTAGRAM_WEBHOOK_VERIFY_ONLY !== 'true') return res.status(404).end();
+
+  const config = {
+    account: process.env.ITBMO_INSTAGRAM_ACCOUNT_ID,
+    accessToken: process.env.ITBMO_INSTAGRAM_ACCESS_TOKEN,
+    version: process.env.ITBMO_INSTAGRAM_GRAPH_VERSION,
+    graphHost: graphHosts.get(process.env.ITBMO_INSTAGRAM_LOGIN_MODE)
+  };
+  if (!instagramId.test(config.account || '') || !config.accessToken ||
+      !/^v\d+\.0$/.test(config.version || '') || !config.graphHost) return res.status(503).end();
+
+  const requested = new Map([['DgGGcQsJkRj', 'es'], ['DgGG9Q2J79G', 'en']]);
+  const [media, subscriptions] = await Promise.allSettled([
+    instagramRequest(config, `${config.account}/media?fields=id,permalink,media_product_type&limit=50`),
+    instagramRequest(config, `${config.account}/subscribed_apps`)
+  ]);
+  const errorCode = result => result.status === 'rejected' ? {
+    code: result.reason.instagramError?.code ?? null,
+    subcode: result.reason.instagramError?.error_subcode ?? null
+  } : null;
+
+  const reels = [];
+  for (const item of media.value?.data || []) {
+    const shortcode = /^https:\/\/(?:www\.)?instagram\.com\/(?:p|reel)\/([\w-]+)(?:[/?]|$)/.exec(item.permalink || '')?.[1];
+    if (requested.has(shortcode) && instagramId.test(item.id || '') && item.media_product_type === 'REELS') {
+      reels.push({ id: item.id, language: requested.get(shortcode) });
+    }
+  }
+  return res.status(200).json({
+    reels,
+    mediaError: errorCode(media),
+    subscriptions: subscriptions.value?.data?.map(item => ({
+      campaignApp: String(item.id ?? item.instagram_business_account_data?.id) === '3838127946326224',
+      fields: item.subscribed_fields ?? []
+    })),
+    subscriptionError: errorCode(subscriptions)
+  });
+}
+
 function sendInstagramMessage(config, recipient, text) {
   return instagramRequest(config, `${config.account}/messages`, { recipient, message: { text } });
 }

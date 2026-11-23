@@ -1,9 +1,10 @@
 import { reservePromotion, consumePromotion, getPromotionReservation } from './_lib/promo-engine.js';
 import { resolveSession } from './_lib/itbmo-foundation.js';
-import { instagramCampaignAction, instagramCampaignWebhook } from './_lib/instagram-campaign.js';
+import { inspectInstagramReels, instagramCampaignAction, instagramCampaignWebhook } from './_lib/instagram-campaign.js';
 
 export default async function handler(req, res) {
   if (req.query?.endpoint === 'instagram-campaign-webhook') return instagramCampaignWebhook(req, res);
+  if (req.query?.endpoint === 'instagram-reel-qa') return inspectInstagramReels(req, res);
   if (req.method !== 'POST') return res.status(405).json({ ok:false, code:'METHOD_NOT_ALLOWED' });
 
   try {
