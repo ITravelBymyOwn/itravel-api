@@ -13,15 +13,11 @@ const graphHosts = new Map([
 ]);
 const campaignCopy = {
   es: {
-    intro: '¡Gracias por participar en ITBMO! Responde CONFIRMAR a este mensaje para que podamos verificar tu participación.',
-    follow: 'Sigue a @itravelbymyown y vuelve a responder CONFIRMAR cuando hayas terminado.',
-    link: '¡Participación verificada! Toca el botón e inicia sesión o crea una cuenta ITBMO para activar tu itinerario gratis.',
+    link: '¡Gracias por participar! ✈️ Antes de canjear tu itinerario gratis, sigue a @itravelbymyown. Si ya nos sigues, toca el botón para continuar.',
     claimButton: 'Canjear itinerario'
   },
   en: {
-    intro: 'Thanks for joining the ITBMO campaign! Reply CONFIRM to this message so we can verify your entry.',
-    follow: 'Follow @itravelbymyown, then reply CONFIRM again when you’re ready.',
-    link: 'Your entry is verified! Tap the button and sign in or create an ITBMO account to activate your free itinerary.',
+    link: 'Thanks for participating! ✈️ Follow @itravelbymyown before claiming your free itinerary. Already following us? Tap the button to continue.',
     claimButton: 'Claim free itinerary'
   }
 };
@@ -85,13 +81,9 @@ async function instagramRequest(config, path, body) {
   return response.json();
 }
 
-function sendInstagramMessage(config, recipient, text) {
-  return instagramRequest(config, `${config.account}/messages`, { recipient, message: { text } });
-}
-
-async function sendClaimButton(config, actor, copy, url) {
+async function sendClaimButton(config, commentId, copy, url) {
   const sent = await instagramRequest(config, `${config.account}/messages`, {
-    recipient: { id: actor },
+    recipient: { comment_id: commentId },
     message: {
       attachment: {
         type: 'template',
@@ -172,48 +164,21 @@ async function handleComment(config, comment, eventTime) {
   });
   const rows = await supabaseFetch(`/instagram_campaign_participation?campaign_id=eq.${reel.campaign_id}&instagram_id=eq.${actor}&limit=1`);
   const row = rows?.[0];
-  if (!row || row.intro_sent_at) return;
-  await withOutboundLease(row, 'intro_sent_at=is.null', async locked => {
-    await sendInstagramMessage(config, { comment_id: locked.comment_id }, campaignCopy[locked.language].intro);
-    return { intro_sent_at: new Date().toISOString() };
+  if (!row || row.link_sent_at || row.user_id) return;
+  // The old flow may already have used the private reply for this comment.
+  if (row.intro_sent_at && row.comment_id === commentId) return;
+  await withOutboundLease(row, 'link_sent_at=is.null&user_id=is.null', async (locked, condition) => {
+    if (locked.intro_sent_at && locked.comment_id === commentId) return {};
+    const expiry = Date.parse(locked.link_expires_at) > Date.now() ?
+      Date.parse(locked.link_expires_at) : Date.now() + HOUR;
+    await patchParticipation(condition, { link_expires_at: new Date(expiry).toISOString() });
+    const value = `${locked.id}.${expiry}`;
+    const token = `${value}.${hmac(value, config.signingKey, 'base64url')}`;
+    const link = `${config.origin}/planner.html?lang=${reel.language}#itbmo_campaign=${token}`;
+    await sendClaimButton(config, commentId, campaignCopy[reel.language], link);
+    const sentAt = new Date().toISOString();
+    return { comment_id: commentId, language: reel.language, intro_sent_at: sentAt, link_sent_at: sentAt };
   });
-}
-
-async function handleConfirmation(config, event) {
-  const actor = event?.sender?.id;
-  const messageId = event?.message?.mid;
-  if (typeof actor !== 'string' || actor === config.account || !instagramId.test(actor) ||
-      event?.recipient?.id !== config.account || event?.message?.is_echo ||
-      typeof messageId !== 'string' || messageId.length > 300 ||
-      !/^(CONFIRM|CONFIRMAR)$/i.test(String(event?.message?.text || '').trim()) ||
-      (Number.isFinite(event.timestamp) && Date.now() - event.timestamp >= 24 * HOUR)) return;
-
-  const pending = await supabaseFetch(`/instagram_campaign_participation?select=*,instagram_campaign_settings!inner(environment)&instagram_id=eq.${actor}&instagram_campaign_settings.environment=eq.${config.environment}&user_id=is.null&order=created_at.desc&limit=5`);
-  for (const row of pending || []) {
-    const campaign = await getSetting(row.campaign_id, config.environment);
-    if (!campaignIsOpen(campaign) || row.last_message_id === messageId) continue;
-    await withOutboundLease(row, 'user_id=is.null', async (locked, condition) => {
-      if (locked.last_message_id === messageId ||
-          (locked.link_sent_at && Date.parse(locked.link_expires_at) > Date.now())) return {};
-      const profile = await instagramRequest(config, `${actor}?fields=is_user_follow_business`);
-      if (typeof profile.is_user_follow_business !== 'boolean') throw new Error('FOLLOW_STATUS_UNAVAILABLE');
-      const copy = campaignCopy[locked.language];
-      if (!profile.is_user_follow_business) {
-        await sendInstagramMessage(config, { id: actor }, copy.follow);
-        return { last_message_id: messageId };
-      }
-      const expiry = Date.parse(locked.link_expires_at) > Date.now() ?
-        Date.parse(locked.link_expires_at) : Date.now() + HOUR;
-      const expiresAt = new Date(expiry).toISOString();
-      await patchParticipation(condition, { link_expires_at: expiresAt });
-      const value = `${locked.id}.${expiry}`;
-      const token = `${value}.${hmac(value, config.signingKey, 'base64url')}`;
-      const link = `${config.origin}/planner.html?lang=${locked.language}#itbmo_campaign=${token}`;
-      await sendClaimButton(config, actor, copy, link);
-      return { last_message_id: messageId, link_sent_at: new Date().toISOString() };
-    });
-    return;
-  }
 }
 
 export async function instagramCampaignWebhook(req, res) {
@@ -251,22 +216,6 @@ export async function instagramCampaignWebhook(req, res) {
   let payload;
   try { payload = JSON.parse(raw.toString('utf8')); }
   catch { return res.status(400).end(); }
-  if (config.environment === 'preview' && Array.isArray(payload?.entry)) {
-    const messages = payload.entry.flatMap(entry => [
-      ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
-      ...(Array.isArray(entry?.changes) ? entry.changes
-        .filter(change => change?.field === 'messages').map(change => change.value) : [])
-    ]);
-    if (messages.length) {
-      console.info('ITBMO Instagram Preview message event', {
-        objectMatches: payload.object === 'instagram',
-        accountMatches: payload.entry.some(entry => entry?.id === config.account),
-        recipientMatches: messages.some(event => event?.recipient?.id === config.account),
-        hasConfirmation: messages.some(event => /^(CONFIRM|CONFIRMAR)$/i.test(String(event?.message?.text || '').trim())),
-        hasMessageId: messages.some(event => typeof event?.message?.mid === 'string')
-      });
-    }
-  }
   if (verifyOnly || payload?.object !== 'instagram' || !Array.isArray(payload.entry)) {
     return res.status(200).end();
   }
@@ -278,14 +227,16 @@ export async function instagramCampaignWebhook(req, res) {
       if (Date.now() - eventTime < 7 * 24 * HOUR) {
         for (const event of entry.changes || []) {
           if (event.field === 'comments') await handleComment(config, event.value, eventTime);
-          if (event.field === 'messages') await handleConfirmation(config, event.value);
         }
       }
-      for (const event of entry.messaging || []) await handleConfirmation(config, event);
     }
     return res.status(200).end();
   } catch (error) {
-    console.error('ITBMO Instagram campaign delivery failed', error.message);
+    console.error('ITBMO Instagram campaign delivery failed', {
+      message: error.message,
+      graphCode: error.instagramError?.code,
+      graphSubcode: error.instagramError?.error_subcode
+    });
     return res.status(503).end();
   }
 }
