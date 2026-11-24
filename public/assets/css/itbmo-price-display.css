@@ -1,0 +1,14 @@
+.itbmo-price-promotion {
+  display: inline-block;
+  max-width: 100%;
+  color: #31566f;
+  font-size: clamp(.76rem, .48em, 1rem);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.itbmo-price-promotion del {
+  white-space: nowrap;
+}

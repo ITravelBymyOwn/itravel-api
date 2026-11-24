@@ -15279,7 +15279,11 @@ function applyCommerceI18n(){
   const newP = qs('#checkout-price-new');
   const basePrice=Number(commerceServerConfig?.base_price);
   const finalPrice=Number(activePromoReservation?.final_amount ?? basePrice);
-  if(newP) newP.textContent = Number.isFinite(finalPrice) ? `US$${finalPrice.toFixed(2)}` : '—';
+  if(newP && !activePromoReservation && window.ITBMOPrice){
+    window.ITBMOPrice.render(newP,commerceServerConfig,es?'es':'en');
+  }else if(newP){
+    newP.textContent=Number.isFinite(finalPrice)?`US$${finalPrice.toFixed(2)}`:'—';
+  }
   if($checkoutPromoLabel) $checkoutPromoLabel.textContent=c.promoLabel;
   if($checkoutPromoInput) $checkoutPromoInput.placeholder=c.promoPlaceholder;
   if($checkoutPromoApply) $checkoutPromoApply.textContent=c.promoApply;
