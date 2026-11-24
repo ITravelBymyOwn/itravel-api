@@ -15,12 +15,14 @@ const campaignCopy = {
   es: {
     intro: '¡Gracias por participar en ITBMO! Responde CONFIRMAR a este mensaje para que podamos verificar tu participación.',
     follow: 'Sigue a @itravelbymyown y vuelve a responder CONFIRMAR cuando hayas terminado.',
-    link: '¡Participación verificada! Abre este enlace e inicia sesión o crea una cuenta ITBMO para activar tu itinerario gratis:'
+    link: '¡Participación verificada! Toca el botón e inicia sesión o crea una cuenta ITBMO para activar tu itinerario gratis.',
+    claimButton: 'Canjear itinerario'
   },
   en: {
     intro: 'Thanks for joining the ITBMO campaign! Reply CONFIRM to this message so we can verify your entry.',
     follow: 'Follow @itravelbymyown, then reply CONFIRM again when you’re ready.',
-    link: 'Your entry is verified! Open this link and sign in or create an ITBMO account to activate your free itinerary:'
+    link: 'Your entry is verified! Tap the button and sign in or create an ITBMO account to activate your free itinerary.',
+    claimButton: 'Claim free itinerary'
   }
 };
 
@@ -85,6 +87,25 @@ async function instagramRequest(config, path, body) {
 
 function sendInstagramMessage(config, recipient, text) {
   return instagramRequest(config, `${config.account}/messages`, { recipient, message: { text } });
+}
+
+async function sendClaimButton(config, actor, copy, url) {
+  const sent = await instagramRequest(config, `${config.account}/messages`, {
+    recipient: { id: actor },
+    message: {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'button',
+          text: copy.link,
+          buttons: [{ type: 'web_url', title: copy.claimButton, url }]
+        }
+      }
+    }
+  });
+  if (typeof sent?.message_id !== 'string' || !sent.message_id) {
+    throw new Error('INSTAGRAM_CLAIM_BUTTON_NOT_ACKNOWLEDGED');
+  }
 }
 
 async function getSetting(campaignId, scope) {
@@ -188,7 +209,7 @@ async function handleConfirmation(config, event) {
       const value = `${locked.id}.${expiry}`;
       const token = `${value}.${hmac(value, config.signingKey, 'base64url')}`;
       const link = `${config.origin}/planner.html?lang=${locked.language}#itbmo_campaign=${token}`;
-      await sendInstagramMessage(config, { id: actor }, `${copy.link}\n${link}`);
+      await sendClaimButton(config, actor, copy, link);
       return { last_message_id: messageId, link_sent_at: new Date().toISOString() };
     });
     return;

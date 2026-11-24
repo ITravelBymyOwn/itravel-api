@@ -100,9 +100,26 @@ test('Instagram delivery respects scope, language, consent, deduplication and si
   const comment = (text, media = '42', actor = '20') => ({
     changes: [{ field: 'comments', value: { id: '50', media: { id: media }, from: { id: actor, username: 'self' }, text } }]
   });
-  const reply = (mid, text = 'CONFIRMAR') => ({
-    messaging: [{ timestamp: Date.now(), sender: { id: '20' }, recipient: { id: '100' }, message: { mid, text } }]
+  const reply = (mid, text = 'CONFIRMAR', actor = '20') => ({
+    messaging: [{ timestamp: Date.now(), sender: { id: actor }, recipient: { id: '100' }, message: { mid, text } }]
   });
+  function claimLink(sent, actor, title, language) {
+    assert.deepEqual(sent.recipient, { id: actor });
+    assert.equal(sent.message.text, undefined);
+    assert.equal(sent.message.attachment.type, 'template');
+    const { template_type, text, buttons } = sent.message.attachment.payload;
+    assert.equal(template_type, 'button');
+    assert.doesNotMatch(text, /https?:/);
+    assert.equal(buttons.length, 1);
+    assert.equal(buttons[0].type, 'web_url');
+    assert.equal(buttons[0].title, title);
+    assert.ok(title.length <= 20);
+    const link = new URL(buttons[0].url);
+    assert.equal(link.origin, env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN);
+    assert.equal(link.pathname, '/planner.html');
+    assert.equal(link.searchParams.get('lang'), language);
+    return link;
+  }
 
   assert.equal(countMentions('@Friend, @friend, @self and not@test.com.', 'self'), 1);
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other'), { secret: 'wrong' }), 403);
@@ -119,8 +136,7 @@ test('Instagram delivery respects scope, language, consent, deduplication and si
 
   follows = true;
   assert.equal(await deliver(reply('3')), 200);
-  const link = new URL(messages[2].message.text.split('\n').at(-1));
-  assert.equal(link.searchParams.get('lang'), 'es');
+  const link = claimLink(messages[2], '20', 'Canjear itinerario', 'es');
   const token = new URLSearchParams(link.hash.slice(1)).get('itbmo_campaign');
   const claim = await instagramCampaignAction('instagram_claim', { token }, 'fixture-session');
   assert.equal(claim.ok, true);
@@ -132,6 +148,9 @@ test('Instagram delivery respects scope, language, consent, deduplication and si
   assert.equal(messages.length, 3);
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '30')), 200);
   assert.match(messages[3].message.text, /Reply CONFIRM/);
+  const englishEvent = reply('en-1', 'CONFIRM', '30').messaging[0];
+  assert.equal(await deliver({ changes: [{ field: 'messages', value: englishEvent }] }), 200);
+  claimLink(messages[4], '30', 'Claim free itinerary', 'en');
   assert.ok(graphRequests.every(request => request.host === 'graph.instagram.com'));
 
   process.env.ITBMO_INSTAGRAM_LOGIN_MODE = 'unified_login';
@@ -139,9 +158,9 @@ test('Instagram delivery respects scope, language, consent, deduplication and si
   assert.deepEqual(graphRequests.at(-1), {
     host: 'graph.facebook.com',
     path: '/v27.0/100/messages',
-    body: messages[4]
+    body: messages[5]
   });
-  assert.deepEqual(messages[4].recipient, { comment_id: '50' });
+  assert.deepEqual(messages[5].recipient, { comment_id: '50' });
   assert.equal(await deliver(reply('4')), 200);
   assert.deepEqual(graphRequests.slice(-2).map(({ host, path }) => ({ host, path })), [
     { host: 'graph.facebook.com', path: '/v27.0/20' },
