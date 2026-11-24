@@ -166,7 +166,7 @@ const PARTNER_LANGUAGE_CAPABILITIES = Object.freeze({
   getyourguide: {
     supported: new Set(['en','es']),
     applicable: new Set(['en','es']),
-    strategy: 'localized_domain'
+    strategy: 'localized_path'
   },
   omio: {
     supported: new Set(['en','es','de']),
@@ -314,7 +314,7 @@ function hasRequiredAttribution(slug, rawUrl) {
         url.searchParams.get('utm_medium') === 'online_publisher' &&
         Boolean(url.searchParams.get('cmp'));
     }
-    if (slug === 'bookaway') return url.hostname.toLowerCase() === 'www.bookaway.com' && url.searchParams.get('offer_id') === BOOKAWAY_OFFER_ID && url.searchParams.get('aff_id') === BOOKAWAY_AFFILIATE_ID && (url.pathname === '/' || /^\/(?:[a-z]{2}\/)?(?:s|routes)\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname));
+    if (slug === 'bookaway') return url.hostname.toLowerCase() === 'www.bookaway.com' && url.searchParams.get('offer_id') === BOOKAWAY_OFFER_ID && url.searchParams.get('aff_id') === BOOKAWAY_AFFILIATE_ID && (/^\/(?:es\/?)?$/.test(url.pathname) || /^\/(?:[a-z]{2}\/)?(?:s|routes)\/[a-z0-9-]+\/[a-z0-9-]+-to-[a-z0-9-]+\/?$/.test(url.pathname));
     if (slug === '12go') return url.searchParams.get('z') === TWELVEGO_PARTNER_ID && url.searchParams.get('sub_id') === 'itbmo';
     if (slug === 'discovercars') return url.searchParams.get('a_aid') === DISCOVERCARS_AID;
     if (slug === 'riseandshield') return url.searchParams.get('ref') === RISE_SHIELD_REF && url.searchParams.get('tm_source') === 'itbmo';
@@ -355,19 +355,39 @@ export async function getOffer(slug, placement = '') {
   return offer ? { ...offer, partner: { id: partner.id, slug: partner.slug, name: partner.name } } : null;
 }
 
+function getYourGuideSearchUrl(locale, query, campaign) {
+  const storefront = locale === 'es' ? 'es-es' : 'en-gb';
+  return appendParams(`https://www.getyourguide.com/${storefront}/s/`, {
+    q: query,
+    locale_autoredirect_optout: 'true',
+    partner_id: GYG_PARTNER_ID,
+    utm_medium: 'online_publisher',
+    cmp: campaign
+  });
+}
+
+function localizedTransportUrl(provider, rawUrl, language) {
+  const url = new URL(rawUrl);
+  const es = normalizeLanguage(language) === 'es';
+  const routePath = url.pathname.replace(/^\/(?:en|es)(?=\/|$)/, '');
+  const prefix = provider === '12go' ? (es ? '/es' : '/en') : (es ? '/es' : '');
+  url.pathname = prefix + routePath || '/';
+  return url.toString();
+}
+
 export async function resolvePublicResourceLink(slug='',language='es'){
   const safeSlug=clean(slug,40).toLowerCase();
   const lang=normalizeLanguage(language)==='es'?'es':'en';
   const campaign=`itbmo-resources-${lang}`;
   let target='';
   if(safeSlug==='viator')target=appendParams(lang==='es'?'https://www.viator.com/es-ES/':'https://www.viator.com/',{pid:VIATOR_PID,mcid:VIATOR_MCID,medium:'link',campaign});
-  else if(safeSlug==='getyourguide')target=appendParams(lang==='es'?'https://www.getyourguide.es/s/':'https://www.getyourguide.com/s/',{q:lang==='es'?'tours y actividades':'tours and activities',partner_id:GYG_PARTNER_ID,utm_medium:'online_publisher',cmp:campaign});
+  else if(safeSlug==='getyourguide')target=getYourGuideSearchUrl(lang,lang==='es'?'tours y actividades':'tours and activities',campaign);
   else if(safeSlug==='omio')target=appendParams('https://omio.sjv.io/c/7727455/861892/7385',{u:lang==='es'?'https://www.omio.es/':'https://www.omio.com/'});
   else if(safeSlug==='airalo')target='https://airalo.pxf.io/c/7727455/2071037/15608';
   else if(safeSlug==='riseandshield')target=appendParams('https://riseandshield.com/',{ref:RISE_SHIELD_REF,tm_source:'itbmo'});
-  else if(safeSlug==='discovercars')target=appendParams('https://www.discovercars.com/',{a_aid:DISCOVERCARS_AID,data1:'itbmo',data2:'resources'});
+  else if(safeSlug==='discovercars')target=appendParams(discoverCarsUrl(lang),{a_aid:DISCOVERCARS_AID,data1:'itbmo',data2:'resources'});
   else if(safeSlug==='12go')target=appendParams(lang==='es'?'https://12go.asia/es':'https://12go.asia/en',{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
-  else if(safeSlug==='bookaway')target=appendParams('https://www.bookaway.com/',{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+  else if(safeSlug==='bookaway')target=appendParams(localizedTransportUrl('bookaway','https://www.bookaway.com/',lang),{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
   else if(safeSlug==='holafly'){
     const offer=(await getOffer('holafly','trip_connectivity'))||(await getOffer('holafly'));
     target=clean(offer?.target_url,1400);
@@ -485,17 +505,7 @@ function contextualSearchUrl(slug, uiLanguage, partnerLocale, need, city) {
   }
 
   if (slug === 'getyourguide') {
-    // GYG deep links keep partner_id attribution. Use its Spanish storefront
-    // when ITBMO is Spanish; English keeps the global .com storefront.
-    const base = partnerLocale === 'es'
-      ? 'https://www.getyourguide.es/s/'
-      : 'https://www.getyourguide.com/s/';
-    return appendParams(base, {
-      q: query,
-      partner_id: GYG_PARTNER_ID,
-      utm_medium: 'online_publisher',
-      cmp: campaign
-    });
+    return getYourGuideSearchUrl(partnerLocale, query, campaign);
   }
 
   return '';
@@ -1266,7 +1276,6 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[],destinations=[]){
       if(!route.verified_url&&localTransportMarket(route,need))continue;
       const a=twelveGoSlug(route.origin),b=twelveGoSlug(route.destination); if(!a||!b||normalizeKey(a)===normalizeKey(b))continue;
       const key=`${clean(need?.id,120)}|${v187RouteKey(route.origin,city)}|${v187RouteKey(route.destination,city)}`; if(seen.has(key))continue;
-      const locale=normalizeLanguage(uiLanguage)==='es'?'es':'en';
       const verified=route.verified_url||verifiedTransportUrl('12go',route,city);
       // No fabricated deep links for unverified private-car/regional markets.
       // A generic affiliate landing page is explicitly a MANUAL search.
@@ -1278,7 +1287,7 @@ function resolve12GoTransportOffers(city,uiLanguage,needs=[],destinations=[]){
       if(!verified&&!inferred)continue;
       seen.add(key);
       const direct=Boolean(verified);
-      const targetUrl=appendParams(verified||inferred,{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
+      const targetUrl=appendParams(localizedTransportUrl('12go',verified||inferred,uiLanguage),{z:TWELVEGO_PARTNER_ID,sub_id:'itbmo'});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,resolutionType:verified?'provider_verified_route':'unverified_route_search',travelDate:route.date||'',routeSegment:{index:Number(route.index||1),commercial_origin:clean(route.origin,120),commercial_destination:clean(route.destination,120),mode:clean(route.mode,80),market_resolution:clean(route.resolution||'sealed_leg',60),journey_origin:clean(route.journey_origin||'',120),journey_destination:clean(route.journey_destination||'',120)},titleEs:label,titleEn:label,descriptionEs:direct?'Busca opciones para este tramo en 12Go. Confirma disponibilidad con el proveedor.':`Buscar manualmente ${label} en 12Go. Ruta y disponibilidad NO verificadas.`,descriptionEn:direct?'Search this leg on 12Go; confirm availability with the provider.':`Manually search ${label} on 12Go. Route and availability NOT verified.`,confidence:direct?'medium':'low'});
       if(offer)out.push(offer);
@@ -1370,7 +1379,7 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
       const inferred=verified?'':v225PublisherSearchCandidate('bookaway',route,need,city,destinations);
       if(!verified&&!inferred)continue;
       seen.add(key);
-      const targetUrl=appendParams(verified||inferred,{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
+      const targetUrl=appendParams(localizedTransportUrl('bookaway',verified||inferred,uiLanguage),{offer_id:BOOKAWAY_OFFER_ID,aff_id:BOOKAWAY_AFFILIATE_ID});
       const label=`${clean(route.origin,120)} → ${clean(route.destination,120)}`;
       const offer=signedVirtualOffer({partner,targetUrl,placement:'city_transport',need:{...need,entity_name:label},city,
         resolutionType:verified?'provider_verified_route':'unverified_route_search',confidence:verified?'high':'low',travelDate:route.date||'',
@@ -1385,7 +1394,10 @@ function resolveBookawayTransportOffers(city,uiLanguage,needs=[],destinations=[]
 }
 // V177: This adapter consumes an explicit, date-scoped rental decision from
 // Workspace. It does NOT infer a rental from arbitrary intercity transfers.
-function resolveDiscoverCarsOffers(city,needs=[]){
+function discoverCarsUrl(language) {
+  return normalizeLanguage(language) === 'es' ? 'https://www.discovercars.com/es' : 'https://www.discovercars.com/';
+}
+function resolveDiscoverCarsOffers(city,uiLanguage,needs=[]){
   const partner=virtualPartner('discovercars','DiscoverCars','car_rental');const out=[];
   for(const need of (Array.isArray(needs)?needs:[])){
     const rental=need?.derived_by==='workspace_rental_plan' ||
@@ -1396,7 +1408,7 @@ function resolveDiscoverCarsOffers(city,needs=[]){
     const scope=days.length?` · ${days.join(', ')}`:'';
     // DiscoverCars search-field parameters have NOT been verified for this
     // affiliate account. Preserve attribution; do not fabricate pickup dates.
-    const targetUrl=appendParams('https://www.discovercars.com/',{a_aid:DISCOVERCARS_AID,data1:'itbmo',data2:campaignPart(city||'workspace')});
+    const targetUrl=appendParams(discoverCarsUrl(uiLanguage),{a_aid:DISCOVERCARS_AID,data1:'itbmo',data2:campaignPart(city||'workspace')});
     const offer=signedVirtualOffer({partner,targetUrl,placement:'city_car_rental',need,city,
       resolutionType:'affiliate_rental_comparison',confidence:selected?'high':'medium',
       travelDate:need?.rental_pickup_date||'',
@@ -1538,7 +1550,7 @@ export async function resolveCityOffers({
     resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[]),
     Promise.resolve(resolve12GoTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity),bookawayDestinations)),
     Promise.resolve(resolveBookawayTransportOffers(safeCity,safeUiLanguage,partnerWorkspaceRouteNeeds(safeNeeds,transport_routes,safeCity),bookawayDestinations)),
-    Promise.resolve(resolveDiscoverCarsOffers(safeCity,safeNeeds))
+    Promise.resolve(resolveDiscoverCarsOffers(safeCity,safeUiLanguage,safeNeeds))
   ]);
   const labels=['viator','getyourguide','omio','12go','bookaway','discovercars'];
   const buckets=resolved.map((result,index)=>{
