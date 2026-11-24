@@ -110,6 +110,7 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
     assert.equal(template_type, 'button');
     assert.doesNotMatch(text, /https?:|CONFIRM/);
     assert.match(text, /(?:sigue a|follow) @itravelbymyown/i);
+    assert.match(text, language === 'es' ? /24 horas/ : /24 hours/);
     assert.equal(buttons.length, 1);
     assert.equal(buttons[0].type, 'web_url');
     assert.equal(buttons[0].title, title);
@@ -125,6 +126,7 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other'), { secret: 'wrong' }), 403);
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @friend.')), 200);
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '999')), 200);
+  const beforeSend = Date.now();
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 200);
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 200);
   assert.equal(messages.length, 1);
@@ -132,6 +134,10 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   assert.equal(await deliver(reply('1')), 200);
   assert.equal(messages.length, 1);
   const token = new URLSearchParams(link.hash.slice(1)).get('itbmo_campaign');
+  const linkExpiry = Number(token.split('.')[1]);
+  assert.ok(linkExpiry >= beforeSend + 86_400_000);
+  assert.ok(linkExpiry <= Date.now() + 86_400_000);
+  assert.equal(participants.get('20').link_expires_at, new Date(linkExpiry).toISOString());
   const claim = await instagramCampaignAction('instagram_claim', { token }, 'fixture-session');
   assert.equal(claim.ok, true);
   assert.equal(claimInput.p_user, profileId);

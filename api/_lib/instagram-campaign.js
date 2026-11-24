@@ -3,6 +3,7 @@ import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 import { commercePricing } from './promo-engine.js';
 
 const HOUR = 3_600_000;
+const CLAIM_LINK_HOURS = 24;
 const MAX_BODY = 256_000;
 const instagramId = /^[0-9]{1,40}$/;
 const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/;
@@ -13,11 +14,11 @@ const graphHosts = new Map([
 ]);
 const campaignCopy = {
   es: {
-    link: '¡Gracias por participar! ✈️ Antes de canjear tu itinerario gratis, sigue a @itravelbymyown. Si ya nos sigues, toca el botón para continuar.',
+    link: `¡Gracias por participar! ✈️ Sigue a @itravelbymyown y toca el botón. Tienes ${CLAIM_LINK_HOURS} horas para activar tu itinerario gratis desde este mensaje.`,
     claimButton: 'Canjear itinerario'
   },
   en: {
-    link: 'Thanks for participating! ✈️ Follow @itravelbymyown before claiming your free itinerary. Already following us? Tap the button to continue.',
+    link: `Thanks for participating! ✈️ Follow @itravelbymyown and tap the button. You have ${CLAIM_LINK_HOURS} hours from this message to activate your free itinerary.`,
     claimButton: 'Claim free itinerary'
   }
 };
@@ -170,7 +171,7 @@ async function handleComment(config, comment, eventTime) {
   await withOutboundLease(row, 'link_sent_at=is.null&user_id=is.null', async (locked, condition) => {
     if (locked.intro_sent_at && locked.comment_id === commentId) return {};
     const expiry = Date.parse(locked.link_expires_at) > Date.now() ?
-      Date.parse(locked.link_expires_at) : Date.now() + HOUR;
+      Date.parse(locked.link_expires_at) : Date.now() + CLAIM_LINK_HOURS * HOUR;
     await patchParticipation(condition, { link_expires_at: new Date(expiry).toISOString() });
     const value = `${locked.id}.${expiry}`;
     const token = `${value}.${hmac(value, config.signingKey, 'base64url')}`;
