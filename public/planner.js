@@ -13640,6 +13640,34 @@ function _appendReturnJourneyToExportBlocks_(blocks=[],outLang='es'){
   return blocks;
 }
 
+function _excelItineraryRowHeight_(values,widths,context){
+  let maxLines=1;
+  for(const [index,value] of values.entries()){
+    if(index<6||typeof value!=='string'||!value)continue;
+    // Excel column widths use character units. Allow space for cell padding
+    // and font differences between the browser and the spreadsheet viewer.
+    const pixelWidth=Math.floor(widths[index]*7*.93)-8;
+    const measure=text=>context?context.measureText(text).width:text.length*7;
+    let lines=0;
+    for(const paragraph of value.split(/\r\n|[\r\n]/)){
+      let line='';
+      lines++;
+      for(const word of paragraph.split(/\s+/).filter(Boolean)){
+        const next=line?`${line} ${word}`:word;
+        if(measure(next)<=pixelWidth){line=next;continue;}
+        if(line)lines++;
+        line='';
+        for(const char of word){
+          if(line&&measure(line+char)>pixelWidth){lines++;line='';}
+          line+=char;
+        }
+      }
+    }
+    maxLines=Math.max(maxLines,lines);
+  }
+  return Math.min(409,Math.max(24,maxLines*15+8));
+}
+
 async function exportItineraryToXLSX(options={}){
   const blocks=_exportPhysicalDestinationBlocks_();
   const es=_plannerOutputLang_()==='es';
@@ -13710,12 +13738,14 @@ async function exportItineraryToXLSX(options={}){
   headerRow.eachCell(cell=>{cell.font={bold:true,color:{argb:white},size:10};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:navy}};cell.alignment={vertical:'middle',horizontal:'center',wrapText:true};cell.border={bottom:{style:'medium',color:{argb:teal}}};});
   const widths=[9,8,13,20,12,12,42,24,17,58,14,16,24,24,22];widths.forEach((width,i)=>sheet.getColumn(i+1).width=width);
 
+  const textMeasure=document.createElement('canvas').getContext('2d');
+  if(textMeasure)textMeasure.font='14px Calibri, Arial, sans-serif';
   let excelRow=8,lastDayKey='';
   blocks.forEach((block,index)=>block.days.forEach(day=>day.rows.forEach(r=>{
     const type=_exportBlockType_(r,outLang),status=_exportScheduleStatus_(r,day.date,outLang),dayKey=`${day.globalDay}|${day.date}`;
     const dateValue=day.date?parseDMY(day.date):null;
     const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,r.start||'',r.end||'',normalizeCellText(r.activity),normalizeCellText(_v40VisibleTransportForRow_(r)),status,normalizeCellText(r.notes),type,null,normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v39VisibleDuration_(r))];
-    const row=sheet.addRow(values);row.height=48;
+    const row=sheet.addRow(values);row.height=_excelItineraryRowHeight_(values,widths,textMeasure);
     row.getCell(12).value={formula:`IF(OR(E${excelRow}="",F${excelRow}=""),"",MOD(TIMEVALUE(F${excelRow})-TIMEVALUE(E${excelRow}),1))`};
     row.getCell(12).numFmt='[h]" h "mm" min"';
     if(dateValue)row.getCell(3).numFmt='dd/mm/yyyy';
