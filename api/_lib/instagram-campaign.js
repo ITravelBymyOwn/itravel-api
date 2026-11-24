@@ -14,11 +14,11 @@ const graphHosts = new Map([
 ]);
 const campaignCopy = {
   es: {
-    link: `¡Gracias por participar! ✈️ Sigue a @itravelbymyown y toca el botón. Tienes ${CLAIM_LINK_HOURS} horas para activar tu itinerario gratis desde este mensaje.`,
+    link: `¡Gracias por participar! ✈️ Sigue a @itravelbymyown y activa tu itinerario gratis en las próximas ${CLAIM_LINK_HOURS} horas. Usa el botón o abre este enlace:`,
     claimButton: 'Canjear itinerario'
   },
   en: {
-    link: `Thanks for participating! ✈️ Follow @itravelbymyown and tap the button. You have ${CLAIM_LINK_HOURS} hours from this message to activate your free itinerary.`,
+    link: `Thanks for participating! ✈️ Follow @itravelbymyown and activate your free itinerary within ${CLAIM_LINK_HOURS} hours. Tap the button or open this link:`,
     claimButton: 'Claim free itinerary'
   }
 };
@@ -90,7 +90,7 @@ async function sendClaimButton(config, commentId, copy, url) {
         type: 'template',
         payload: {
           template_type: 'button',
-          text: copy.link,
+          text: `${copy.link}\n\n${url}`,
           buttons: [{ type: 'web_url', title: copy.claimButton, url }]
         }
       }

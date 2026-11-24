@@ -108,7 +108,9 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
     assert.equal(sent.message.attachment.type, 'template');
     const { template_type, text, buttons } = sent.message.attachment.payload;
     assert.equal(template_type, 'button');
-    assert.doesNotMatch(text, /https?:|CONFIRM/);
+    assert.doesNotMatch(text, /CONFIRM/);
+    assert.equal(text.split('\n\n').at(-1), buttons[0].url);
+    assert.match(text, language === 'es' ? /abre este enlace/ : /open this link/);
     assert.match(text, /(?:sigue a|follow) @itravelbymyown/i);
     assert.match(text, language === 'es' ? /24 horas/ : /24 hours/);
     assert.equal(buttons.length, 1);
