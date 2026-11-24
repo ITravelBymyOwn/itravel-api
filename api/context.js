@@ -5,6 +5,7 @@
 
 import OpenAI from "openai";
 import crypto from "crypto";
+import itbmoAdmission from "../public/assets/js/itbmo-admission.js";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL = process.env.OPENAI_CONTEXT_MODEL || "gpt-5.6-luna";
@@ -21,7 +22,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.11-v323-admission-binding";
+const CONTEXT_VERSION = "1.12-site-admission";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -187,6 +188,7 @@ function compactAdmissionText(value) {
 // V323: source facts outrank incidental ticket words and generated messages.
 // An exterior fallback in a paid visit's notes is not a contradiction.
 function admissionSourceBlocked(source) {
+  if (itbmoAdmission.blocksSiteAdmission(source)) return true;
   const cc = source?.commerce_context || {};
   const semantic = String(source?.commerce_semantic_type || cc.semantic_type || "").toUpperCase();
   const ticket = String(source?.commerce_ticket_need || cc.ticket_need || "").toLowerCase();
@@ -250,13 +252,16 @@ function blocksAttractionAdmission(source, entityName = "", entityType = "other"
 function filterUnsafeAdmissionNeeds(needs, candidates = []) {
   const byId = new Map(candidates.map(source => [source.candidate_id, source]));
   return (Array.isArray(needs) ? needs : []).filter(item => {
-    if (!item || (item.need_type !== "ticket_required" && item.need_type !== "reservation_recommended")) {
+    if (!item || !["ticket_required", "reservation_recommended", "guided_tour_optional"].includes(item.need_type)) {
       return true;
     }
 
     const candidateId = item.candidate_id || String(item.id || "").split(":")[0];
     const source = byId.get(candidateId) || candidates.find(candidate =>
       compactAdmissionText(candidate.activity) === compactAdmissionText(item.source_activity));
+    if (item.need_type === "guided_tour_optional") {
+      return !source || !itbmoAdmission.blocksStandaloneTour(source, item, item.city);
+    }
     // Cached cards must still bind to their own itinerary activity.
     if (!source) return false;
     return !blocksAttractionAdmission(source, item.entity_name, item.entity_type);
@@ -638,7 +643,7 @@ function buildCandidates(trip, requestedCity) {
         const contextNotes=clean(`${pendingContextNotes.get(pendingKey)||""} ${ownNotes}`,620);
         pendingContextNotes.delete(pendingKey);
         // Access belongs to this activity; transfer notes must not leak into it.
-        const accessSource={activity,notes:ownNotes,commerce_context:cc};
+        const accessSource={activity,notes:ownNotes,commerce_context:cc,entity_hint:entityHint};
         const evidence=accessEvidence(accessSource);
         const ticketNeed=clean(cc.ticket_need,40).toLowerCase();
         const structuredHint=admissionSourceBlocked(accessSource)?'':ticketNeed==='required'?'ticket_required':ticketNeed==='recommended'?'reservation_recommended':'';
@@ -690,6 +695,7 @@ ACCESS-FIRST RULES (CRITICAL):
 2. If admission is intrinsic to doing the planned visit, use ticket_required. This is the self-guided access need. Do NOT substitute a guided tour for it.
 3. If advance booking is strongly useful but not mandatory, use reservation_recommended.
 4. If only one component requires payment/reservation (for example a dome climb or special interior), state that condition in user_message and do not imply the whole site requires it.
+4A. A self-guided stop at a waterfall or other open natural feature has no admission need unless its own itinerary row explicitly establishes paid or controlled entry. Parking charges, seasonal restrictions and trail access checks are logistics. Do not turn the stop into a standalone guided tour. A genuinely guided excursion can be an alternative if grounded in the route. An optional paid tower is not a reservation for a church visit when the tower is outside the planned visit.
 5. candidate.access_hint and candidate.access_evidence are source-derived clues. Respect them unless the clue clearly refers to transport rather than attraction admission.
 5A. candidate.commerce_semantic_type, commerce_ticket_need, commerce_guided_tour_value and commerce_canonical_place are structured signals emitted by the itinerary engine. Treat them as stronger evidence than generic prose: ATTRACTION_TICKET with ticket_need=required must produce ticket_required; recommended/optional/unknown normally produces reservation_recommended when access is genuinely controlled. guided_tour_value=high may additionally produce guided_tour_optional, but never instead of the access need. FREE_SIGHT, RESTAURANT and LOGISTICS must not become ticket needs without contradictory explicit evidence.
 6. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
@@ -902,7 +908,8 @@ function sanitizeClassifications(candidates, classifications, city) {
     if ((needType === "ticket_required" || needType === "reservation_recommended") &&
         ["RESTAURANT","LOGISTICS","FREE_SIGHT","NONE","TRANSPORT"].includes(semantic)) continue;
     if (needType === "guided_tour_optional" &&
-        !["ATTRACTION_TICKET","TOUR_EXPERIENCE","FREE_SIGHT"].includes(semantic)) continue;
+        (!["ATTRACTION_TICKET","TOUR_EXPERIENCE","FREE_SIGHT"].includes(semantic) ||
+         itbmoAdmission.blocksStandaloneTour(source, { entity_name: entityName }, city))) continue;
 
     if (
       (needType === "ticket_required" || needType === "reservation_recommended") &&

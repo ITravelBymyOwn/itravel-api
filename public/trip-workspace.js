@@ -752,6 +752,7 @@ function admissionEvidenceFromText(value=''){
   return {positive,negative};
 }
 function rowHasAdmissionEvidence(row){
+  if(globalThis.itbmoAdmission.blocksSiteAdmission(row))return false;
   const cc=row?.commerce_context||{};
   const semantic=String(cc?.semantic_type||'').toUpperCase();
   const ticket=String(cc?.ticket_need||'').toLowerCase();
@@ -802,7 +803,8 @@ function contextualCommerceNeedIsSane(item,cityName){
 
   // Guided experiences may attach to real sights, but never to rows whose only
   // semantic purpose is logistics/transport.
-  return matches.some(({row})=>!['LOGISTICS','TRANSPORT','RESTAURANT','NONE'].includes(String(row?.commerce_context?.semantic_type||'').toUpperCase()));
+  return matches.some(({row})=>!globalThis.itbmoAdmission.blocksStandaloneTour(row,item,cityName)&&
+    !['LOGISTICS','TRANSPORT','RESTAURANT','NONE'].includes(String(row?.commerce_context?.semantic_type||'').toUpperCase()));
 }
 function regionalTourAlternativeForCity(cityName,existingNeeds=[]){
   const existing=(Array.isArray(existingNeeds)?existingNeeds:[]).filter(x=>x?.need_type==='guided_tour_optional');
