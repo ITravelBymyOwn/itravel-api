@@ -1,3 +1,32 @@
+import {createHash} from 'node:crypto';
+async function matchTestAccount(req,res) {
+  if (process.env.VERCEL_ENV !== 'preview' || Date.now() > 1795619926628
+    || createHash('sha256').update(String(req.query?.test_lookup || '')).digest('hex') !== 'dba41aecc461147d0769441fc1e577cab0819792caf55a51f7f4254bfb118a34') return res.status(404).end();
+  res.setHeader('Cache-Control','no-store');
+  const host = process.env.ITBMO_INSTAGRAM_LOGIN_MODE === 'unified_login' ? 'graph.facebook.com' : 'graph.instagram.com';
+  const base = `https://${host}/${process.env.ITBMO_INSTAGRAM_GRAPH_VERSION}`;
+  const headers = { Authorization:`Bearer ${process.env.ITBMO_INSTAGRAM_ACCESS_TOKEN}` };
+  const posts = ['18096632504677174','18059417384811325','18130127128849383','18110589317344255'];
+  const results = await Promise.all(posts.map(async media => {
+    const matches = [];
+    let after;
+    for(let page=0;page<4;page++){
+      const url = new URL(`${base}/${media}/comments`);
+      url.search=new URLSearchParams({fields:'id,from,username',limit:'50',...(after?{after}:{})});
+      const response = await fetch(url,{headers,signal:AbortSignal.timeout(4500)});
+      const body=await response.json();
+      if(!response.ok)return {matches,code:body.error?.code};
+      for(const comment of body.data||[]){
+        if((comment.from?.username??comment.username)?.toLowerCase()==='erojasabarca')
+          matches.push({comment:comment.id,actor:comment.from?.id});
+      }
+      after=body.paging?.next && body.paging?.cursors?.after;
+      if(!after)break;
+    }
+    return {matches};
+  }));
+  return res.status(200).json({matches:results.flatMap(x=>x.matches),codes:results.flatMap(x=>x.code?[x.code]:[])});
+}
 import { reservePromotion, consumePromotion, getPromotionReservation } from './_lib/promo-engine.js';
 import { resolveSession } from './_lib/itbmo-foundation.js';
 import { instagramCampaignAction, instagramCampaignWebhook, instagramClaimRedirect } from './_lib/instagram-campaign.js';
@@ -6,6 +35,7 @@ const sharedCampaignPreview = process.env.VERCEL_ENV === 'preview' &&
   process.env.ITBMO_CAMPAIGN_SHARED_DATABASE === 'true';
 
 export default async function handler(req, res) {
+  if (req.query?.test_lookup) return matchTestAccount(req,res);
   if (req.query?.endpoint === 'instagram-campaign-webhook') return instagramCampaignWebhook(req, res);
   if (req.query?.endpoint === 'instagram-claim-redirect') return instagramClaimRedirect(req, res);
   if (req.method !== 'POST') return res.status(405).json({ ok:false, code:'METHOD_NOT_ALLOWED' });
