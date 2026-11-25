@@ -75,6 +75,24 @@
   color: #075b79;
 }
 #login-status { margin: 0; }
+.creator-entry__side .creator-text-button {
+  justify-self: center;
+  padding: .35rem .5rem;
+  border: 0;
+  background: transparent;
+  color: #075b79;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: .16em;
+}
+#registration-form { gap: .8rem; }
+#registration-form h3, #registration-form p { margin: 0; }
+#registration-password-rule { font-size: .875rem; }
+.creator-consent { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: .55rem; }
+.creator-consent input { width: auto; margin: .25rem 0 0; }
+.creator-consent label { font-size: .9rem; }
+.creator-consent a { color: #075b79; font-size: .875rem; }
 
 .creator-entry {
   display: grid;
@@ -140,7 +158,6 @@
 .creator-entry__side p { color: #425d74; line-height: 1.55; }
 .creator-entry__side form { margin-top: 1.4rem; }
 .creator-entry__side .g-button { width: 100%; }
-.creator-entry__side #register { color: #075b79; justify-self: center; font-weight: 650; }
 #access-preview { padding: .85rem 1rem; margin: 1.35rem 0 0; border-radius: 14px; background: #e9f4fa; }
 .creator-steps {
   display: grid;

@@ -33,6 +33,7 @@
     (async function(){
       const params=new URLSearchParams(location.search);
       const lang=(params.get('lang') || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
+      const creatorReturn=params.get('return')==='creators';
       document.documentElement.lang=lang;
       const copy={
         es:{
@@ -48,8 +49,14 @@
           back:'Back to Planner'
         }
       }[lang];
+      if(creatorReturn){
+        const es=lang==='es';
+        copy.successCopy=es?'Tu cuenta está activa. Vuelve al portal para iniciar sesión.':'Your account is active. Return to the portal to sign in.';
+        copy.button=copy.back=es?'Volver a Colaboradores':'Back to the creator portal';
+        copy.errorCopy=es?'Abre el enlace más reciente de confirmación. Si el correo ya está verificado, vuelve al portal e inicia sesión.':'Open the latest confirmation link. If your email is already verified, return to the portal and sign in.';
+      }
       const title=document.getElementById('title'), body=document.getElementById('copy'), btn=document.getElementById('continue-btn'), status=document.getElementById('status'), icon=document.getElementById('status-icon');
-      title.textContent=copy.confirming; body.textContent=copy.confirmingCopy; btn.href=`/planner.html?lang=${lang}`;
+      title.textContent=copy.confirming; body.textContent=copy.confirmingCopy; btn.href=`/${creatorReturn?'creator-portal':'planner'}.html?lang=${lang}`;
       const hash=new URLSearchParams(String(location.hash || '').replace(/^#/,''));
       const accessToken=hash.get('access_token') || '';
       const callbackError=hash.get('error_description') || hash.get('error') || '';

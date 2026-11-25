@@ -7,12 +7,12 @@
 <title>I Travel By My Own · Colaboradores</title>
 <link rel="icon" href="/assets/img/favicon-32.png">
 <link rel="stylesheet" href="/assets/css/itbmo-growth.css?v=297.7">
-<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css?v=6">
+<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css?v=8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap">
 
-<script src="/assets/js/itbmo-creator-portal.js?v=8" defer></script>
+<script src="/assets/js/itbmo-creator-portal.js?v=10" defer></script>
 </head>
 <body>
 <header class="g-header"><div class="g-header__inner creator-header">
@@ -40,7 +40,7 @@
 <div class="creator-entry__side">
 <section class="card creator-access" id="access" aria-labelledby="access-title">
 <h2 id="access-title">Portal de colaboradores</h2>
-<p id="access-description">Usa la cuenta que registraste y verificaste en el Planner de Preview para obtener tu código y revisar tus comisiones.</p>
+<p id="access-description">Ingresa con tu cuenta de Preview para obtener tu código y revisar tus comisiones.</p>
 <form id="login-form">
 <fieldset id="login-fields" disabled>
 <label><span id="email-label">Correo electrónico</span><input name="email" type="email" autocomplete="username" maxlength="254" required></label>
@@ -59,7 +59,25 @@
 <button id="signin" class="g-button g-button--primary" type="submit">Iniciar sesión</button>
 </fieldset>
 <p id="login-status" role="status"></p>
-<a id="register" href="/planner.html?lang=es&amp;mode=register" target="_blank" rel="noopener" hidden>Crear una cuenta ITBMO en Preview</a>
+<button class="creator-text-button" id="resend-confirmation" type="button" hidden>Reenviar correo de confirmación</button>
+<button class="creator-text-button" id="register" type="button" aria-controls="registration-form" hidden>Crear mi cuenta ITBMO</button>
+</form>
+<form id="registration-form" aria-labelledby="registration-title" hidden>
+<h3 id="registration-title" tabindex="-1">Crea tu cuenta ITBMO</h3>
+<p id="registration-description">Esta cuenta de Preview también te sirve para ingresar al Planner de este entorno.</p>
+<label><span id="registration-name">Nombre</span><input name="name" autocomplete="given-name" maxlength="100" required></label>
+<label><span id="registration-email">Correo electrónico</span><input name="email" type="email" autocomplete="email" maxlength="254" required></label>
+<label><span id="registration-password">Contraseña</span><input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="72" aria-describedby="registration-password-rule" required></label>
+<p id="registration-password-rule">Mínimo 8 caracteres, con una mayúscula, una minúscula y un número.</p>
+<label><span id="registration-password-confirmation">Confirmar contraseña</span><input name="password_confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="72" required></label>
+<div class="creator-consent">
+<input name="consent" id="registration-consent" type="checkbox" required aria-describedby="registration-documents">
+<div><label for="registration-consent" id="registration-consent-label">Acepto los Términos de Uso y reconozco la Política de Privacidad.</label>
+<p id="registration-documents"><a id="registration-terms" href="https://itravelbymyown.com/terminos" target="_blank" rel="noopener">Términos de Uso</a> · <a id="registration-privacy" href="https://itravelbymyown.com/privacidad-cookies" target="_blank" rel="noopener">Política de Privacidad</a></p></div>
+</div>
+<button class="g-button g-button--primary" id="create-account" type="submit">Crear cuenta</button>
+<p id="registration-status" role="status"></p>
+<button class="creator-text-button" id="back-to-login" type="button">Volver a iniciar sesión</button>
 </form>
 <p id="access-preview" hidden>El acceso de prueba está pendiente de conectar a la base de usuarios de Preview.</p>
 </section>

@@ -38,15 +38,14 @@
     el('home-button').href = '/english';
     el('home-button').textContent = 'Home';
     el('intro').textContent = 'Your audience gets a discount on their itinerary. You earn a commission when someone buys with your code.';
-    el('register').textContent = 'Create an ITBMO account in Preview';
-    el('register').href = '/planner.html?lang=en&mode=register';
+    el('register').textContent = 'Create my ITBMO account';
     el('enroll-title').textContent = 'Activate your creator code';
     el('enroll-offer').textContent = 'Test offer: your audience gets 10% off the current price and you earn USD 0.30 per eligible purchase.';
     el('enroll-name').textContent = 'Display name';
     el('enroll-email').textContent = 'PayPal Sandbox email';
     el('enroll').textContent = 'Generate my code';
     el('access-title').textContent = 'Creator portal';
-    el('access-description').textContent = 'Use the account you registered and verified in the Preview Planner to get your code and track your commissions.';
+    el('access-description').textContent = 'Sign in with your Preview account to get your code and track your commissions.';
     el('access-preview').textContent = 'Test access is waiting for the Preview user database to be connected.';
     el('destination').textContent = 'Torres del Paine, Patagonia';
     el('steps').setAttribute('aria-label', 'How it works');
@@ -60,6 +59,23 @@
     el('email-label').textContent = 'Email';
     el('password-label').textContent = 'Password';
     el('signin').textContent = 'Sign in';
+    el('resend-confirmation').textContent = 'Resend confirmation email';
+    el('registration-terms').href = 'https://itravelbymyown.com/terms';
+    el('registration-privacy').href = 'https://itravelbymyown.com/privacy-cookies';
+    for (const [id, label] of Object.entries({
+      'registration-title': 'Create your ITBMO account',
+      'registration-description': 'You can also use this Preview account to sign in to the Planner in this environment.',
+      'registration-name': 'Name',
+      'registration-email': 'Email',
+      'registration-password': 'Password',
+      'registration-password-rule': 'At least 8 characters, including uppercase, lowercase and a number.',
+      'registration-password-confirmation': 'Confirm password',
+      'registration-consent-label': 'I accept the Terms of Use and acknowledge the Privacy Policy.',
+      'registration-terms': 'Terms of Use',
+      'registration-privacy': 'Privacy Policy',
+      'create-account': 'Create account',
+      'back-to-login': 'Back to sign in'
+    })) el(id).textContent = label;
   }
 
   const password = el('creator-password');
@@ -190,6 +206,10 @@
     CREATOR_ACCESS_REQUIRED: t('Esta cuenta todavía no tiene acceso al programa.', 'This account does not have access to the program yet.'),
     CREATOR_PORTAL_UNAVAILABLE: t('El portal aún no está habilitado en este entorno.', 'The portal is not enabled in this environment yet.'),
     EMAIL_NOT_CONFIRMED: t('Verifica tu correo con el enlace que recibiste al registrarte en Preview.', 'Verify your email using the link you received when you signed up in Preview.'),
+    SIGNUP_EMAIL_INVALID: t('Revisa el correo electrónico e intenta con una dirección válida.', 'Check your email address and try a valid address.'),
+    SIGNUP_INVALID_FIELDS: t('Revisa el nombre, el correo y la longitud de la contraseña.', 'Check your name, email and password length.'),
+    SIGNUP_TRY_LATER: t('El servicio de registro limitó los intentos. Espera unos minutos y vuelve a intentar.', 'The sign-up service is rate-limiting attempts. Wait a few minutes and try again.'),
+    RESEND_RATE_LIMITED: t('Espera al menos un minuto antes de volver a solicitar el correo.', 'Wait at least one minute before requesting another email.'),
     CREATOR_OR_CODE_EXISTS: t('El colaborador o el código ya existe.', 'The creator or code already exists.'),
     VERIFIED_PROFILE_OR_MARGIN_REQUIRED: t('Verifica que la cuenta esté registrada y que la comisión sea menor que el precio con descuento.', 'Check that the account is verified and the commission is below the discounted price.'),
     INVALID_CREATOR_AGREEMENT: t('Revisa los datos del colaborador.', 'Check the creator details.')
@@ -217,19 +237,100 @@
     }
   }
 
+  function openAccountForm(registering) {
+    el('registration-form').hidden = !registering;
+    el('login-form').hidden = registering;
+    if (registering) el('registration-title').focus();
+    else el('login-form').elements.email.focus();
+  }
+
+  el('register').addEventListener('click', () => openAccountForm(true));
+  el('back-to-login').addEventListener('click', () => openAccountForm(false));
+
+  async function userRequest(action, fields) {
+    const response = await fetch('/api/user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...fields, action })
+    });
+    return { response, data: await response.json() };
+  }
+
+  const loginEmail = el('login-form').elements.email;
+  const resendConfirmation = el('resend-confirmation');
+  loginEmail.addEventListener('input', () => { resendConfirmation.hidden = true; });
+
+  resendConfirmation.addEventListener('click', async () => {
+    const status = el('login-status');
+    resendConfirmation.disabled = true;
+    try {
+      const { response, data } = await userRequest('creator_resend_confirmation', {
+        email: loginEmail.value.trim(), preferred_language: lang
+      });
+      status.textContent = response.ok && data.ok
+        ? t('Si la cuenta está pendiente de verificación, recibirás un enlace nuevo. Revisa también el correo no deseado.', 'If the account is still pending verification, you will get a new link. Check your spam folder too.')
+        : errors[data.code] || unavailable;
+    } catch {
+      status.textContent = unavailable;
+    } finally {
+      resendConfirmation.disabled = false;
+    }
+  });
+
+  el('registration-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = el('registration-status');
+    const fields = Object.fromEntries(new FormData(form));
+    if (!/[a-z]/.test(fields.password) || !/[A-Z]/.test(fields.password) || !/[0-9]/.test(fields.password)) {
+      status.textContent = el('registration-password-rule').textContent;
+      return;
+    }
+    if (fields.password !== fields.password_confirmation) {
+      status.textContent = t('Las contraseñas deben coincidir.', 'The passwords must match.');
+      return;
+    }
+
+    const submit = el('create-account');
+    const back = el('back-to-login');
+    const failed = t('No pudimos crear tu cuenta de Preview. Intenta de nuevo.', 'We could not create your Preview account. Please try again.');
+    submit.disabled = back.disabled = true;
+    status.textContent = t('Creando tu cuenta…', 'Creating your account…');
+    try {
+      const { consent, ...account } = fields;
+      const { response, data } = await userRequest('creator_sign_up', {
+        ...account, preferred_language: lang,
+        terms_accepted: consent === 'on', privacy_accepted: consent === 'on'
+      });
+      const registered = response.ok && data.ok && data.confirmation_required;
+      if (registered || response.status === 409) {
+        if (registered) form.reset();
+        status.textContent = '';
+        loginEmail.value = account.email.trim();
+        resendConfirmation.hidden = false;
+        openAccountForm(false);
+        el('login-status').textContent = registered
+          ? t('Revisa tu correo y abre el enlace de confirmación. Después podrás iniciar sesión aquí.', 'Check your email and open the confirmation link. You can then sign in here.')
+          : t('Este correo ya está en uso en Preview. Inicia sesión si ya lo verificaste o solicita un nuevo enlace.', 'This email is already in use in Preview. Sign in if you already verified it, or request a new link.');
+      } else {
+        status.textContent = errors[data.code] || failed;
+      }
+    } catch {
+      status.textContent = failed;
+    } finally {
+      submit.disabled = back.disabled = false;
+    }
+  });
+
   el('login-form').addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
     const status = el('login-status');
+    resendConfirmation.hidden = true;
     el('signin').disabled = true;
     status.textContent = t('Iniciando sesión…', 'Signing in…');
     try {
-      const response = await fetch('/api/user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...Object.fromEntries(new FormData(form)), action: 'creator_sign_in' })
-      });
-      const data = await response.json();
+      const { response, data } = await userRequest('creator_sign_in', Object.fromEntries(new FormData(form)));
       if (response.ok && data.ok && data.session_token) {
         form.reset();
         setPasswordVisibility(false);
@@ -238,6 +339,7 @@
         sessionStorage.setItem(storageKey, token);
         await init();
       } else {
+        resendConfirmation.hidden = data.code !== 'EMAIL_NOT_CONFIRMED';
         status.textContent = errors[data.code] || (response.status === 401
           ? t('Revisa tus credenciales. Si tu cuenta solo existe en el sitio público, crea y verifica una cuenta en Preview para esta prueba.', 'Check your credentials. If your account only exists on the public site, create and verify a Preview account for this test.')
           : unavailable);

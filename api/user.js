@@ -2,6 +2,7 @@ import { isCreatorPreview, isCreatorQaDatabase } from './_lib/creator-portal.js'
 import emailHandler from './email.js';
 import crypto from "crypto";
 
+const CREATOR_PREVIEW_ORIGIN = "https://itravelbymyown-api-git-preview-cfe8e9-itravelbymyowns-projects.vercel.app";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const SUPABASE_PUBLIC_KEY =
@@ -168,6 +169,11 @@ function validPassword(password) {
     /[A-Z]/.test(password) &&
     /[0-9]/.test(password)
   );
+}
+
+function creatorAuthRedirect(language) {
+  const query = new URLSearchParams({ lang: language, return: "creators" });
+  return `${CREATOR_PREVIEW_ORIGIN}/auth-confirmed.html?${query}`;
 }
 
 function resolveRedirectUrl(body, fallbackPath = "/planner.html") {
@@ -632,7 +638,7 @@ async function handlePasswordLogin(req, res, body) {
       body: JSON.stringify({ email, password })
     });
   } catch (error) {
-    const authCode = String(error?.data?.code || "").toLowerCase();
+    const authCode = String(error?.data?.error_code || error?.data?.code || "").toLowerCase();
     const authMessage = String(
       error?.data?.msg || error?.data?.message || error?.data?.error_description || ""
     ).toLowerCase();
@@ -1331,19 +1337,61 @@ export default async function handler(req, res) {
       return await emailHandler(req, res);
     }
 
-    if (action === "guest") {
-      return await handleGuest(req, res, body);
-    }
-
-    if (action === "sign_up") {
-      return await handleSignUp(req, res, body);
-    }
-
-    if (action === "creator_sign_in" || isCreatorPreview(process.env)) {
+    if (["creator_sign_up", "creator_sign_in", "creator_resend_confirmation"].includes(action) || isCreatorPreview(process.env)) {
       res.setHeader("Cache-Control", "no-store");
       if (!isCreatorQaDatabase(process.env)) {
         return res.status(503).json({ ok: false, code: "CREATOR_PORTAL_UNAVAILABLE" });
       }
+    }
+
+    if (action === "guest") {
+      return await handleGuest(req, res, body);
+    }
+
+    if (action === "creator_resend_confirmation") {
+      const language = body.preferred_language === "en" ? "en" : "es";
+      return await handleResendConfirmation(req, res, {
+        email: body.email,
+        redirect_to: creatorAuthRedirect(language)
+      });
+    }
+
+    if (action === "creator_sign_up") {
+      const language = body.preferred_language === "en" ? "en" : "es";
+      if (typeof body.name !== "string" || typeof body.email !== "string" ||
+          typeof body.password !== "string" || typeof body.password_confirmation !== "string" ||
+          normalizeName(body.name).length > 100 || normalizeEmail(body.email).length > 254 ||
+          Buffer.byteLength(body.password, "utf8") > 72) {
+        return res.status(400).json({ ok: false, code: "SIGNUP_INVALID_FIELDS" });
+      }
+      try {
+        return await handleSignUp(req, res, {
+          name: body.name,
+          email: body.email,
+          password: body.password,
+          password_confirmation: body.password_confirmation,
+          terms_accepted: body.terms_accepted,
+          privacy_accepted: body.privacy_accepted,
+          terms_url: `https://itravelbymyown.com/${language === "en" ? "terms" : "terminos"}`,
+          privacy_url: `https://itravelbymyown.com/${language === "en" ? "privacy-cookies" : "privacidad-cookies"}`,
+          registration_source: "creator_portal",
+          preferred_language: language,
+          redirect_to: creatorAuthRedirect(language)
+        });
+      } catch (error) {
+        const authCode = error?.data?.error_code || error?.data?.code;
+        if (authCode === "email_address_invalid") {
+          return res.status(400).json({ ok: false, code: "SIGNUP_EMAIL_INVALID" });
+        }
+        if (error?.status === 429) {
+          return res.status(429).json({ ok: false, code: "SIGNUP_TRY_LATER" });
+        }
+        throw error;
+      }
+    }
+
+    if (action === "sign_up") {
+      return await handleSignUp(req, res, body);
     }
 
     if (action === "sign_in" || action === "creator_sign_in") {
