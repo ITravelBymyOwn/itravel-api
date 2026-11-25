@@ -1,3 +1,4 @@
+import { canOperateCreatorPayouts, creatorPayoutAction } from './_lib/creator-payouts.js';
 import { getPromotionReservation, consumePromotion, findConsumedPromoEntitlement, promoCodeForRedemption, commercePricing } from './_lib/promo-engine.js';
 import crypto from "crypto";
 
@@ -902,6 +903,17 @@ export default async function handler(req, res) {
         : req.body || {};
 
     const action = String(body.action || "").trim().toLowerCase();
+    if (["creator_payout_balances", "creator_payout_prepare", "creator_payout_submit", "creator_payout_reconcile"].includes(action)) {
+      res.setHeader("Cache-Control", "no-store");
+      if (!canOperateCreatorPayouts(req.headers?.authorization, process.env, PAYPAL_ENV)) {
+        return res.status(404).json({ ok: false, code: "CREATOR_PAYOUTS_UNAVAILABLE" });
+      }
+      const result = await creatorPayoutAction({ ...body, action }, {
+        database: supabaseFetch, paypal: paypalRequest, environment: PAYPAL_ENV
+      });
+      return res.status(result.ok ? 200 : 409).json(result);
+    }
+
     if (sharedCampaignPreview && ["paypal_create_order", "paypal_capture_order", "tilopay_create_checkout"].includes(action)) {
       return res.status(403).json({ ok: false, code: "PREVIEW_CHECKOUT_DISABLED" });
     }
