@@ -1,0 +1,67 @@
+.creator-header.g-header__inner { justify-content: space-between; }
+.creator-header .g-lang { display: flex; }
+.creator-header .g-lang a {
+  padding: .45rem .8rem;
+  color: #075b79;
+  font-weight: 750;
+  text-decoration: none;
+}
+.creator-main {
+  padding-block: clamp(2rem, 6vw, 5.5rem) 4rem;
+  color: #10283f;
+}
+.creator-main [hidden] { display: none !important; }
+.creator-intro { margin-bottom: 1.5rem; }
+.creator-intro h1 {
+  margin: 0;
+  font-size: clamp(2.15rem, 5vw, 4.2rem);
+  line-height: 1.1;
+  letter-spacing: -.055em;
+}
+.creator-intro p { margin: .85rem 0 0; color: #526a81; max-width: 38rem; }
+.creator-main .card {
+  padding: clamp(1.15rem, 3vw, 2rem);
+  margin-block: 1rem;
+  border: 1px solid #d9e7ee;
+  border-radius: 24px;
+  background: linear-gradient(145deg, #fff, #f7fbfc);
+  box-shadow: 0 16px 40px #143d5d0d;
+}
+.creator-main .creator-access { max-width: 35rem; }
+.creator-main h2 { margin: 0 0 1rem; font-size: 1.3rem; letter-spacing: -.025em; }
+.creator-main form { display: grid; gap: 1rem; max-width: 34rem; }
+.creator-main label { display: grid; gap: .4rem; font-weight: 650; }
+.creator-main input {
+  width: 100%;
+  padding: .75rem .95rem;
+  color: inherit;
+  border: 1px solid #cbdde8;
+  border-radius: 14px;
+  background: #fff;
+  font: inherit;
+}
+.creator-main input:focus-visible, .creator-header a:focus-visible,
+.creator-main button:focus-visible, .creator-main a:focus-visible {
+  outline: 2px solid #067ab9;
+  outline-offset: 3px;
+}
+.creator-main button { justify-self: start; cursor: pointer; }
+.creator-main button:disabled { opacity: .65; cursor: wait; }
+.creator-main p[role="status"] { color: #425d74; }
+.creator-main p[role="status"]:empty { display: none; }
+.creator-main .stats { display: flex; gap: 1rem 3rem; flex-wrap: wrap; }
+.creator-main .stats strong { display: block; font-size: 1.6rem; }
+.creator-main .wrap { overflow: auto; }
+.creator-main table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+.creator-main th, .creator-main td { text-align: left; padding: .7rem; border-bottom: 1px solid #deebf1; }
+.creator-main th { background: #eef6fa; }
+.creator-main td a { color: #075b79; font-weight: 700; }
+.creator-main fieldset {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  border: 0;
+}
+.creator-main fieldset:disabled button { cursor: default; }

@@ -7,14 +7,23 @@
   const money = new Intl.NumberFormat(lang, { style: 'currency', currency: 'USD' });
   const usd = cents => money.format(Number(cents || 0) / 100);
   const date = value => new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value));
-  const token = sessionStorage.getItem('itbmo_guest_session_token') || localStorage.getItem('itbmo_session_token');
+  const storageKey = 'itbmo_creator_session_token';
+  let token = sessionStorage.getItem(storageKey) || localStorage.getItem('itbmo_session_token');
 
   document.documentElement.lang = lang;
-  el('title').textContent = t('Colaboradores', 'Creator partners');
   el('language').textContent = t('English', 'Español');
   el('language').href = en ? '?lang=es' : '?lang=en';
-  el('login').textContent = t('Iniciar sesión en el Planner', 'Sign in to the Planner');
-  el('login').href += '&lang=' + lang;
+  el('language').lang = el('language').hreflang = en ? 'es' : 'en';
+  if (en) {
+    el('title').firstChild.textContent = 'Creator ';
+    el('title').querySelector('span').textContent = 'portal';
+    el('home').href = '/english';
+    el('intro').textContent = 'Find your link, sales attributed to your code, and commission status.';
+    el('access-title').textContent = 'Access your dashboard';
+    el('email-label').textContent = 'Email';
+    el('password-label').textContent = 'Password';
+    el('signin').textContent = 'Sign in';
+  }
 
   async function request(action, data = {}) {
     const response = await fetch('/api/payment', {
@@ -130,21 +139,48 @@
   const unavailable = t('No pudimos cargar el portal.', 'We could not load the portal.');
 
   async function init() {
-    if (!token) {
-      el('notice').textContent = errors.REGISTERED_SESSION_REQUIRED;
-      el('login').hidden = false;
-      return;
-    }
     try {
       const data = await request('creator_summary');
-      el('notice').textContent = data.ok ? t('Entorno de pruebas PayPal Sandbox', 'PayPal Sandbox test environment') : errors[data.code] || unavailable;
-      el('login').hidden = data.code !== 'REGISTERED_SESSION_REQUIRED';
+      el('notice').textContent = data.ok
+        ? t('Entorno de pruebas PayPal Sandbox', 'PayPal Sandbox test environment')
+        : errors[data.code] || unavailable;
+      el('access').hidden = data.ok || data.code === 'CREATOR_ACCESS_REQUIRED';
+      el('login-fields').disabled = data.code !== 'REGISTERED_SESSION_REQUIRED';
       if (data.summary) render(data.summary);
       if (data.is_admin) el('admin').hidden = false;
     } catch {
       el('notice').textContent = unavailable;
     }
   }
+
+  el('login-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    el('signin').disabled = true;
+    el('notice').textContent = t('Iniciando sesión…', 'Signing in…');
+    try {
+      const response = await fetch('/api/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...Object.fromEntries(new FormData(form)), action: 'creator_sign_in' })
+      });
+      const data = await response.json();
+      if (response.ok && data.ok && data.session_token) {
+        form.reset();
+        token = data.session_token;
+        sessionStorage.setItem(storageKey, token);
+        await init();
+      } else {
+        el('notice').textContent = errors[data.code] || (response.status === 401
+          ? t('Revisa tu correo y contraseña.', 'Check your email and password.')
+          : unavailable);
+      }
+    } catch {
+      el('notice').textContent = unavailable;
+    } finally {
+      el('signin').disabled = false;
+    }
+  });
 
   if (en) {
     for (const [key, label] of Object.entries({

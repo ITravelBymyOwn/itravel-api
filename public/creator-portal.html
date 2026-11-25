@@ -5,24 +5,36 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>I Travel By My Own · Colaboradores</title>
-<style>
-:root{font:16px/1.5 system-ui,sans-serif;color:#16354a;background:#f3f8fb}*{box-sizing:border-box}
-body{margin:0}main{width:min(70rem,calc(100% - 2rem));margin:3rem auto}h1{font-size:clamp(2rem,5vw,3rem);margin:0}
-h2{margin-top:0}.card{background:#fff;border:1px solid #dce8ee;border-radius:1rem;padding:1.25rem;margin:1rem 0}
-.stats{display:flex;gap:1.5rem;flex-wrap:wrap}.stats strong{display:block;font-size:1.5rem}
-.wrap{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:.6rem;border-bottom:1px solid #e0ebf0}
-a{color:#006485}button{background:#006485;color:white;border:0;border-radius:.5rem;padding:.65rem 1rem;font:inherit;cursor:pointer}
-input{display:block;font:inherit;width:100%;padding:.5rem;border:1px solid #9bb5c3;border-radius:.4rem}form{display:grid;gap:.8rem;max-width:36rem}
-nav{display:flex;justify-content:space-between;gap:1rem;margin-bottom:1.5rem}p[role=status]{min-height:1.5em}
-</style>
-<script src="/assets/js/itbmo-creator-portal.js" defer></script>
+<link rel="icon" href="/assets/img/favicon-32.png">
+<link rel="stylesheet" href="/assets/css/itbmo-growth.css?v=297.7">
+<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap">
+
+<script src="/assets/js/itbmo-creator-portal.js?v=2" defer></script>
 </head>
 <body>
-<main>
-<nav><a href="/">I Travel By My Own</a><a id="language" href="?lang=en">English</a></nav>
-<h1 id="title">Colaboradores</h1>
+<header class="g-header"><div class="g-header__inner creator-header">
+<a class="g-brand" id="home" href="/"><img src="/assets/img/itbmo-logo-premium.webp" alt="I Travel By My Own" width="154" height="59"></a>
+<nav class="g-lang" aria-label="Language / Idioma"><a id="language" href="?lang=en" hreflang="en" lang="en">English</a></nav>
+</div></header>
+<main class="g-shell creator-main">
+<section class="creator-intro">
+<h1 id="title">Portal de <span class="g-gradient-text">colaboradores</span></h1>
+<p id="intro">Encuentra tu enlace, las ventas con tu código y el estado de tus comisiones.</p>
+</section>
+<section class="card creator-access" id="access" aria-labelledby="access-title">
+<h2 id="access-title">Accede a tu panel</h2>
+<form id="login-form">
+<fieldset id="login-fields" disabled>
+<label><span id="email-label">Correo electrónico</span><input name="email" type="email" autocomplete="username" maxlength="254" required></label>
+<label><span id="password-label">Contraseña</span><input name="password" type="password" autocomplete="current-password" required></label>
+<button id="signin" class="g-button g-button--primary" type="submit">Iniciar sesión</button>
+</fieldset>
+</form>
+</section>
 <p id="notice" role="status"></p>
-<a id="login" href="/planner.html?mode=login" hidden>Iniciar sesión en el Planner</a>
 <section id="dashboard" hidden></section>
 <section id="admin" class="card" hidden>
 <h2 id="admin-title">Crear colaborador</h2>
@@ -33,7 +45,7 @@ nav{display:flex;justify-content:space-between;gap:1rem;margin-bottom:1.5rem}p[r
 <label><span data-field="payout_email">Correo PayPal Sandbox del colaborador</span><input name="payout_email" type="email" required></label>
 <label><span data-field="discount">Descuento (%)</span><input name="discount" type="number" min="1" max="99" required></label>
 <label><span data-field="commission">Comisión fija (centavos de USD)</span><input name="commission" type="number" min="1" max="798" required></label>
-<button id="save">Crear colaborador</button>
+<button id="save" class="g-button g-button--primary">Crear colaborador</button>
 <p id="admin-result" role="status"></p>
 </form>
 </section>
