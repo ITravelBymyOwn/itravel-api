@@ -107,7 +107,18 @@ async function sendClaimButton(config, recipient, copy, url) {
 function claimLink(config, participation, language, expiry) {
   const value = `${participation.id}.${expiry}`;
   const token = `${value}.${hmac(value, config.signingKey, 'base64url')}`;
-  return `${config.origin}/planner.html?lang=${language}#itbmo_campaign=${token}`;
+  return `${config.origin}/c/${language}/${token}`;
+}
+
+export function instagramClaimRedirect(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(405).end();
+  const { language, token } = req.query;
+  if ((language !== 'es' && language !== 'en') ||
+      typeof token !== 'string' || !claimToken.test(token)) return res.status(404).end();
+  res.setHeader('Location', `/planner.html?lang=${language}#itbmo_campaign=${token}`);
+  return res.status(302).end();
 }
 
 async function getSetting(campaignId, scope) {

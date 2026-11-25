@@ -27,7 +27,8 @@ const json = value => new Response(JSON.stringify(value), { headers: { 'Content-
 function response() {
   return {
     code: null,
-    setHeader() {},
+    headers: {},
+    setHeader(name, value) { this.headers[name] = value; },
     status(code) { this.code = code; return this; },
     send(value) { this.value = value; return this; },
     end() { return this; }
@@ -37,6 +38,8 @@ function response() {
 test('Instagram delivery respects scope, language, valid mentions, deduplication and signed claims', async (t) => {
   Object.assign(process.env, env);
   const { countMentions, instagramCampaignAction, instagramCampaignWebhook } = await import('../api/_lib/instagram-campaign.js');
+  const { default: promotions } = await import('../api/promotions.js');
+  const { routes } = require('../vercel.json');
   const messages = [];
   const graphRequests = [];
   const participants = new Map();
@@ -120,8 +123,9 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
     assert.equal(lines.length, 2);
     const link = new URL(lines[1]);
     assert.equal(link.origin, env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN);
-    assert.equal(link.pathname, '/planner.html');
-    assert.equal(link.searchParams.get('lang'), language);
+    assert.equal(link.hash, '');
+    assert.equal(link.search, '');
+    assert.ok(link.pathname.startsWith(`/c/${language}/`));
     return link;
   }
 
@@ -136,7 +140,19 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   const link = claimLink(messages[0], '50', 'es');
   assert.equal(await deliver(reply('1')), 200);
   assert.equal(messages.length, 1);
-  const token = new URLSearchParams(link.hash.slice(1)).get('itbmo_campaign');
+  const route = routes.find(({ src }) => new RegExp(src).test(link.pathname));
+  const destination = new URL(link.pathname.replace(new RegExp(route.src), route.dest), link.origin);
+  const query = Object.fromEntries(destination.searchParams);
+  const redirect = response();
+  await promotions({ method: 'GET', query }, redirect);
+  const token = query.token;
+  assert.equal(redirect.code, 302);
+  assert.equal(redirect.headers.Location, `/planner.html?lang=es#itbmo_campaign=${token}`);
+  assert.equal(redirect.headers['Cache-Control'], 'no-store');
+  assert.equal(redirect.headers['Referrer-Policy'], 'no-referrer');
+  const malformedRedirect = response();
+  await promotions({ method: 'GET', query: { ...query, token: '//example.test' } }, malformedRedirect);
+  assert.equal(malformedRedirect.code, 404);
   const linkExpiry = Number(token.split('.')[1]);
   assert.ok(linkExpiry >= beforeSend + 86_400_000);
   assert.ok(linkExpiry <= Date.now() + 86_400_000);

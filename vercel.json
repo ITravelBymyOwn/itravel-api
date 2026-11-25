@@ -67,6 +67,10 @@
   ],
   "routes": [
     {
+      "src": "^/c/(es|en)/([a-zA-Z0-9_.-]+)$",
+      "dest": "/api/promotions.js?endpoint=instagram-claim-redirect&language=$1&token=$2"
+    },
+    {
       "src": "/api/platform-config",
       "dest": "/api/platform.js?endpoint=platform-config"
     },

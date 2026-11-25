@@ -1,12 +1,13 @@
 import { reservePromotion, consumePromotion, getPromotionReservation } from './_lib/promo-engine.js';
 import { resolveSession } from './_lib/itbmo-foundation.js';
-import { instagramCampaignAction, instagramCampaignWebhook } from './_lib/instagram-campaign.js';
+import { instagramCampaignAction, instagramCampaignWebhook, instagramClaimRedirect } from './_lib/instagram-campaign.js';
 
 const sharedCampaignPreview = process.env.VERCEL_ENV === 'preview' &&
   process.env.ITBMO_CAMPAIGN_SHARED_DATABASE === 'true';
 
 export default async function handler(req, res) {
   if (req.query?.endpoint === 'instagram-campaign-webhook') return instagramCampaignWebhook(req, res);
+  if (req.query?.endpoint === 'instagram-claim-redirect') return instagramClaimRedirect(req, res);
   if (req.method !== 'POST') return res.status(405).json({ ok:false, code:'METHOD_NOT_ALLOWED' });
 
   try {
