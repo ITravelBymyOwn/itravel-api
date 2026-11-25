@@ -14,12 +14,12 @@ const graphHosts = new Map([
 ]);
 const campaignCopy = {
   es: {
-    link: `¡Gracias por participar! ✈️ Sigue a @itravelbymyown y activa tu itinerario gratis en las próximas ${CLAIM_LINK_HOURS} horas. Usa el botón o abre este enlace:`,
+    link: `¡Gracias por participar! ✈️ Sigue a @itravelbymyown. Abre este enlace en las próximas ${CLAIM_LINK_HOURS} horas para activar tu itinerario gratis:`,
     recovery: 'Aquí tienes tu enlace para activar el itinerario gratis. Sigue a @itravelbymyown y úsalo antes de que venza el plazo original:',
     claimButton: 'Canjear itinerario'
   },
   en: {
-    link: `Thanks for participating! ✈️ Follow @itravelbymyown and activate your free itinerary within ${CLAIM_LINK_HOURS} hours. Tap the button or open this link:`,
+    link: `Thanks for participating! ✈️ Follow @itravelbymyown. Open this link within ${CLAIM_LINK_HOURS} hours to activate your free itinerary:`,
     recovery: 'Here is your link to activate your free itinerary. Follow @itravelbymyown and use it before the original deadline:',
     claimButton: 'Claim free itinerary'
   }
@@ -84,23 +84,24 @@ async function instagramRequest(config, path, body) {
   return response.json();
 }
 
+async function sendClaimMessage(config, recipient, message) {
+  const sent = await instagramRequest(config, `${config.account}/messages`, { recipient, message });
+  if (typeof sent?.message_id !== 'string' || !sent.message_id) {
+    throw new Error('INSTAGRAM_CLAIM_MESSAGE_NOT_ACKNOWLEDGED');
+  }
+}
+
 async function sendClaimButton(config, recipient, copy, url) {
-  const sent = await instagramRequest(config, `${config.account}/messages`, {
-    recipient,
-    message: {
-      attachment: {
-        type: 'template',
-        payload: {
-          template_type: 'button',
-          text: `${copy.link}\n\n${url}`,
-          buttons: [{ type: 'web_url', title: copy.claimButton, url }]
-        }
+  await sendClaimMessage(config, recipient, {
+    attachment: {
+      type: 'template',
+      payload: {
+        template_type: 'button',
+        text: `${copy.link}\n\n${url}`,
+        buttons: [{ type: 'web_url', title: copy.claimButton, url }]
       }
     }
   });
-  if (typeof sent?.message_id !== 'string' || !sent.message_id) {
-    throw new Error('INSTAGRAM_CLAIM_BUTTON_NOT_ACKNOWLEDGED');
-  }
 }
 
 function claimLink(config, participation, language, expiry) {
@@ -182,7 +183,9 @@ async function handleComment(config, comment, eventTime) {
       Date.parse(locked.link_expires_at) : Date.now() + CLAIM_LINK_HOURS * HOUR;
     await patchParticipation(condition, { link_expires_at: new Date(expiry).toISOString() });
     const link = claimLink(config, locked, reel.language, expiry);
-    await sendClaimButton(config, { comment_id: commentId }, campaignCopy[reel.language], link);
+    await sendClaimMessage(config, { comment_id: commentId }, {
+      text: `${campaignCopy[reel.language].link}\n\n${link}`
+    });
     const sentAt = new Date().toISOString();
     return { comment_id: commentId, language: reel.language, intro_sent_at: sentAt, link_sent_at: sentAt };
   });
