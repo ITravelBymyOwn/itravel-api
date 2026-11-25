@@ -1,7 +1,12 @@
 (() => {
-  const params = new URLSearchParams(location.search);
-  const en = params.get('lang') === 'en';
-  const lang = en ? 'en' : 'es';
+  const languageKey = 'itbmo_site_language';
+  const requestedLanguage = new URLSearchParams(location.search).get('lang');
+  let savedLanguage;
+  try { savedLanguage = localStorage.getItem(languageKey); } catch {}
+  const lang = ['es', 'en'].includes(requestedLanguage)
+    ? requestedLanguage
+    : savedLanguage === 'en' ? 'en' : 'es';
+  const en = lang === 'en';
   const t = (es, english) => en ? english : es;
   const el = id => document.getElementById(id);
   const money = new Intl.NumberFormat(lang, { style: 'currency', currency: 'USD' });
@@ -11,9 +16,21 @@
   let token = sessionStorage.getItem(storageKey) || localStorage.getItem('itbmo_session_token');
 
   document.documentElement.lang = lang;
-  el('language').textContent = t('English', 'Español');
-  el('language').href = en ? '?lang=es' : '?lang=en';
-  el('language').lang = el('language').hreflang = en ? 'es' : 'en';
+  document.title = t('I Travel By My Own · Colaboradores', 'I Travel By My Own · Creator portal');
+  el('language').setAttribute('aria-label', t('Idioma', 'Language'));
+  for (const button of el('language').querySelectorAll('[data-site-lang]')) {
+    const targetLanguage = button.dataset.siteLang;
+    const active = targetLanguage === lang;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+    button.addEventListener('click', () => {
+      try { localStorage.setItem(languageKey, targetLanguage); } catch {}
+      if (active) return;
+      const url = new URL(location.href);
+      url.searchParams.set('lang', targetLanguage);
+      location.assign(url.href);
+    });
+  }
   if (en) {
     el('title').firstChild.textContent = 'Creator ';
     el('title').querySelector('span').textContent = 'portal';
