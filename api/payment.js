@@ -1,4 +1,5 @@
-import { canOperateCreatorPayouts, creatorPayoutAction } from './_lib/creator-payouts.js';
+import { creatorPortal, isCreatorSandbox } from './_lib/creator-portal.js';
+import { canOperateCreatorPayouts, creatorPayoutAction, runSandboxCreatorSettlement } from './_lib/creator-payouts.js';
 import { getPromotionReservation, consumePromotion, findConsumedPromoEntitlement, promoCodeForRedemption, commercePricing } from './_lib/promo-engine.js';
 import crypto from "crypto";
 
@@ -903,18 +904,26 @@ export default async function handler(req, res) {
         : req.body || {};
 
     const action = String(body.action || "").trim().toLowerCase();
-    if (["creator_payout_balances", "creator_payout_prepare", "creator_payout_submit", "creator_payout_reconcile"].includes(action)) {
+    if (action === "creator_summary" || action === "creator_create") {
+      return await creatorPortal(req, res, { ...body, action });
+    }
+    if (["creator_payout_balances", "creator_payout_prepare", "creator_payout_submit", "creator_payout_reconcile", "creator_payout_sandbox_run"].includes(action)) {
       res.setHeader("Cache-Control", "no-store");
       if (!canOperateCreatorPayouts(req.headers?.authorization, process.env, PAYPAL_ENV)) {
         return res.status(404).json({ ok: false, code: "CREATOR_PAYOUTS_UNAVAILABLE" });
       }
-      const result = await creatorPayoutAction({ ...body, action }, {
-        database: supabaseFetch, paypal: paypalRequest, environment: PAYPAL_ENV
-      });
+      const payoutTools = { database: supabaseFetch, paypal: paypalRequest, environment: PAYPAL_ENV };
+      const result = action === "creator_payout_sandbox_run"
+        ? await runSandboxCreatorSettlement(payoutTools)
+        : await creatorPayoutAction({ ...body, action }, payoutTools);
       return res.status(result.ok ? 200 : 409).json(result);
     }
 
-    if (sharedCampaignPreview && ["paypal_create_order", "paypal_capture_order", "tilopay_create_checkout"].includes(action)) {
+    const checkoutAction = ["paypal_create_order", "paypal_capture_order", "tilopay_create_checkout"].includes(action);
+    const creatorPreview = process.env.VERCEL_ENV === "preview" &&
+      process.env.VERCEL_GIT_COMMIT_REF === "preview/creator-affiliates";
+    if (checkoutAction && (sharedCampaignPreview ||
+        (creatorPreview && (!isCreatorSandbox(process.env) || action === "tilopay_create_checkout")))) {
       return res.status(403).json({ ok: false, code: "PREVIEW_CHECKOUT_DISABLED" });
     }
 

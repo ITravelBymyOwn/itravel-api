@@ -115,3 +115,51 @@ export async function creatorPayoutAction(body, { database, paypal, environment 
   }
   return { ok: false, code: 'PAYOUT_ACTION_UNAVAILABLE' };
 }
+
+// A bounded QA settlement pass. Repeated calls reuse the monthly database record.
+export async function runSandboxCreatorSettlement({ database, paypal, environment }) {
+  if (environment !== 'sandbox') return { ok: false, code: 'SANDBOX_REQUIRED' };
+  const minimum = Number(process.env.ITBMO_CREATOR_MIN_PAYOUT_CENTS || 2500);
+  if (!Number.isSafeInteger(minimum) || minimum < 1 || minimum > 2147483647) {
+    return { ok: false, code: 'INVALID_PAYOUT_MINIMUM' };
+  }
+  const jobs = await database(
+    '/creator_payouts?select=id&paypal_environment=eq.sandbox&state=eq.processing&order=created_at&limit=5'
+  );
+  const results = [];
+  const tools = { database, paypal, environment };
+  for (const job of jobs) {
+    try {
+      const result = await creatorPayoutAction({ action: 'creator_payout_reconcile', payout_id: job.id }, tools);
+      results.push({ payout_id: job.id, ...result });
+    } catch {
+      results.push({ payout_id: job.id, ok: false, code: 'RECONCILIATION_FAILED' });
+    }
+  }
+  const month = new Date().toISOString().slice(0, 7) + '-01';
+  const existing = await database(
+    '/creator_payouts?select=creator_id&paypal_environment=eq.sandbox&or=(period.eq.' + month +
+    ',state.in.(prepared,submitting,processing,review))'
+  );
+  const excluded = existing.map(row => row.creator_id).filter(value => uuid.test(value));
+  const withoutExisting = excluded.length ? '&creator_id=not.in.(' + excluded.join(',') + ')' : '';
+  const balances = await database(
+    balanceView + '?select=creator_id,payable_cents&paypal_environment=eq.sandbox&payable_cents=gte.' +
+    minimum + withoutExisting + '&order=creator_id&limit=5'
+  );
+  for (const balance of balances) {
+    const amount = Number(balance.payable_cents);
+    try {
+      const prepared = await creatorPayoutAction({
+        action: 'creator_payout_prepare', creator_id: balance.creator_id, amount_cents: amount
+      }, tools);
+      const result = prepared.ok ? await creatorPayoutAction({
+        action: 'creator_payout_submit', payout_id: prepared.payout_id, amount_cents: amount
+      }, tools) : prepared;
+      results.push({ creator_id: balance.creator_id, ...result });
+    } catch {
+      results.push({ creator_id: balance.creator_id, ok: false, code: 'PAYOUT_NEEDS_REVIEW' });
+    }
+  }
+  return { ok: true, results };
+}

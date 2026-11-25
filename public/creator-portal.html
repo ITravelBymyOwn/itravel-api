@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>I Travel By My Own · Colaboradores</title>
+<style>
+:root{font:16px/1.5 system-ui,sans-serif;color:#16354a;background:#f3f8fb}*{box-sizing:border-box}
+body{margin:0}main{width:min(70rem,calc(100% - 2rem));margin:3rem auto}h1{font-size:clamp(2rem,5vw,3rem);margin:0}
+h2{margin-top:0}.card{background:#fff;border:1px solid #dce8ee;border-radius:1rem;padding:1.25rem;margin:1rem 0}
+.stats{display:flex;gap:1.5rem;flex-wrap:wrap}.stats strong{display:block;font-size:1.5rem}
+.wrap{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:.6rem;border-bottom:1px solid #e0ebf0}
+a{color:#006485}button{background:#006485;color:white;border:0;border-radius:.5rem;padding:.65rem 1rem;font:inherit;cursor:pointer}
+input{display:block;font:inherit;width:100%;padding:.5rem;border:1px solid #9bb5c3;border-radius:.4rem}form{display:grid;gap:.8rem;max-width:36rem}
+nav{display:flex;justify-content:space-between;gap:1rem;margin-bottom:1.5rem}p[role=status]{min-height:1.5em}
+</style>
+<script src="/assets/js/itbmo-creator-portal.js" defer></script>
+</head>
+<body>
+<main>
+<nav><a href="/">I Travel By My Own</a><a id="language" href="?lang=en">English</a></nav>
+<h1 id="title">Colaboradores</h1>
+<p id="notice" role="status"></p>
+<a id="login" href="/planner.html?mode=login" hidden>Iniciar sesión en el Planner</a>
+<section id="dashboard" hidden></section>
+<section id="admin" class="card" hidden>
+<h2 id="admin-title">Crear colaborador</h2>
+<form id="creator-form">
+<label><span data-field="name">Nombre visible</span><input name="name" maxlength="100" required></label>
+<label><span data-field="code">Código</span><input name="code" autocomplete="off" minlength="3" maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{2,39}" required></label>
+<label><span data-field="email">Correo de la cuenta ITBMO verificada</span><input name="email" type="email" required></label>
+<label><span data-field="payout_email">Correo PayPal Sandbox del colaborador</span><input name="payout_email" type="email" required></label>
+<label><span data-field="discount">Descuento (%)</span><input name="discount" type="number" min="1" max="99" required></label>
+<label><span data-field="commission">Comisión fija (centavos de USD)</span><input name="commission" type="number" min="1" max="798" required></label>
+<button id="save">Crear colaborador</button>
+<p id="admin-result" role="status"></p>
+</form>
+</section>
+</main>
+</body>
+</html>
