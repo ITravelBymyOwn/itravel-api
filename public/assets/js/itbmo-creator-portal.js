@@ -38,7 +38,7 @@
     el('home-button').href = '/english';
     el('home-button').textContent = 'Home';
     el('intro').textContent = 'Your audience gets a discount on their itinerary. You earn a commission when someone buys with your code.';
-    el('register').textContent = 'Create and verify my ITBMO account';
+    el('register').textContent = 'Create an ITBMO account in Preview';
     el('register').href = '/planner.html?lang=en&mode=register';
     el('enroll-title').textContent = 'Activate your creator code';
     el('enroll-offer').textContent = 'Test offer: your audience gets 10% off the current price and you earn USD 0.30 per eligible purchase.';
@@ -46,7 +46,7 @@
     el('enroll-email').textContent = 'PayPal Sandbox email';
     el('enroll').textContent = 'Generate my code';
     el('access-title').textContent = 'Creator portal';
-    el('access-description').textContent = 'Sign in with your ITBMO account to get your code and track your commissions.';
+    el('access-description').textContent = 'Use the account you registered and verified in the Preview Planner to get your code and track your commissions.';
     el('access-preview').textContent = 'Test access is waiting for the Preview user database to be connected.';
     el('destination').textContent = 'Torres del Paine, Patagonia';
     el('steps').setAttribute('aria-label', 'How it works');
@@ -61,6 +61,22 @@
     el('password-label').textContent = 'Password';
     el('signin').textContent = 'Sign in';
   }
+
+  const password = el('creator-password');
+  const passwordToggle = el('password-toggle');
+
+  function setPasswordVisibility(visible) {
+    const label = visible
+      ? t('Ocultar contraseña', 'Hide password')
+      : t('Mostrar contraseña', 'Show password');
+    password.type = visible ? 'text' : 'password';
+    passwordToggle.setAttribute('aria-label', label);
+    passwordToggle.title = label;
+    el('password-toggle-slash').toggleAttribute('hidden', !visible);
+  }
+
+  setPasswordVisibility(false);
+  passwordToggle.addEventListener('click', () => setPasswordVisibility(password.type === 'password'));
 
   async function request(action, data = {}) {
     const response = await fetch('/api/payment', {
@@ -173,6 +189,7 @@
     REGISTERED_SESSION_REQUIRED: t('Inicia sesión con tu cuenta registrada de ITBMO.', 'Sign in with your registered ITBMO account.'),
     CREATOR_ACCESS_REQUIRED: t('Esta cuenta todavía no tiene acceso al programa.', 'This account does not have access to the program yet.'),
     CREATOR_PORTAL_UNAVAILABLE: t('El portal aún no está habilitado en este entorno.', 'The portal is not enabled in this environment yet.'),
+    EMAIL_NOT_CONFIRMED: t('Verifica tu correo con el enlace que recibiste al registrarte en Preview.', 'Verify your email using the link you received when you signed up in Preview.'),
     CREATOR_OR_CODE_EXISTS: t('El colaborador o el código ya existe.', 'The creator or code already exists.'),
     VERIFIED_PROFILE_OR_MARGIN_REQUIRED: t('Verifica que la cuenta esté registrada y que la comisión sea menor que el precio con descuento.', 'Check that the account is verified and the commission is below the discounted price.'),
     INVALID_CREATOR_AGREEMENT: t('Revisa los datos del colaborador.', 'Check the creator details.')
@@ -184,7 +201,7 @@
       const data = await request('creator_summary');
       const preview = data.code === 'CREATOR_PORTAL_UNAVAILABLE';
       el('access-preview').hidden = !preview;
-      el('notice').textContent = preview ? '' : data.ok
+      el('notice').textContent = preview || data.code === 'REGISTERED_SESSION_REQUIRED' ? '' : data.ok
         ? t('Entorno de pruebas PayPal Sandbox', 'PayPal Sandbox test environment')
         : errors[data.code] || unavailable;
       el('access').hidden = data.ok || data.code === 'CREATOR_ACCESS_REQUIRED';
@@ -203,8 +220,9 @@
   el('login-form').addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
+    const status = el('login-status');
     el('signin').disabled = true;
-    el('notice').textContent = t('Iniciando sesión…', 'Signing in…');
+    status.textContent = t('Iniciando sesión…', 'Signing in…');
     try {
       const response = await fetch('/api/user', {
         method: 'POST',
@@ -214,16 +232,18 @@
       const data = await response.json();
       if (response.ok && data.ok && data.session_token) {
         form.reset();
+        setPasswordVisibility(false);
+        status.textContent = '';
         token = data.session_token;
         sessionStorage.setItem(storageKey, token);
         await init();
       } else {
-        el('notice').textContent = errors[data.code] || (response.status === 401
-          ? t('Revisa tu correo y contraseña.', 'Check your email and password.')
+        status.textContent = errors[data.code] || (response.status === 401
+          ? t('Revisa tus credenciales. Si tu cuenta solo existe en el sitio público, crea y verifica una cuenta en Preview para esta prueba.', 'Check your credentials. If your account only exists on the public site, create and verify a Preview account for this test.')
           : unavailable);
       }
     } catch {
-      el('notice').textContent = unavailable;
+      status.textContent = unavailable;
     } finally {
       el('signin').disabled = false;
     }

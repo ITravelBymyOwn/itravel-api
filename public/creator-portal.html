@@ -7,12 +7,12 @@
 <title>I Travel By My Own · Colaboradores</title>
 <link rel="icon" href="/assets/img/favicon-32.png">
 <link rel="stylesheet" href="/assets/css/itbmo-growth.css?v=297.7">
-<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css?v=5">
+<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css?v=6">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap">
 
-<script src="/assets/js/itbmo-creator-portal.js?v=7" defer></script>
+<script src="/assets/js/itbmo-creator-portal.js?v=8" defer></script>
 </head>
 <body>
 <header class="g-header"><div class="g-header__inner creator-header">
@@ -40,14 +40,26 @@
 <div class="creator-entry__side">
 <section class="card creator-access" id="access" aria-labelledby="access-title">
 <h2 id="access-title">Portal de colaboradores</h2>
-<p id="access-description">Ingresa con tu cuenta de ITBMO para obtener tu código y revisar tus comisiones.</p>
+<p id="access-description">Usa la cuenta que registraste y verificaste en el Planner de Preview para obtener tu código y revisar tus comisiones.</p>
 <form id="login-form">
 <fieldset id="login-fields" disabled>
 <label><span id="email-label">Correo electrónico</span><input name="email" type="email" autocomplete="username" maxlength="254" required></label>
-<label><span id="password-label">Contraseña</span><input name="password" type="password" autocomplete="current-password" required></label>
+<div class="creator-password">
+<label for="creator-password" id="password-label">Contraseña</label>
+<div class="creator-password__field">
+<input id="creator-password" name="password" type="password" autocomplete="current-password" required>
+<button class="creator-password__toggle" id="password-toggle" type="button" aria-controls="creator-password" aria-label="Mostrar contraseña" title="Mostrar contraseña">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"></path><circle cx="12" cy="12" r="2.6"></circle>
+<path id="password-toggle-slash" d="M4 4l16 16" hidden></path>
+</svg>
+</button>
+</div>
+</div>
 <button id="signin" class="g-button g-button--primary" type="submit">Iniciar sesión</button>
 </fieldset>
-<a id="register" href="/planner.html?lang=es&amp;mode=register" target="_blank" rel="noopener" hidden>Crear y verificar mi cuenta ITBMO</a>
+<p id="login-status" role="status"></p>
+<a id="register" href="/planner.html?lang=es&amp;mode=register" target="_blank" rel="noopener" hidden>Crear una cuenta ITBMO en Preview</a>
 </form>
 <p id="access-preview" hidden>El acceso de prueba está pendiente de conectar a la base de usuarios de Preview.</p>
 </section>
