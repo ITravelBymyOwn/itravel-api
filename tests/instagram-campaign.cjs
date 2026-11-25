@@ -44,6 +44,10 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   const graphRequests = [];
   const participants = new Map();
   let claimInput = null;
+  let pricing = { regular_price_cents: 799, base_price_cents: 799, campaign_id: campaignId };
+  let configured = true;
+  let granted = 0;
+  let status = 'active';
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = new URL(input);
     const body = init?.body && JSON.parse(init.body);
@@ -62,15 +66,24 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
       }] : []);
     }
     if (url.pathname.endsWith('/itbmo_current_offer')) {
-      return json({ regular_price_cents: 799, base_price_cents: 799, campaign_id: campaignId });
+      return json(pricing);
+    }
+    if (url.pathname.endsWith('/itbmo_offer_settings')) {
+      return json(configured ? [{ campaign_id: campaignId }] : []);
     }
     if (url.pathname.endsWith('/instagram_campaign_settings')) {
+      if (url.searchParams.get('select') === 'quota') return json([{ quota: 500 }]);
       return json([{ campaigns: {
-        status: 'active', starts_at: new Date(Date.now() - 600_000).toISOString(),
+        status, starts_at: new Date(Date.now() - 600_000).toISOString(),
         ends_at: new Date(Date.now() + 600_000).toISOString()
       } }]);
     }
     if (url.pathname.endsWith('/instagram_campaign_participation')) {
+      if (url.searchParams.get('granted_at') === 'not.is.null') {
+        assert.equal(url.searchParams.get('offset'), '499');
+        assert.equal(url.searchParams.get('limit'), '1');
+        return json(granted >= 500 ? [{ id: participationId }] : []);
+      }
       if (init.method === 'POST') {
         const id = body.instagram_id === '20' ? participationId : `a3200000-0000-4000-8000-${body.instagram_id.padStart(12, '0')}`;
         if (!participants.has(body.instagram_id)) participants.set(body.instagram_id, { id, ...body });
@@ -219,6 +232,43 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   assert.equal(messages.length, 6);
   assert.match(messages[5].message.attachment.payload.text, /plazo original/);
   assert.equal(messages[5].message.attachment.payload.buttons[0].url, link.href);
+
+  pricing = { regular_price_cents: 799, base_price_cents: 299, campaign_id: null };
+  granted = 499;
+  const soldOutES = comment('PRUEBAITBMO @friend @other', '42', '71', '101');
+  assert.equal(await deliver(soldOutES), 200);
+  assert.equal(messages.length, 6);
+  granted = 500;
+  configured = false;
+  assert.equal(await deliver(soldOutES), 200);
+  configured = true;
+  status = 'paused';
+  assert.equal(await deliver(soldOutES), 200);
+  status = 'active';
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @friend', '42', '71', '101')), 200);
+  assert.equal(messages.length, 6);
+
+  assert.equal(await deliver(soldOutES), 200);
+  assert.equal(await deliver(soldOutES), 200);
+  assert.equal(messages.length, 7);
+  assert.deepEqual(messages[6].recipient, { comment_id: '101' });
+  assert.match(messages[6].message.text, /agotaron.*US\$2\.99.*63 %/);
+  assert.equal(messages[6].message.text.split('\n\n')[1], env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN + '/planner.html?lang=es');
+  assert.equal(participants.get('71').link_expires_at, undefined);
+  assert.equal(participants.get('71').link_sent_at, undefined);
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '42', '20', '105')), 200);
+  assert.equal(participants.get('20').link_expires_at, new Date(linkExpiry).toISOString());
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '72', '102')), 200);
+  assert.match(messages[7].message.text, /claimed.*US\$2\.99.*63%/);
+  assert.equal(messages[7].message.text.split('\n\n')[1], env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN + '/planner.html?lang=en');
+  pricing.base_price_cents = 799;
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '73', '103')), 200);
+  assert.match(messages[8].message.text, /US\$7\.99/);
+  assert.doesNotMatch(messages[8].message.text, /%/);
+
+  pricing = { regular_price_cents: 799, base_price_cents: 799, campaign_id: campaignId };
+  assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '42', '71', '104')), 200);
+  claimLink(messages[9], '104', 'es');
 
   process.env.ITBMO_INSTAGRAM_LOGIN_MODE = 'invalid';
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 404);

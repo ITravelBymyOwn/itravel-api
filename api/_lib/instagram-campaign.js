@@ -162,6 +162,40 @@ async function withOutboundLease(row, filter, delivery) {
   }
 }
 
+async function isCampaignSoldOut(campaignId, scope) {
+  const offers = await supabaseFetch(
+    `/itbmo_offer_settings?select=campaign_id&environment=eq.${scope}&campaign_id=eq.${campaignId}&limit=1`
+  );
+  if (!offers?.length) return false;
+
+  const settings = await supabaseFetch(
+    `/instagram_campaign_settings?select=quota&campaign_id=eq.${campaignId}&environment=eq.${scope}&limit=1`
+  );
+  const quota = settings?.[0]?.quota;
+  if (!Number.isInteger(quota) || quota < 1) return false;
+
+  // Current offer and claim RPCs both count granted entries against the quota.
+  const entries = await supabaseFetch(
+    `/instagram_campaign_participation?select=id&campaign_id=eq.${campaignId}&granted_at=not.is.null&order=granted_at.asc,id.asc&offset=${quota - 1}&limit=1`
+  );
+  return Boolean(entries?.length);
+}
+
+function soldOutMessage(origin, language, { regular_price, base_price }) {
+  const price = `US$${Number(base_price).toFixed(2)}`;
+  const discount = Math.round(100 * (regular_price - base_price) / regular_price);
+  const link = `${origin}/planner.html?lang=${language}`;
+  const es = language === 'es';
+  const intro = es
+    ? '¡Gracias por participar! ✈️ Ya se agotaron los itinerarios gratuitos de esta campaña.'
+    : 'Thanks for participating! ✈️ All free itineraries for this campaign have been claimed.';
+  const offer = discount > 0
+    ? (es ? `Crea tu itinerario por ${price} y ahorra ${discount} % sobre el precio regular.`
+      : `Create your itinerary for ${price} and save ${discount}% off the regular price.`)
+    : (es ? `Puedes crear tu itinerario por ${price}.` : `You can create your itinerary for ${price}.`);
+  return `${intro} ${offer}\n\n${link}`;
+}
+
 async function handleComment(config, comment, eventTime) {
   const actor = comment?.from?.id;
   const media = comment?.media?.id;
@@ -174,9 +208,13 @@ async function handleComment(config, comment, eventTime) {
   const reel = reels?.[0];
   if (!reel || (reel.test_keyword && !String(comment.text).split(/\s+/).some(
     word => word.toUpperCase() === reel.test_keyword.toUpperCase()))) return;
-  if ((await commercePricing()).campaign_id !== reel.campaign_id) return;
+  const pricing = await commercePricing();
+  // A different active offer means the comment belongs to an earlier campaign.
+  if (pricing.campaign_id && pricing.campaign_id !== reel.campaign_id) return;
   const campaign = await getSetting(reel.campaign_id, config.environment);
   if (!campaignIsOpen(campaign) || !campaignIsOpen(campaign, eventTime)) return;
+  const soldOut = !pricing.campaign_id;
+  if (soldOut && !await isCampaignSoldOut(reel.campaign_id, config.environment)) return;
 
   await supabaseFetch('/instagram_campaign_participation?on_conflict=campaign_id,instagram_id', {
     method: 'POST',
@@ -190,6 +228,11 @@ async function handleComment(config, comment, eventTime) {
   if (row.intro_sent_at && row.comment_id === commentId) return;
   await withOutboundLease(row, 'link_sent_at=is.null&user_id=is.null', async (locked, condition) => {
     if (locked.intro_sent_at && locked.comment_id === commentId) return {};
+    if (soldOut) {
+      const text = soldOutMessage(config.origin, reel.language, pricing);
+      await sendClaimMessage(config, { comment_id: commentId }, { text });
+      return { comment_id: commentId, language: reel.language, intro_sent_at: new Date().toISOString() };
+    }
     const expiry = Date.parse(locked.link_expires_at) > Date.now() ?
       Date.parse(locked.link_expires_at) : Date.now() + CLAIM_LINK_HOURS * HOUR;
     await patchParticipation(condition, { link_expires_at: new Date(expiry).toISOString() });
