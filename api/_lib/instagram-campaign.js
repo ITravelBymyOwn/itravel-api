@@ -15,10 +15,12 @@ const graphHosts = new Map([
 const campaignCopy = {
   es: {
     link: `¡Gracias por participar! ✈️ Sigue a @itravelbymyown y activa tu itinerario gratis en las próximas ${CLAIM_LINK_HOURS} horas. Usa el botón o abre este enlace:`,
+    recovery: 'Aquí tienes tu enlace para activar el itinerario gratis. Sigue a @itravelbymyown y úsalo antes de que venza el plazo original:',
     claimButton: 'Canjear itinerario'
   },
   en: {
     link: `Thanks for participating! ✈️ Follow @itravelbymyown and activate your free itinerary within ${CLAIM_LINK_HOURS} hours. Tap the button or open this link:`,
+    recovery: 'Here is your link to activate your free itinerary. Follow @itravelbymyown and use it before the original deadline:',
     claimButton: 'Claim free itinerary'
   }
 };
@@ -82,9 +84,9 @@ async function instagramRequest(config, path, body) {
   return response.json();
 }
 
-async function sendClaimButton(config, commentId, copy, url) {
+async function sendClaimButton(config, recipient, copy, url) {
   const sent = await instagramRequest(config, `${config.account}/messages`, {
-    recipient: { comment_id: commentId },
+    recipient,
     message: {
       attachment: {
         type: 'template',
@@ -101,8 +103,13 @@ async function sendClaimButton(config, commentId, copy, url) {
   }
 }
 
+function claimLink(config, participation, language, expiry) {
+  const value = `${participation.id}.${expiry}`;
+  const token = `${value}.${hmac(value, config.signingKey, 'base64url')}`;
+  return `${config.origin}/planner.html?lang=${language}#itbmo_campaign=${token}`;
+}
+
 async function getSetting(campaignId, scope) {
-  if ((await commercePricing()).campaign_id !== campaignId) return null;
   const rows = await supabaseFetch(`/instagram_campaign_settings?select=campaign_id,campaigns(status,starts_at,ends_at)&campaign_id=eq.${campaignId}&environment=eq.${scope}&limit=1`);
   return rows?.[0]?.campaigns;
 }
@@ -155,6 +162,7 @@ async function handleComment(config, comment, eventTime) {
   const reel = reels?.[0];
   if (!reel || (reel.test_keyword && !String(comment.text).split(/\s+/).some(
     word => word.toUpperCase() === reel.test_keyword.toUpperCase()))) return;
+  if ((await commercePricing()).campaign_id !== reel.campaign_id) return;
   const campaign = await getSetting(reel.campaign_id, config.environment);
   if (!campaignIsOpen(campaign) || !campaignIsOpen(campaign, eventTime)) return;
 
@@ -173,12 +181,43 @@ async function handleComment(config, comment, eventTime) {
     const expiry = Date.parse(locked.link_expires_at) > Date.now() ?
       Date.parse(locked.link_expires_at) : Date.now() + CLAIM_LINK_HOURS * HOUR;
     await patchParticipation(condition, { link_expires_at: new Date(expiry).toISOString() });
-    const value = `${locked.id}.${expiry}`;
-    const token = `${value}.${hmac(value, config.signingKey, 'base64url')}`;
-    const link = `${config.origin}/planner.html?lang=${reel.language}#itbmo_campaign=${token}`;
-    await sendClaimButton(config, commentId, campaignCopy[reel.language], link);
+    const link = claimLink(config, locked, reel.language, expiry);
+    await sendClaimButton(config, { comment_id: commentId }, campaignCopy[reel.language], link);
     const sentAt = new Date().toISOString();
     return { comment_id: commentId, language: reel.language, intro_sent_at: sentAt, link_sent_at: sentAt };
+  });
+}
+
+async function handleRecovery(config, event) {
+  const actor = event?.sender?.id;
+  const message = event?.message;
+  const timestamp = event?.timestamp;
+  const now = Date.now();
+  if (typeof actor !== 'string' || !instagramId.test(actor) || actor === config.account ||
+      event?.recipient?.id !== config.account || message?.is_echo || message?.is_deleted ||
+      typeof message?.mid !== 'string' || !message.mid || message.mid.length > 300 ||
+      typeof message.text !== 'string' || !/^(ITINERARIO|ITINERARY)$/i.test(message.text.trim()) ||
+      !Number.isSafeInteger(timestamp) || timestamp > now || now - timestamp >= 24 * HOUR) return;
+
+  console.info('ITBMO Instagram claim recovery requested');
+  const { campaign_id: campaignId } = await commercePricing();
+  if (!uuid.test(campaignId || '') || !campaignIsOpen(await getSetting(campaignId, config.environment))) return;
+
+  const eligible = `user_id=is.null&link_expires_at=gt.${encodeURIComponent(new Date(now).toISOString())}`;
+  const rows = await supabaseFetch(`/instagram_campaign_participation?campaign_id=eq.${campaignId}&instagram_id=eq.${actor}&${eligible}&limit=1`);
+  const row = rows?.[0];
+  if (!row) return;
+  const marker = `recovery:${timestamp}:${message.mid}`;
+
+  await withOutboundLease(row, eligible, async locked => {
+    const lastTimestamp = Number(locked.last_message_id?.match(/^recovery:(\d+):/)?.[1]);
+    const expiry = Date.parse(locked.link_expires_at);
+    const copy = campaignCopy[locked.language];
+    if (!copy || !(expiry > Date.now()) || lastTimestamp >= timestamp) return {};
+    const link = claimLink(config, locked, locked.language, expiry);
+    await sendClaimButton(config, { id: actor }, { ...copy, link: copy.recovery }, link);
+    console.info('ITBMO Instagram claim recovery accepted by Meta');
+    return { last_message_id: marker, link_sent_at: locked.link_sent_at || new Date().toISOString() };
   });
 }
 
@@ -228,7 +267,9 @@ export async function instagramCampaignWebhook(req, res) {
       if (Date.now() - eventTime < 7 * 24 * HOUR) {
         for (const event of entry.changes || []) {
           if (event.field === 'comments') await handleComment(config, event.value, eventTime);
+          if (event.field === 'messages') await handleRecovery(config, event.value);
         }
+        for (const event of entry.messaging || []) await handleRecovery(config, event);
       }
     }
     return res.status(200).end();

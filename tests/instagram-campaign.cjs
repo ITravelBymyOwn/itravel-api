@@ -69,12 +69,18 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
     }
     if (url.pathname.endsWith('/instagram_campaign_participation')) {
       if (init.method === 'POST') {
-        if (!participants.has(body.instagram_id)) participants.set(body.instagram_id, { id: participationId, ...body });
+        const id = body.instagram_id === '20' ? participationId : `a3200000-0000-4000-8000-${body.instagram_id.padStart(12, '0')}`;
+        if (!participants.has(body.instagram_id)) participants.set(body.instagram_id, { id, ...body });
         return json([]);
       }
       const row = url.searchParams.has('instagram_id') ?
-        participants.get(url.searchParams.get('instagram_id').slice(3)) : [...participants.values()].at(-1);
+        participants.get(url.searchParams.get('instagram_id').slice(3)) :
+        [...participants.values()].find(entry => `eq.${entry.id}` === url.searchParams.get('id'));
       if (!row) return json([]);
+      if (url.searchParams.get('user_id') === 'is.null' && row.user_id) return json([]);
+      const expiryFilter = url.searchParams.get('link_expires_at');
+      if (expiryFilter?.startsWith('gt.') &&
+          !(Date.parse(row.link_expires_at) > Date.parse(expiryFilter.slice(3)))) return json([]);
       if (init.method === 'PATCH') Object.assign(row, body);
       return json([row]);
     }
@@ -149,7 +155,7 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '20', '51')), 200);
   assert.equal(messages.length, 1);
   participants.set('30', {
-    id: participationId, instagram_id: '30', comment_id: '60', language: 'es',
+    id: 'a3200000-0000-4000-8000-000000000030', instagram_id: '30', comment_id: '60', language: 'es',
     intro_sent_at: new Date().toISOString()
   });
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '42', '30', '60')), 200);
@@ -169,6 +175,38 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
     path: '/v27.0/100/messages',
     body: messages[3]
   });
+
+  const english = participants.get('32');
+  const originalExpiry = english.link_expires_at;
+  const originalSentAt = english.link_sent_at;
+  const originalLink = messages[3].message.attachment.payload.buttons[0].url;
+  const recovery = reply('recovery-1', '  Itinerario  ', '32');
+  assert.equal(await deliver(reply('missing-participation', 'ITINERARY', '99')), 200);
+  const stale = reply('stale', 'ITINERARY', '32');
+  stale.messaging[0].timestamp -= 24 * 3_600_000;
+  assert.equal(await deliver(stale), 200);
+  assert.equal(messages.length, 4);
+
+  assert.equal(await deliver(recovery), 200);
+  assert.equal(await deliver({ changes: [{ field: 'messages', value: recovery.messaging[0] }] }), 200);
+  assert.equal(messages.length, 5);
+  assert.deepEqual(messages[4].recipient, { id: '32' });
+  assert.match(messages[4].message.attachment.payload.text, /original deadline/);
+  assert.equal(messages[4].message.attachment.payload.buttons[0].url, originalLink);
+  assert.equal(english.link_expires_at, originalExpiry);
+  assert.equal(english.link_sent_at, originalSentAt);
+  assert.equal(participants.size, 4);
+
+  english.link_expires_at = new Date(Date.now() - 1).toISOString();
+  participants.get('31').user_id = profileId;
+  assert.equal(await deliver(reply('expired', 'ITINERARY', '32')), 200);
+  assert.equal(await deliver(reply('claimed', 'ITINERARY', '31')), 200);
+  assert.equal(messages.length, 5);
+
+  const spanish = reply('spanish', 'ITINERARY', '20');
+  assert.equal(await deliver({ changes: [{ field: 'messages', value: spanish.messaging[0] }] }), 200);
+  assert.match(messages[5].message.attachment.payload.text, /plazo original/);
+  assert.equal(messages[5].message.attachment.payload.buttons[0].url, link.href);
 
   process.env.ITBMO_INSTAGRAM_LOGIN_MODE = 'invalid';
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other')), 404);
