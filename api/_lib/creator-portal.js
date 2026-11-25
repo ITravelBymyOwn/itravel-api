@@ -4,16 +4,24 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const codePattern = /^[A-Z0-9][A-Z0-9_-]{2,39}$/;
 const projectUrl = 'https://gpfoqnnznncqisunmrlc.supabase.co';
 
-export function isCreatorSandbox(env) {
+export function isCreatorPreview(env) {
   return env.VERCEL_ENV === 'preview' &&
-    env.SUPABASE_URL?.replace(/\/$/, '') === projectUrl && env.PAYPAL_ENV === 'sandbox';
+    env.VERCEL_GIT_COMMIT_REF === 'preview/creator-affiliates';
+}
+
+export function isCreatorQaDatabase(env) {
+  return isCreatorPreview(env) && env.SUPABASE_URL?.replace(/\/$/, '') === projectUrl;
+}
+
+export function isCreatorSandbox(env) {
+  return isCreatorQaDatabase(env) && env.PAYPAL_ENV === 'sandbox';
 }
 
 export async function creatorPortal(req, res, body) {
   res.setHeader('Cache-Control', 'no-store');
 
   // This pilot must not return creator data from an inherited production database.
-  if (!isCreatorSandbox(process.env)) {
+  if (!isCreatorQaDatabase(process.env)) {
     return res.status(404).json({ ok: false, code: 'CREATOR_PORTAL_UNAVAILABLE' });
   }
 

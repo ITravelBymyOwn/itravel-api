@@ -1,4 +1,4 @@
-import { isCreatorSandbox } from './_lib/creator-portal.js';
+import { isCreatorPreview, isCreatorQaDatabase } from './_lib/creator-portal.js';
 import emailHandler from './email.js';
 import crypto from "crypto";
 
@@ -1339,15 +1339,14 @@ export default async function handler(req, res) {
       return await handleSignUp(req, res, body);
     }
 
-    if (action === "creator_sign_in") {
+    if (action === "creator_sign_in" || isCreatorPreview(process.env)) {
       res.setHeader("Cache-Control", "no-store");
-      if (!isCreatorSandbox(process.env)) {
-        return res.status(404).json({ ok: false, code: "CREATOR_PORTAL_UNAVAILABLE" });
+      if (!isCreatorQaDatabase(process.env)) {
+        return res.status(503).json({ ok: false, code: "CREATOR_PORTAL_UNAVAILABLE" });
       }
-      return await handlePasswordLogin(req, res, body);
     }
 
-    if (action === "sign_in") {
+    if (action === "sign_in" || action === "creator_sign_in") {
       return await handlePasswordLogin(req, res, body);
     }
 

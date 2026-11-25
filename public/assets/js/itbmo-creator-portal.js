@@ -38,7 +38,7 @@
     el('home-button').href = '/english';
     el('home-button').textContent = 'Home';
     el('intro').textContent = 'Your audience gets a discount on their itinerary. You earn a commission when someone buys with your code.';
-    el('register').textContent = 'Create my ITBMO account';
+    el('register').textContent = 'Create and verify my ITBMO account';
     el('register').href = '/planner.html?lang=en&mode=register';
     el('enroll-title').textContent = 'Activate your creator code';
     el('enroll-offer').textContent = 'Test offer: your audience gets 10% off the current price and you earn USD 0.30 per eligible purchase.';
@@ -47,7 +47,7 @@
     el('enroll').textContent = 'Generate my code';
     el('access-title').textContent = 'Creator portal';
     el('access-description').textContent = 'Sign in with your ITBMO account to get your code and track your commissions.';
-    el('access-preview').textContent = 'Portal preview. Sandbox sign-in will open once the test environment is connected.';
+    el('access-preview').textContent = 'Test access is waiting for the Preview user database to be connected.';
     el('destination').textContent = 'Torres del Paine, Patagonia';
     el('steps').setAttribute('aria-label', 'How it works');
     el('step-code').textContent = 'Get your code';
@@ -184,7 +184,6 @@
       const data = await request('creator_summary');
       const preview = data.code === 'CREATOR_PORTAL_UNAVAILABLE';
       el('access-preview').hidden = !preview;
-      el('login-form').hidden = preview;
       el('notice').textContent = preview ? '' : data.ok
         ? t('Entorno de pruebas PayPal Sandbox', 'PayPal Sandbox test environment')
         : errors[data.code] || unavailable;

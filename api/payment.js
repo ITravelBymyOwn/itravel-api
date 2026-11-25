@@ -1,4 +1,4 @@
-import { creatorPortal, isCreatorSandbox } from './_lib/creator-portal.js';
+import { creatorPortal, isCreatorPreview, isCreatorSandbox } from './_lib/creator-portal.js';
 import { canOperateCreatorPayouts, creatorPayoutAction, runSandboxCreatorSettlement } from './_lib/creator-payouts.js';
 import { getPromotionReservation, consumePromotion, findConsumedPromoEntitlement, promoCodeForRedemption, commercePricing } from './_lib/promo-engine.js';
 import crypto from "crypto";
@@ -920,8 +920,7 @@ export default async function handler(req, res) {
     }
 
     const checkoutAction = ["paypal_create_order", "paypal_capture_order", "tilopay_create_checkout"].includes(action);
-    const creatorPreview = process.env.VERCEL_ENV === "preview" &&
-      process.env.VERCEL_GIT_COMMIT_REF === "preview/creator-affiliates";
+    const creatorPreview = isCreatorPreview(process.env);
     if (checkoutAction && (sharedCampaignPreview ||
         (creatorPreview && (!isCreatorSandbox(process.env) || action === "tilopay_create_checkout")))) {
       return res.status(403).json({ ok: false, code: "PREVIEW_CHECKOUT_DISABLED" });
