@@ -7,12 +7,12 @@
 <title>I Travel By My Own · Colaboradores</title>
 <link rel="icon" href="/assets/img/favicon-32.png">
 <link rel="stylesheet" href="/assets/css/itbmo-growth.css?v=297.7">
-<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css?v=3">
+<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css?v=4">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap">
 
-<script src="/assets/js/itbmo-creator-portal.js?v=4" defer></script>
+<script src="/assets/js/itbmo-creator-portal.js?v=5" defer></script>
 </head>
 <body>
 <header class="g-header"><div class="g-header__inner creator-header">
@@ -23,13 +23,21 @@
 </div>
 </div></header>
 <main class="g-shell creator-main">
-<section class="creator-intro">
-<h1 id="title">Portal de <span class="g-gradient-text">colaboradores</span></h1>
-<p id="intro">Comparte una forma nueva de planear viajes. Tu audiencia recibe un descuento y tú ganas una comisión por cada compra válida con tu código.</p>
-<figure class="creator-photo"><img src="/assets/img/hero-real/patagonia-torres-del-paine.webp" alt="" width="900" height="440" decoding="async"></figure>
+<div class="creator-entry" id="entry">
+<section class="creator-intro" aria-labelledby="title">
+<figure class="creator-photo">
+<img src="/assets/img/hero-real/patagonia-torres-del-paine.webp" alt="" width="900" height="660" fetchpriority="high">
+<figcaption id="destination">Torres del Paine, Patagonia</figcaption>
+</figure>
+<div class="creator-intro__copy">
+<h1 id="title">Inspira el <span>próximo viaje.</span></h1>
+<p id="intro">Tu audiencia recibe un descuento en su itinerario. Tú ganas una comisión cuando alguien compra con tu código.</p>
+</div>
 </section>
+<div class="creator-entry__side">
 <section class="card creator-access" id="access" aria-labelledby="access-title">
-<h2 id="access-title">Accede a tu panel</h2>
+<h2 id="access-title">Portal de colaboradores</h2>
+<p id="access-description">Ingresa con tu cuenta de ITBMO para obtener tu código y revisar tus comisiones.</p>
 <form id="login-form">
 <fieldset id="login-fields" disabled>
 <label><span id="email-label">Correo electrónico</span><input name="email" type="email" autocomplete="username" maxlength="254" required></label>
@@ -38,8 +46,8 @@
 </fieldset>
 <a id="register" href="/planner.html?lang=es&amp;mode=register" hidden>Crear mi cuenta ITBMO</a>
 </form>
+<p id="access-preview" hidden>Vista previa del portal. El acceso de prueba se habilitará al conectar PayPal Sandbox.</p>
 </section>
-<p id="notice" role="status"></p>
 <section id="enrollment" class="card creator-access" hidden>
 <h2 id="enroll-title">Activa tu código de colaborador</h2>
 <p id="enroll-offer">Oferta de prueba: tu audiencia recibe un 10 % sobre el precio vigente y tú acumulas USD 0.30 por compra válida.</p>
@@ -49,7 +57,15 @@
 <button class="g-button g-button--primary" id="enroll" type="submit">Generar mi código</button>
 </form>
 </section>
-<section id="dashboard" hidden></section>
+</div>
+</div>
+<p id="notice" role="status"></p>
+<ul class="creator-steps" id="steps" aria-label="Cómo funciona">
+<li><strong id="step-code">Obtén tu código</strong><span id="step-code-description">Se genera una vez y queda ligado a tu cuenta.</span></li>
+<li><strong id="step-share">Comparte tu enlace</strong><span id="step-share-description">Tu audiencia lo abre con el descuento listo para aplicar.</span></li>
+<li><strong id="step-results">Consulta tus ingresos</strong><span id="step-results-description">Revisa compras, itinerarios generados y pagos desde tu panel.</span></li>
+</ul>
+<section id="dashboard" aria-label="Estado de cuenta" hidden></section>
 <section id="admin" class="card" hidden>
 <h2 id="admin-title">Crear colaborador</h2>
 <form id="creator-form">

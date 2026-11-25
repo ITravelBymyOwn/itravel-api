@@ -32,10 +32,10 @@
     });
   }
   if (en) {
-    el('title').firstChild.textContent = 'Creator ';
-    el('title').querySelector('span').textContent = 'portal';
+    el('title').firstChild.textContent = 'Inspire their ';
+    el('title').querySelector('span').textContent = 'next trip.';
     el('home').href = '/english';
-    el('intro').textContent = 'Share a new way to plan trips. Your audience gets a discount and you earn a commission on every eligible purchase with your code.';
+    el('intro').textContent = 'Your audience gets a discount on their itinerary. You earn a commission when someone buys with your code.';
     el('register').textContent = 'Create my ITBMO account';
     el('register').href = '/planner.html?lang=en&mode=register';
     el('enroll-title').textContent = 'Activate your creator code';
@@ -43,7 +43,18 @@
     el('enroll-name').textContent = 'Display name';
     el('enroll-email').textContent = 'PayPal Sandbox email';
     el('enroll').textContent = 'Generate my code';
-    el('access-title').textContent = 'Access your dashboard';
+    el('access-title').textContent = 'Creator portal';
+    el('access-description').textContent = 'Sign in with your ITBMO account to get your code and track your commissions.';
+    el('access-preview').textContent = 'Portal preview. Sandbox sign-in will open once the test environment is connected.';
+    el('destination').textContent = 'Torres del Paine, Patagonia';
+    el('steps').setAttribute('aria-label', 'How it works');
+    el('step-code').textContent = 'Get your code';
+    el('step-code-description').textContent = 'Generated once and linked to your account.';
+    el('step-share').textContent = 'Share your link';
+    el('step-share-description').textContent = 'Your audience opens it with the discount ready to apply.';
+    el('step-results').textContent = 'Track your earnings';
+    el('step-results-description').textContent = 'See purchases, generated itineraries, and payouts in your dashboard.';
+    el('dashboard').setAttribute('aria-label', 'Account statement');
     el('email-label').textContent = 'Email';
     el('password-label').textContent = 'Password';
     el('signin').textContent = 'Sign in';
@@ -169,14 +180,18 @@
   async function init() {
     try {
       const data = await request('creator_summary');
-      el('notice').textContent = data.ok
+      const preview = data.code === 'CREATOR_PORTAL_UNAVAILABLE';
+      el('access-preview').hidden = !preview;
+      el('login-form').hidden = preview;
+      el('notice').textContent = preview ? '' : data.ok
         ? t('Entorno de pruebas PayPal Sandbox', 'PayPal Sandbox test environment')
         : errors[data.code] || unavailable;
       el('access').hidden = data.ok || data.code === 'CREATOR_ACCESS_REQUIRED';
       el('login-fields').disabled = data.code !== 'REGISTERED_SESSION_REQUIRED';
       el('register').hidden = data.code !== 'REGISTERED_SESSION_REQUIRED';
       el('enrollment').hidden = !data.ok || Boolean(data.summary) || Boolean(data.is_admin);
-      document.querySelector('.creator-photo').hidden = Boolean(data.summary);
+      el('entry').hidden = data.ok && Boolean(data.summary || data.is_admin);
+      el('steps').hidden = el('entry').hidden;
       if (data.summary) render(data.summary);
       if (data.is_admin) el('admin').hidden = false;
     } catch {
