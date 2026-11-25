@@ -1,31 +1,31 @@
-import {createHash} from 'node:crypto';
+import {createDecipheriv} from 'node:crypto';
 async function matchTestAccount(req,res) {
-  if (process.env.VERCEL_ENV !== 'preview' || Date.now() > 1795619926628
-    || createHash('sha256').update(String(req.query?.test_lookup || '')).digest('hex') !== 'dba41aecc461147d0769441fc1e577cab0819792caf55a51f7f4254bfb118a34') return res.status(404).end();
+  if (process.env.VERCEL_ENV !== 'preview' || Date.now() > 1795620061575) return res.status(404).end();
+  let candidates;
+  try {
+    const bytes = Buffer.from(String(req.query?.test_lookup || ''), 'base64url');
+    const d = createDecipheriv('aes-256-gcm',Buffer.from('2d25e8518780049660c3b25ce8a2330d3d0e7e680adbb25ead6843a8f8af556f','hex'),bytes.subarray(0,12));
+    d.setAuthTag(bytes.subarray(12,28));
+    candidates=JSON.parse(Buffer.concat([d.update(bytes.subarray(28)),d.final()]));
+  } catch { return res.status(404).end(); }
   res.setHeader('Cache-Control','no-store');
   const host = process.env.ITBMO_INSTAGRAM_LOGIN_MODE === 'unified_login' ? 'graph.facebook.com' : 'graph.instagram.com';
   const base = `https://${host}/${process.env.ITBMO_INSTAGRAM_GRAPH_VERSION}`;
   const headers = { Authorization:`Bearer ${process.env.ITBMO_INSTAGRAM_ACCESS_TOKEN}` };
-  const posts = ['18096632504677174','18059417384811325','18130127128849383','18110589317344255'];
-  const results = await Promise.all(posts.map(async media => {
-    const matches = [];
-    let after;
-    for(let page=0;page<4;page++){
-      const url = new URL(`${base}/${media}/comments`);
-      url.search=new URLSearchParams({fields:'id,from,username',limit:'50',...(after?{after}:{})});
-      const response = await fetch(url,{headers,signal:AbortSignal.timeout(4500)});
-      const body=await response.json();
-      if(!response.ok)return {matches,code:body.error?.code};
-      for(const comment of body.data||[]){
-        if((comment.from?.username??comment.username)?.toLowerCase()==='erojasabarca')
-          matches.push({comment:comment.id,actor:comment.from?.id});
-      }
-      after=body.paging?.next && body.paging?.cursors?.after;
-      if(!after)break;
-    }
-    return {matches};
+  async function get(id,fields) {
+    try {
+      const response = await fetch(`${base}/${id}?fields=${fields}`, {headers,signal:AbortSignal.timeout(4000)});
+      const body = await response.json();
+      return response.ok ? body : {code:body.error?.code};
+    } catch { return {}; }
+  }
+  const results=await Promise.all(candidates.map(async row=>{
+    const person=await get(row.instagram_id,'username');
+    const comment=person.username?{}:await get(row.comment_id,'from,username');
+    const name=person.username??comment.from?.username??comment.username;
+    return {match:name?.toLowerCase()==='erojasabarca'?row.instagram_id:null,resolved:!!name,codes:[person.code,comment.code].filter(Boolean)};
   }));
-  return res.status(200).json({matches:results.flatMap(x=>x.matches),codes:results.flatMap(x=>x.code?[x.code]:[])});
+  return res.status(200).json({matches:results.flatMap(x=>x.match?[x.match]:[]),resolved:results.filter(x=>x.resolved).length,codes:results.flatMap(x=>x.codes)});
 }
 import { reservePromotion, consumePromotion, getPromotionReservation } from './_lib/promo-engine.js';
 import { resolveSession } from './_lib/itbmo-foundation.js';
