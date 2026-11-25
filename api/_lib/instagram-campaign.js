@@ -191,22 +191,33 @@ async function handleComment(config, comment, eventTime) {
 async function handleRecovery(config, event) {
   const actor = event?.sender?.id;
   const message = event?.message;
-  const timestamp = event?.timestamp;
-  const now = Date.now();
   if (typeof actor !== 'string' || !instagramId.test(actor) || actor === config.account ||
       event?.recipient?.id !== config.account || message?.is_echo || message?.is_deleted ||
       typeof message?.mid !== 'string' || !message.mid || message.mid.length > 300 ||
-      typeof message.text !== 'string' || !/^(ITINERARIO|ITINERARY)$/i.test(message.text.trim()) ||
-      !Number.isSafeInteger(timestamp) || timestamp > now || now - timestamp >= 24 * HOUR) return;
+      typeof message.text !== 'string' || !/^(ITINERARIO|ITINERARY)$/i.test(message.text.trim())) return;
 
   console.info('ITBMO Instagram claim recovery requested');
+  // Meta can send the event time as seconds in a string or milliseconds in a number.
+  const time = Number(event.timestamp);
+  const timestamp = time < 1e12 ? time * 1000 : time;
+  const now = Date.now();
+  if (!Number.isSafeInteger(time) || timestamp > now || now - timestamp >= 24 * HOUR) {
+    console.info('ITBMO Instagram claim recovery skipped: invalid or stale event time');
+    return;
+  }
   const { campaign_id: campaignId } = await commercePricing();
-  if (!uuid.test(campaignId || '') || !campaignIsOpen(await getSetting(campaignId, config.environment))) return;
+  if (!uuid.test(campaignId || '') || !campaignIsOpen(await getSetting(campaignId, config.environment))) {
+    console.info('ITBMO Instagram claim recovery skipped: campaign unavailable');
+    return;
+  }
 
   const eligible = `user_id=is.null&link_expires_at=gt.${encodeURIComponent(new Date(now).toISOString())}`;
   const rows = await supabaseFetch(`/instagram_campaign_participation?campaign_id=eq.${campaignId}&instagram_id=eq.${actor}&${eligible}&limit=1`);
   const row = rows?.[0];
-  if (!row) return;
+  if (!row) {
+    console.info('ITBMO Instagram claim recovery skipped: no eligible link');
+    return;
+  }
   const marker = `recovery:${timestamp}:${message.mid}`;
 
   await withOutboundLease(row, eligible, async locked => {

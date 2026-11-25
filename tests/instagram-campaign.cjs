@@ -204,7 +204,9 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   assert.equal(messages.length, 5);
 
   const spanish = reply('spanish', 'ITINERARY', '20');
+  spanish.messaging[0].timestamp = String(Math.floor(spanish.messaging[0].timestamp / 1000));
   assert.equal(await deliver({ changes: [{ field: 'messages', value: spanish.messaging[0] }] }), 200);
+  assert.equal(messages.length, 6);
   assert.match(messages[5].message.attachment.payload.text, /plazo original/);
   assert.equal(messages[5].message.attachment.payload.buttons[0].url, link.href);
 
