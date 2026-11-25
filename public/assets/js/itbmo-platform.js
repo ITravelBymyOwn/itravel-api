@@ -93,7 +93,12 @@
       const wrapped=function(name,properties={}){
         const eventId=original.call(window.ITBMOFoundation,name,properties);
         const metaEvent=standard[String(name||'')];
-        if(metaEvent){const payload={};if(properties?.currency)payload.currency=String(properties.currency);fbq('track',metaEvent,payload,{eventID:eventId||undefined});}
+        if(metaEvent){
+          const payload={};
+          if(properties?.currency)payload.currency=String(properties.currency);
+          if(metaEvent==='Purchase' && Number.isFinite(properties?.value))payload.value=properties.value;
+          fbq('track',metaEvent,payload,{eventID:properties?.transaction_id||eventId||undefined});
+        }
         return eventId;
       };
       wrapped.__metaWrapped=true;window.ITBMOFoundation.track=wrapped;

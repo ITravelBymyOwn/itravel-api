@@ -53,7 +53,7 @@
     'generation_completed','itinerary_generated','workspace_opened','city_workspace_opened',
     'partner_offer_view','partner_offer_click','affiliate_click','trip_shared','trip_reopened',
     'new_trip_started','new_planning_started','export_pdf','export_csv','export_receipt',
-    'info_chat_question','start_chat','promo_code_applied','promo_code_consumed',
+    'info_chat_question','start_chat','promo_code_applied','promo_code_consumed','instagram_benefit_claimed','instagram_benefit_redeemed',
     'social_link_clicked','support_channel_opened','support_channel_unavailable',
     'feedback_prompt_viewed','feedback_started','feedback_dismissed','feedback_submitted',
     'mobility_route_prepared','live_location_granted','live_location_denied',
@@ -65,7 +65,7 @@
     'partner','partner_name','placement','destination','queries_used','queries_remaining',
     'file_type','error_stage','campaign_id','campaign_key','channel','source','medium',
     'content','creator','referral','landing_page','first_touch_source','last_touch_source',
-    'promotion_code','promo_type','discount_amount','partner_slug','need_type','entity_name','resolution_type','travel_date',
+    'value','transaction_id','promotion_code','promo_type','discount_amount','partner_slug','need_type','entity_name','resolution_type','travel_date',
     'feedback_type','rating','capability','provider','action','proposal_status'
   ]);
 
@@ -216,6 +216,11 @@
     if(!clean.language) clean.language=(document.documentElement.lang||'en').slice(0,2);
     if(firstTouch?.source) clean.first_touch_source=String(firstTouch.source).slice(0,160);
     if(lastTouch?.source) clean.last_touch_source=String(lastTouch.source).slice(0,160);
+    if(lastTouch?.campaign==='itbmo_instagram_itineraries'){
+      clean.campaign_key=lastTouch.campaign;
+      clean.medium=lastTouch.medium||'dm';
+      if(lastTouch.content) clean.content=lastTouch.content;
+    }
     analyticsDispatch(name,clean);
     void firstPartyDispatch(name,eventId,clean);
     return eventId;
