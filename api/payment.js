@@ -904,7 +904,7 @@ export default async function handler(req, res) {
         : req.body || {};
 
     const action = String(body.action || "").trim().toLowerCase();
-    if (action === "creator_summary" || action === "creator_create") {
+    if (["creator_summary", "creator_create", "creator_enroll"].includes(action)) {
       return await creatorPortal(req, res, { ...body, action });
     }
     if (["creator_payout_balances", "creator_payout_prepare", "creator_payout_submit", "creator_payout_reconcile", "creator_payout_sandbox_run"].includes(action)) {

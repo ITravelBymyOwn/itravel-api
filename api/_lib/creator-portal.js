@@ -1,5 +1,6 @@
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const codePattern = /^[A-Z0-9][A-Z0-9_-]{2,39}$/;
 const projectUrl = 'https://gpfoqnnznncqisunmrlc.supabase.co';
 
@@ -27,9 +28,22 @@ export async function creatorPortal(req, res, body) {
       method: 'POST',
       body: JSON.stringify({ p_profile: session.user_id, p_environment: 'sandbox' })
     });
-    return summary || isAdmin
-      ? res.status(200).json({ ok: true, summary, is_admin: isAdmin })
-      : res.status(403).json({ ok: false, code: 'CREATOR_ACCESS_REQUIRED' });
+    return res.status(200).json({ ok: true, summary, is_admin: isAdmin });
+  }
+
+  if (body.action === 'creator_enroll') {
+    const name = String(body.name || '').trim();
+    const payoutEmail = String(body.payout_email || '').trim().toLowerCase();
+    if (!name || name.length > 100 || !emailPattern.test(payoutEmail) || payoutEmail.length > 254) {
+      return res.status(400).json({ ok: false, code: 'INVALID_CREATOR_AGREEMENT' });
+    }
+    const code = await supabaseFetch('/rpc/itbmo_enroll_creator', {
+      method: 'POST',
+      body: JSON.stringify({ p_profile: session.user_id, p_name: name, p_payout_email: payoutEmail })
+    });
+    return code
+      ? res.status(200).json({ ok: true, code })
+      : res.status(409).json({ ok: false, code: 'CREATOR_ENROLLMENT_UNAVAILABLE' });
   }
 
   if (!isAdmin) {
@@ -42,7 +56,6 @@ export async function creatorPortal(req, res, body) {
   const payoutEmail = String(body.payout_email || '').trim().toLowerCase();
   const discount = Number(body.discount);
   const commission = Number(body.commission);
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!codePattern.test(code) || !name || name.length > 100 ||
       !emailPattern.test(email) || !emailPattern.test(payoutEmail) ||
       email.length > 254 || payoutEmail.length > 254 ||

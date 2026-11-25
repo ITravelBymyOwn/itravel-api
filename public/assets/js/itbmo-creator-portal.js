@@ -35,7 +35,14 @@
     el('title').firstChild.textContent = 'Creator ';
     el('title').querySelector('span').textContent = 'portal';
     el('home').href = '/english';
-    el('intro').textContent = 'Find your link, sales attributed to your code, and commission status.';
+    el('intro').textContent = 'Share a new way to plan trips. Your audience gets a discount and you earn a commission on every eligible purchase with your code.';
+    el('register').textContent = 'Create my ITBMO account';
+    el('register').href = '/planner.html?lang=en&mode=register';
+    el('enroll-title').textContent = 'Activate your creator code';
+    el('enroll-offer').textContent = 'Test offer: your audience gets 10% off the current price and you earn USD 0.30 per eligible purchase.';
+    el('enroll-name').textContent = 'Display name';
+    el('enroll-email').textContent = 'PayPal Sandbox email';
+    el('enroll').textContent = 'Generate my code';
     el('access-title').textContent = 'Access your dashboard';
     el('email-label').textContent = 'Email';
     el('password-label').textContent = 'Password';
@@ -100,13 +107,16 @@
   }
 
   function render(summary) {
+    el('dashboard').replaceChildren();
     el('dashboard').hidden = false;
     const balance = section(summary.name);
     const stats = document.createElement('div');
     stats.className = 'stats';
     for (const [label, value] of [
+      [t('Comisión acumulada', 'Total commission'), summary.total_commission_cents],
       [t('Pendiente', 'Pending'), summary.pending_cents],
-      [t('Disponible', 'Available'), summary.available_cents]
+      [t('Disponible', 'Available'), summary.available_cents],
+      [t('Pagado', 'Paid'), summary.paid_cents]
     ]) {
       const item = document.createElement('div');
       const amount = document.createElement('strong');
@@ -118,11 +128,11 @@
 
     table(section(t('Códigos', 'Codes')), [
       t('Código', 'Code'), t('Descuento', 'Discount'), t('Estado', 'Status'),
-      t('Visitas registradas', 'Tracked visits'), t('Ventas atribuidas', 'Attributed sales'), t('Enlace', 'Link')
+      t('Visitas registradas', 'Tracked visits'), t('Compras', 'Purchases'), t('Itinerarios generados', 'Generated itineraries'), t('Enlace', 'Link')
     ], summary.codes.map(code => [
       code.code, code.type === 'percentage' ? code.discount + '%' : usd(Number(code.discount) * 100),
       code.active ? t('Activo', 'Active') : t('Inactivo', 'Inactive'),
-      code.visits, code.sales, creatorLink(code.code)
+      code.visits, code.sales, code.generated, creatorLink(code.code)
     ]));
 
     table(section(t('Últimas 100 ventas con comisión', 'Latest 100 commissionable sales')), [
@@ -146,6 +156,7 @@
   }
 
   const errors = {
+    CREATOR_ENROLLMENT_UNAVAILABLE: t('Para generar tu código, necesitas una cuenta activa y verificada de ITBMO.', 'You need an active, verified ITBMO account to generate a code.'),
     REGISTERED_SESSION_REQUIRED: t('Inicia sesión con tu cuenta registrada de ITBMO.', 'Sign in with your registered ITBMO account.'),
     CREATOR_ACCESS_REQUIRED: t('Esta cuenta todavía no tiene acceso al programa.', 'This account does not have access to the program yet.'),
     CREATOR_PORTAL_UNAVAILABLE: t('El portal aún no está habilitado en este entorno.', 'The portal is not enabled in this environment yet.'),
@@ -163,6 +174,9 @@
         : errors[data.code] || unavailable;
       el('access').hidden = data.ok || data.code === 'CREATOR_ACCESS_REQUIRED';
       el('login-fields').disabled = data.code !== 'REGISTERED_SESSION_REQUIRED';
+      el('register').hidden = data.code !== 'REGISTERED_SESSION_REQUIRED';
+      el('enrollment').hidden = !data.ok || Boolean(data.summary) || Boolean(data.is_admin);
+      document.querySelector('.creator-photo').hidden = Boolean(data.summary);
       if (data.summary) render(data.summary);
       if (data.is_admin) el('admin').hidden = false;
     } catch {
@@ -206,6 +220,25 @@
     })) document.querySelector('[data-field="' + key + '"]').textContent = label;
     el('save').textContent = el('admin-title').textContent = 'Create creator';
   }
+
+  el('enroll-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    el('enroll').disabled = true;
+    try {
+      const result = await request('creator_enroll', Object.fromEntries(new FormData(form)));
+      if (result.ok) {
+        form.reset();
+        await init();
+      } else {
+        el('notice').textContent = errors[result.code] || unavailable;
+      }
+    } catch {
+      el('notice').textContent = unavailable;
+    } finally {
+      el('enroll').disabled = false;
+    }
+  });
 
   el('creator-form').addEventListener('submit', async event => {
     event.preventDefault();
