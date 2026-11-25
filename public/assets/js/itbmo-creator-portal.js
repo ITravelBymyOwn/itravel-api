@@ -35,6 +35,8 @@
     el('title').firstChild.textContent = 'Inspire their ';
     el('title').querySelector('span').textContent = 'next trip.';
     el('home').href = '/english';
+    el('home-button').href = '/english';
+    el('home-button').textContent = 'Home';
     el('intro').textContent = 'Your audience gets a discount on their itinerary. You earn a commission when someone buys with your code.';
     el('register').textContent = 'Create my ITBMO account';
     el('register').href = '/planner.html?lang=en&mode=register';

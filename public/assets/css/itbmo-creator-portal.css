@@ -1,5 +1,11 @@
 .creator-header.g-header__inner { justify-content: space-between; }
 .creator-header .g-lang { display: flex; }
+.creator-header__controls { display: flex; align-items: center; gap: clamp(.35rem, 1.5vw, .8rem); }
+.creator-header__controls .g-button { min-width: 0; }
+@media (max-width: 360px) {
+  .creator-header .g-brand { width: min(100px, 29vw); }
+  .creator-header__controls .g-button { padding-inline: .55rem; }
+}
 .creator-main {
   padding-block: clamp(1.5rem, 4vw, 3.75rem) 4rem;
   color: #10283f;
