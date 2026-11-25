@@ -142,6 +142,7 @@ async function claimInstagramBenefit() {
   try {
     const result = await promotionApi({ action: 'instagram_claim', session_token: session, token: instagramCampaign.token });
     if (session !== getStoredSessionToken()) return;
+    if (result.code === 'CLAIMED') trackITBMOEvent('instagram_benefit_claimed');
     instagramCampaign.expiresAt = result.expires_at || '';
     instagramCampaign.message = '';
     instagramCampaign.token = '';
@@ -163,10 +164,10 @@ async function claimInstagramBenefit() {
 /* ---------- Analytics bridge: Planner (Vercel) -> Webflow -> GTM/GA4 ----------
    Sends only allow-listed, non-personal operational data. */
 const ITBMO_ANALYTICS_EVENT_NAMES = new Set([
-  'planner_started','destinations_saved','checkout_opened','payment_approved',
+  'planner_open','planner_started','destinations_saved','checkout_opened','payment_approved',
   'payment_cancelled','payment_failed','itinerary_generated','export_pdf',
   'export_csv','export_receipt','info_chat_question','affiliate_click',
-  'new_planning_started','start_chat','promo_code_applied','promo_code_consumed'
+  'new_planning_started','start_chat','promo_code_applied','promo_code_consumed','instagram_benefit_claimed','instagram_benefit_redeemed'
 ]);
 
 function trackITBMOEvent(eventName, parameters={}){
@@ -178,7 +179,7 @@ function trackITBMOEvent(eventName, parameters={}){
       return;
     }
     const allowedKeys=new Set([
-      'language','city_count','days_total','payment_provider','currency',
+      'language','city_count','days_total','payment_provider','currency','value','transaction_id',
       'generation_mode','partner','partner_name','placement','destination',
       'queries_used','queries_remaining','file_type','error_stage',
       'promotion_code','promo_type','discount_amount'
@@ -15617,6 +15618,7 @@ async function confirmPlanningStart(){
         closePaymentPreparing();
         void refreshInstagramCampaignStatus({ force: true });
         const redeemed = result.code === 'REDEEMED';
+        if (redeemed) trackITBMOEvent('instagram_benefit_redeemed');
         await completePaymentGate(redeemed ? instagramCopy.success : '', { instagramBenefit: redeemed });
       } catch (error) {
         closePaymentPreparing();
@@ -15710,11 +15712,16 @@ async function renderPayPalButtonsIfAvailable(){
           order_id:data.orderID
         });
         if(!result?.paid) throw new Error('PAYPAL_CAPTURE_NOT_PAID');
-        trackITBMOEvent('payment_approved',{
-          payment_provider:'paypal',
-          currency:ITBMO_COMMERCE_CONFIG.currency,
-          city_count:savedDestinations.length
-        });
+        const paidAmount = Number(result.amount);
+        if (!result.already_captured && paidAmount > 0 && result.payment_id) {
+          trackITBMOEvent('payment_approved',{
+            payment_provider:'paypal',
+            value:paidAmount,
+            currency:result.currency,
+            transaction_id:result.payment_id,
+            city_count:savedDestinations.length
+          });
+        }
         await completePaymentGate();
       },
       onCancel:()=>{

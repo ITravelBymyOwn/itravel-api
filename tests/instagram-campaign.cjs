@@ -160,7 +160,7 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   await promotions({ method: 'GET', query }, redirect);
   const token = query.token;
   assert.equal(redirect.code, 302);
-  assert.equal(redirect.headers.Location, `/planner.html?lang=es#itbmo_campaign=${token}`);
+  assert.equal(redirect.headers.Location, `/planner.html?lang=es&utm_source=instagram&utm_medium=dm&utm_campaign=itbmo_instagram_itineraries&utm_content=free_es#itbmo_campaign=${token}`);
   assert.equal(redirect.headers['Cache-Control'], 'no-store');
   assert.equal(redirect.headers['Referrer-Policy'], 'no-referrer');
   const malformedRedirect = response();
@@ -253,14 +253,14 @@ test('Instagram delivery respects scope, language, valid mentions, deduplication
   assert.equal(messages.length, 7);
   assert.deepEqual(messages[6].recipient, { comment_id: '101' });
   assert.match(messages[6].message.text, /agotaron.*US\$2\.99.*63 %/);
-  assert.equal(messages[6].message.text.split('\n\n')[1], env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN + '/planner.html?lang=es');
+  assert.equal(messages[6].message.text.split('\n\n')[1], env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN + '/planner.html?lang=es&utm_source=instagram&utm_medium=dm&utm_campaign=itbmo_instagram_itineraries&utm_content=sold_out_es');
   assert.equal(participants.get('71').link_expires_at, undefined);
   assert.equal(participants.get('71').link_sent_at, undefined);
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '42', '20', '105')), 200);
   assert.equal(participants.get('20').link_expires_at, new Date(linkExpiry).toISOString());
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '72', '102')), 200);
   assert.match(messages[7].message.text, /claimed.*US\$2\.99.*63%/);
-  assert.equal(messages[7].message.text.split('\n\n')[1], env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN + '/planner.html?lang=en');
+  assert.equal(messages[7].message.text.split('\n\n')[1], env.ITBMO_INSTAGRAM_CAMPAIGN_ORIGIN + '/planner.html?lang=en&utm_source=instagram&utm_medium=dm&utm_campaign=itbmo_instagram_itineraries&utm_content=sold_out_en');
   pricing.base_price_cents = 799;
   assert.equal(await deliver(comment('PRUEBAITBMO @friend @other', '43', '73', '103')), 200);
   assert.match(messages[8].message.text, /US\$7\.99/);

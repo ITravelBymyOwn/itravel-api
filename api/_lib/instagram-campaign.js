@@ -110,6 +110,17 @@ function claimLink(config, participation, language, expiry) {
   return `${config.origin}/c/${language}/${token}`;
 }
 
+function campaignPlannerPath(language, offer) {
+  const query = new URLSearchParams({
+    lang: language,
+    utm_source: 'instagram',
+    utm_medium: 'dm',
+    utm_campaign: 'itbmo_instagram_itineraries',
+    utm_content: `${offer}_${language}`
+  });
+  return `/planner.html?${query}`;
+}
+
 export function instagramClaimRedirect(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -117,7 +128,7 @@ export function instagramClaimRedirect(req, res) {
   const { language, token } = req.query;
   if ((language !== 'es' && language !== 'en') ||
       typeof token !== 'string' || !claimToken.test(token)) return res.status(404).end();
-  res.setHeader('Location', `/planner.html?lang=${language}#itbmo_campaign=${token}`);
+  res.setHeader('Location', `${campaignPlannerPath(language, 'free')}#itbmo_campaign=${token}`);
   return res.status(302).end();
 }
 
@@ -184,7 +195,7 @@ async function isCampaignSoldOut(campaignId, scope) {
 function soldOutMessage(origin, language, { regular_price, base_price }) {
   const price = `US$${Number(base_price).toFixed(2)}`;
   const discount = Math.round(100 * (regular_price - base_price) / regular_price);
-  const link = `${origin}/planner.html?lang=${language}`;
+  const link = `${origin}${campaignPlannerPath(language, 'sold_out')}`;
   const es = language === 'es';
   const intro = es
     ? '¡Gracias por participar! ✈️ Ya se agotaron los itinerarios gratuitos de esta campaña.'
