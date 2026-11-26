@@ -1,0 +1,12 @@
+{
+  "name": "itbmo-accounting-assets",
+  "private": true,
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/spa": "1.0.0",
+    "pdfjs-dist": "5.4.624",
+    "tesseract.js": "6.0.1",
+    "tesseract.js-core": "6.1.2"
+  }
+}

@@ -61,11 +61,24 @@
       }
     },
     {
+      "src": "accounting-assets/package.json",
+      "use": "@vercel/static-build",
+      "config": { "distDir": "dist" }
+    },
+    {
       "src": "public/**/*",
       "use": "@vercel/static"
     }
   ],
   "routes": [
+    {
+      "src": "^/api/accounting$",
+      "dest": "/api/platform.js?endpoint=accounting"
+    },
+    {
+      "src": "^/contabilidad/?$",
+      "dest": "/public/accounting.html"
+    },
     {
       "src": "^/c/(es|en)/([a-zA-Z0-9_.-]+)$",
       "dest": "/api/promotions.js?endpoint=instagram-claim-redirect&language=$1&token=$2"
@@ -261,6 +274,9 @@
     {
       "src": "^/sitemap.xml$",
       "dest": "/public/sitemap-v297.xml"
+    },
+    {
+      "handle": "filesystem"
     },
     {
       "src": "/(.*)",

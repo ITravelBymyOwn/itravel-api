@@ -3,12 +3,14 @@ import feedback from './feedback.js';
 import travelIntelligence from './travel-intelligence.js';
 import itineraryChanges from './itinerary-changes.js';
 import supabaseTest from './supabase-test.js';
+import accounting from './_lib/accounting.js';
 
 const handlers=Object.freeze({
   'platform-config':platformConfig,
   feedback,
   'travel-intelligence':travelIntelligence,
   'itinerary-changes':itineraryChanges,
+  accounting,
   'supabase-test':supabaseTest
 });
 

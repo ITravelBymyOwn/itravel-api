@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Contabilidad privada · ITBMO</title>
+  <link rel="icon" href="/assets/img/favicon-32.png">
+  <link rel="stylesheet" href="/assets/css/itbmo-accounting.css">
+  <script type="module" src="/assets/js/itbmo-accounting.mjs"></script>
+</head>
+<body>
+  <main>
+    <header class="top">
+      <small>I TRAVEL BY MY OWN</small>
+      <h1>Contabilidad</h1>
+      <p>Archivo privado de comprobantes</p>
+    </header>
+    <p id="status" role="status">Verificando acceso…</p>
+    <section id="login" hidden>
+      <p>Inicia sesión con tu cuenta autorizada de ITBMO y vuelve a esta página.</p>
+      <a class="button" href="/planner.html?lang=es&amp;mode=access" target="_blank" rel="noopener">Abrir acceso de ITBMO</a>
+      <button id="retry" type="button">Verificar acceso</button>
+    </section>
+    <div id="ledger" hidden>
+      <section class="card">
+        <h2>Cargar comprobante</h2>
+        <p class="hint">XML, PDF, JPG, PNG o WebP. Hasta 3 MB por archivo.</p>
+        <div class="actions">
+          <label class="button pick">Elegir archivo<input id="file" type="file" accept=".xml,.pdf,.jpg,.jpeg,.png,.webp"></label>
+          <label class="button pick">Tomar foto<input id="camera" type="file" accept="image/*" capture="environment"></label>
+        </div>
+        <p id="intake-status" role="status"></p>
+        <form id="intake" hidden>
+          <h3>Revisar comprobante</h3>
+          <div class="fields">
+            <label>Fecha de emisión<input type="date" name="issue_date" min="1900-01-01" max="2199-12-31" required></label>
+            <label>Emisor<input name="issuer" maxlength="200" required></label>
+            <label>Identificación del emisor<input name="issuer_id" maxlength="50"></label>
+            <label>Tipo de movimiento<select name="direction" required><option value="">Seleccionar</option><option value="expense">Gasto</option><option value="income">Ingreso</option></select></label>
+            <label>Tipo de comprobante<select name="document_kind"><option value="invoice">Factura</option><option value="receipt">Tiquete o recibo</option><option value="credit_note">Nota de crédito</option><option value="debit_note">Nota de débito</option><option value="other">Otro</option></select></label>
+            <label>Origen fiscal<select name="jurisdiction"><option value="pending">Por revisar</option><option value="CR">Costa Rica</option><option value="foreign">Exterior</option></select></label>
+            <label>Número de comprobante<input name="document_number" maxlength="90"></label>
+            <label>Clave electrónica<input name="document_key" pattern="[0-9]{50}" maxlength="50" inputmode="numeric"></label>
+            <label>Moneda (ISO 4217)<input name="currency" pattern="[A-Za-z]{3}" maxlength="3" value="" placeholder="CRC, USD…" required></label>
+            <label>Subtotal<input name="subtotal" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?"></label>
+            <label>Impuesto del comprobante<input name="tax" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?"></label>
+            <label>Total<input name="total" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?" required></label>
+            <label>Tipo de cambio a CRC<input name="exchange_rate" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?"></label>
+            <label>Categoría<input name="category" list="categories" maxlength="100" placeholder="Por clasificar"></label>
+            <datalist id="categories"><option>Ventas de itinerarios</option><option>Infraestructura y software</option><option>Publicidad</option><option>Comisiones de pago</option><option>Servicios profesionales</option><option>Reembolsos</option></datalist>
+            <label>Crédito de IVA<select name="vat_treatment" data-fiscal></select></label>
+            <label>Deducibilidad para renta<select name="income_tax_treatment" data-fiscal></select></label>
+            <label class="full">Notas<textarea name="notes" maxlength="800" rows="2"></textarea></label>
+          </div>
+          <div class="actions"><button id="save" class="button" type="submit">Guardar comprobante</button><button id="clear" type="button">Descartar selección</button></div>
+        </form>
+      </section>
+      <section class="card" aria-labelledby="archive-title">
+        <h2 id="archive-title">Archivo por fecha de emisión</h2>
+        <form id="period" class="filters">
+          <label>Año<input name="year" type="number" min="1900" max="2199" required></label>
+          <label>Mes<select name="month"><option value="">Todos los meses</option></select></label>
+          <button type="submit">Consultar</button>
+          <button id="export" type="button">Exportar período a CSV</button>
+        </form>
+        <p id="archive-status" role="status"></p>
+        <div id="documents"></div>
+        <button id="more" type="button" hidden>Cargar más comprobantes</button>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
