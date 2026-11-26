@@ -26,6 +26,7 @@ const errorMessages = {
   INVALID_FILE_TYPE: 'Selecciona un XML, PDF, JPG, PNG o WebP.',
   INVALID_FILE: 'El archivo no coincide con su formato o está dañado.',
   INVALID_DOCUMENT: 'Revisa la fecha, los importes y la información del comprobante.',
+  INVALID_PAYPAL_CSV: 'Usa el CSV de actividad de PayPal en inglés con código de evento, hasta 1.000 filas y el orden de fechas correcto.',
   INVALID_BILLING_REVIEW: 'Revisa la clasificación y la evidencia. Si la venta ya fue revisada, vuelve a consultar.',
   ACCOUNTING_STORAGE_ERROR: 'No pudimos guardar o consultar el archivo. Si estabas cargándolo, conserva esta selección y vuelve a intentar.'
 };
@@ -98,6 +99,7 @@ async function selectFile(input, fromCamera) {
     for (const [name, value] of Object.entries(fields)) {
       if (value) intake.elements[name].value = value;
     }
+    updateCategoryOptions();
     intakeStatus.textContent = limited
       ? 'Se analizaron las primeras 8 páginas. Completa los datos y revisa el comprobante completo antes de guardar.'
       : 'Revisa los campos propuestos y completa los que falten antes de guardar.';
@@ -149,7 +151,7 @@ function renderFiscalProfile(profile) {
 function documentRow(row) {
   const card = makeNode('article', '', 'document');
   const heading = makeNode('div');
-  heading.append(makeNode('p', row.issuer), makeNode('p', [row.direction === 'income' ? 'Ingreso' : 'Gasto', row.category, row.currency + ' ' + row.total].join(' · '), 'metadata'));
+  heading.append(makeNode('p', row.issuer), makeNode('p', [movementLabels[row.direction], row.category, row.currency + ' ' + row.total].join(' · '), 'metadata'));
   const download = makeNode('button', 'Descargar');
   download.type = 'button';
   download.addEventListener('click', async () => {
@@ -282,6 +284,68 @@ intake.elements.direction.addEventListener('change', updateCategoryOptions);
 byId('retry').addEventListener('click', () => { void loadArchive(); });
 byId('more').addEventListener('click', () => { void loadArchive(true); });
 period.addEventListener('submit', event => { event.preventDefault(); void loadArchive(); });
+
+const movementLabels = { income: 'Ingreso', expense: 'Gasto', transfer: 'Transferencia propia', unclassified: 'Conciliación de PayPal' };
+const journalButton = byId('journal-load');
+const journalMore = byId('journal-more');
+const journalStatus = byId('journal-status');
+const journalContainer = byId('journal-entries');
+let journalPeriod;
+let journalOffset = 0;
+
+async function loadJournal(append = false) {
+  if (journalButton.disabled || (!append && !period.reportValidity())) return;
+  const filters = append ? journalPeriod : Object.fromEntries(new FormData(period));
+  const offset = append ? journalOffset : 0;
+  journalButton.disabled = journalMore.disabled = true;
+  journalStatus.textContent = 'Consultando movimientos…';
+  try {
+    const data = await request('journal', { ...filters, offset });
+    if (!append) journalContainer.replaceChildren();
+    for (const row of data.entries) {
+      const article = makeNode('article', '', 'document');
+      const detail = makeNode('div');
+      const review = {
+        matched: 'Conciliado por referencia', pending_review: 'Pendiente de revisión',
+        pending: 'Comisión pendiente', approved: 'Comisión aprobada', reversed: 'Comisión anulada'
+      }[row.review_status];
+      detail.append(makeNode('p', `${row.entry_date} · ${row.description} · ${row.currency} ${row.amount}`),
+        makeNode('p', [row.source === 'impact' ? 'Impact.com' : movementLabels[row.direction], row.category, row.reference, review].filter(Boolean).join(' · '), 'metadata'));
+      article.append(detail);
+      journalContainer.append(article);
+    }
+    journalPeriod = filters;
+    journalOffset = offset + data.entries.length;
+    journalMore.hidden = !data.more;
+    journalStatus.textContent = journalOffset ? `${journalOffset} movimientos en pantalla.` : 'Sin movimientos en el período.';
+  } catch (error) {
+    journalStatus.textContent = error.message;
+  } finally {
+    journalButton.disabled = journalMore.disabled = false;
+  }
+}
+
+journalButton.addEventListener('click', () => { void loadJournal(); });
+journalMore.addEventListener('click', () => { void loadJournal(true); });
+const paypalImport = byId('paypal-import');
+paypalImport.addEventListener('submit', async event => {
+  event.preventDefault();
+  const file = paypalImport.elements.file.files[0];
+  const button = paypalImport.querySelector('button[type="submit"]');
+  const status = byId('paypal-status');
+  if (file.size > 1024 * 1024) { status.textContent = 'El CSV supera 1 MiB.'; return; }
+  button.disabled = true;
+  status.textContent = 'Importando actividad…';
+  try {
+    const result = await request('paypal_import', { csv: await file.text(), date_format: paypalImport.elements.format.value });
+    status.textContent = `${result.imported} movimientos nuevos. ${result.duplicates} referencias repetidas.`;
+    await loadJournal();
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 let salesPeriod;
 let salesOffset = 0;

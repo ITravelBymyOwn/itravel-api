@@ -72,6 +72,10 @@
   ],
   "routes": [
     {
+      "src": "^/api/accounting/impact$",
+      "dest": "/api/platform.js?endpoint=accounting-impact"
+    },
+    {
       "src": "^/api/accounting$",
       "dest": "/api/platform.js?endpoint=accounting"
     },

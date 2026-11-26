@@ -51,3 +51,36 @@ test('document suggestions distinguish total from subtotal and leave ambiguous c
   assert.equal(ambiguous.currency, '');
   assert.equal(ambiguous.total, '14.00');
 });
+
+test('Impact postbacks read commission and state from the provider, using the same key for reversals', async () => {
+  const { receiveImpactAction } = await import('../api/_lib/accounting-impact.js');
+  const secret = 'a'.repeat(32);
+  const env = {
+    ITBMO_IMPACT_ACCOUNT_SID: 'publisher', ITBMO_IMPACT_AUTH_TOKEN: 'test-token',
+    ITBMO_IMPACT_POSTBACK_SECRET: secret
+  };
+  const req = { body: { action_id: '10.20.30', payout: '5000' }, headers: { 'x-itbmo-impact-secret': secret } };
+  const saved = [];
+  const rest = async (path, options) => {
+    assert.equal(path, '/rpc/itbmo_accounting_save_impact_action');
+    saved.push(JSON.parse(options.body).p_action);
+  };
+  const fetcher = state => async (url, options) => {
+    assert.equal(url, 'https://api.impact.com/Mediapartners/publisher/Actions/10.20.30');
+    assert.equal(options.redirect, 'error');
+    return Response.json({
+      Id: '10.20.30', CampaignId: '10', CampaignName: 'Demo', Amount: '125.50',
+      CurrentPayout: '8.759', Payout: '9.000', Currency: 'USD',
+      EventDate: '2026-11-01T03:15:00Z', State: state
+    });
+  };
+  const denied = await receiveImpactAction({ ...req, headers: {} }, rest, env, () => assert.fail('unauthorized lookup'));
+  assert.equal(denied.status, 401);
+  assert.equal((await receiveImpactAction(req, rest, env, fetcher('APPROVED'))).status, 200);
+  assert.equal((await receiveImpactAction(req, rest, env, fetcher('REVERSED'))).status, 200);
+  assert.equal(saved[0].event_date, '2026-10-31');
+  assert.equal(saved[0].amount, '8.759');
+  assert.equal(saved[0].source_state, 'approved');
+  assert.equal(saved[1].action_id, saved[0].action_id);
+  assert.equal(saved[1].source_state, 'reversed');
+});

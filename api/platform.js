@@ -11,6 +11,7 @@ const handlers=Object.freeze({
   'travel-intelligence':travelIntelligence,
   'itinerary-changes':itineraryChanges,
   accounting,
+  'accounting-impact': (req, res) => accounting(req, res, true),
   'supabase-test':supabaseTest
 });
 

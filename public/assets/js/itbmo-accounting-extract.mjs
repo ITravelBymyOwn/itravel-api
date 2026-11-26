@@ -65,19 +65,24 @@ function labeledAmount(text, label) {
 }
 
 export function suggestFromText(text) {
-  const dateLabel = text.match(/(?:fecha\s+(?:de\s+)?emisi[oó]n|fecha\s+factura|invoice date|issue date|date issued)\s*[:=]?\s*([^\n]+)/i);
+  const dateLabel = text.match(/(?:fecha\s+(?:de\s+)?(?:emisi[oó]n|pago)|fecha\s+factura|invoice date|issue date|date issued|payout date|payment date)\s*[:=]?\s*([^\n]+)/i);
+  const transfer = /retiro (?:bancario|a (?:tu |la )?cuenta bancaria)|withdrawal to (?:your |a )?bank|transfer to (?:your |a )?bank account/i.test(text);
+  const affiliate = /(?:affiliate commission|affiliate payout|comisi[oó]n(?:es)? de afiliados|pago a afiliados)/i.test(text);
   const currencies = new Set(text.match(/\b(?:CRC|USD|EUR|CAD|GBP|MXN|JPY|AUD|PAB|CHF)\b/gi)?.map(code => code.toUpperCase()));
   if (text.includes('₡')) currencies.add('CRC');
   if (text.includes('€')) currencies.add('EUR');
   return {
     issue_date: dateLabel ? dateFromText(dateLabel[1]) : '',
-    issuer: text.match(/(?:^|\n)\s*(?:emisor|proveedor|supplier|vendor)\s*:\s*([^\n]+)/i)?.[1]?.trim() || '',
-    document_number: text.match(/(?:consecutivo|invoice\s*(?:number|no\.?|#)|factura\s*(?:n[uú]mero|n[°º]|#))\s*[:=]?\s*([A-Z0-9][A-Z0-9/-]*)/i)?.[1] || '',
+    issuer: text.match(/(?:^|\n)\s*(?:emisor|proveedor|supplier|vendor|pagador|payer)\s*:\s*([^\n]+)/i)?.[1]?.trim() || '',
+    direction: transfer ? 'transfer' : affiliate ? 'income' : '',
+    category: transfer ? 'Retiro de PayPal al banco' : affiliate ? 'Comisiones de afiliados' : '',
+    document_number: text.match(/(?:consecutivo|invoice\s*(?:number|no\.?|#)|factura\s*(?:n[uú]mero|n[°º]|#)|transaction id|id de transacci[oó]n)\s*[:=]?\s*([A-Z0-9][A-Z0-9/-]*)/i)?.[1] || '',
     document_key: text.match(/\b\d{50}\b/)?.[0] || '',
     currency: currencies.size === 1 ? [...currencies][0] : '',
     subtotal: labeledAmount(text, 'sub[ -]?total|total venta neta'),
     tax: labeledAmount(text, 'iva|vat|impuesto total|total impuesto|sales tax|tax'),
-    total: labeledAmount(text, 'total(?: a pagar| comprobante| factura| pagado| due| amount)?|grand total|amount due')
+    total: labeledAmount(text, 'total(?: a pagar| comprobante| factura| pagado| due| amount)?|grand total|amount due|gross amount|monto bruto') ||
+      (affiliate || transfer ? labeledAmount(text, 'payout amount|amount paid|monto pagado|importe del pago') : '')
   };
 }
 

@@ -52,7 +52,7 @@
             <label>Fecha de emisión<input type="date" name="issue_date" min="1900-01-01" max="2199-12-31" required></label>
             <label>Emisor<input name="issuer" maxlength="200" required></label>
             <label>Identificación del emisor<input name="issuer_id" maxlength="50"></label>
-            <label>Tipo de movimiento<select name="direction" required><option value="">Seleccionar</option><option value="expense">Gasto</option><option value="income">Ingreso</option></select></label>
+            <label>Tipo de movimiento<select name="direction" required><option value="">Seleccionar</option><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="transfer">Transferencia propia</option></select></label>
             <label>Tipo de comprobante<select name="document_kind"><option value="invoice">Factura</option><option value="receipt">Tiquete o recibo</option><option value="credit_note">Nota de crédito</option><option value="debit_note">Nota de débito</option><option value="other">Otro</option></select></label>
             <label>Origen fiscal<select name="jurisdiction"><option value="pending">Por revisar</option><option value="CR">Costa Rica</option><option value="foreign">Exterior</option></select></label>
             <label>Número de comprobante<input name="document_number" maxlength="90"></label>
@@ -82,6 +82,20 @@
         <p id="archive-status" role="status"></p>
         <div id="documents"></div>
         <button id="more" type="button" hidden>Cargar más comprobantes</button>
+      </section>
+      <section class="card" aria-labelledby="journal-title">
+        <h2 id="journal-title">Libro de movimientos</h2>
+        <p class="hint">Usa los filtros de año y mes para consultar ventas, gastos y comisiones por programa. Para cotejar cobros en PayPal, importa el CSV Activity Download en inglés con código de evento.</p>
+        <form id="paypal-import" class="filters">
+          <label>Archivo PayPal<input name="file" type="file" accept=".csv,text/csv" required></label>
+          <label>Fechas del CSV<select name="format" required><option value="">Selecciona el orden</option><option value="MDY">Mes/día/año o ISO</option><option value="DMY">Día/mes/año o ISO</option></select></label>
+          <button type="submit">Importar actividad</button>
+        </form>
+        <p id="paypal-status" role="status"></p>
+        <button id="journal-load" type="button">Consultar movimientos</button>
+        <p id="journal-status" role="status"></p>
+        <div id="journal-entries"></div>
+        <button id="journal-more" type="button" hidden>Cargar más movimientos</button>
       </section>
       <section class="card" aria-labelledby="billing-title">
         <h2 id="billing-title">Ventas y comprobantes</h2>

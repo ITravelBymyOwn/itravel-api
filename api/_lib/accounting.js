@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { resolveSession } from './itbmo-foundation.js';
 import { accountingFiscalProfile } from './accounting-fiscal.js';
+import { parsePayPalActivity } from './accounting-paypal.js';
+import { receiveImpactAction } from './accounting-impact.js';
 
 const QA_PROJECT = 'https://gpfoqnnznncqisunmrlc.supabase.co';
 const BUCKET = 'itbmo-accounting';
@@ -88,7 +90,7 @@ export function parseAccountingUpload(body) {
   const key = field(form.document_key, 51);
   const rate = money(form.exchange_rate);
   requireValue(validDate(date) && issuer && /^[A-Z]{3}$/.test(currency) && (!key || /^\d{50}$/.test(key)));
-  requireValue(['expense', 'income'].includes(form.direction) &&
+  requireValue(['expense', 'income', 'transfer'].includes(form.direction) &&
     ['invoice', 'receipt', 'credit_note', 'debit_note', 'other'].includes(form.document_kind) &&
     ['CR', 'foreign', 'pending'].includes(form.jurisdiction) &&
     FISCAL.includes(form.vat_treatment) && FISCAL.includes(form.income_tax_treatment) &&
@@ -174,12 +176,16 @@ async function downloadDocument(body) {
   return { url: url.href };
 }
 
-export default async function accounting(req, res) {
+export default async function accounting(req, res, impactPostback = false) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   if (!accountingEnabled()) return res.status(404).json({ ok: false, code: 'ACCOUNTING_UNAVAILABLE' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, code: 'METHOD_NOT_ALLOWED' });
   try {
+    if (impactPostback) {
+      const { status, code } = await receiveImpactAction(req, rest);
+      return res.status(status).json(code ? { ok: false, code } : { ok: true });
+    }
     const rawToken = String(req.headers?.authorization || '').match(/^Bearer ([0-9a-f]{64})$/i)?.[1];
     const session = await resolveSession(rawToken);
     if (session?.auth_level !== 'supabase_auth') throw new AccountingError(401, 'ACCOUNTING_SIGN_IN');
@@ -194,6 +200,25 @@ export default async function accounting(req, res) {
         break;
       }
       case 'upload': result = await saveDocument(session.user_id, body); break;
+      case 'journal': {
+        const query = listPeriod(body, 'entry_date');
+        query.set('select', 'entry_id,entry_date,source,description,reference,currency,amount::text,direction,category,review_status');
+        query.set('order', 'entry_date.desc,entry_id.asc');
+        const rows = await rest('/accounting_journal?' + query);
+        result = { entries: rows.slice(0, 100), more: rows.length > 100 };
+        break;
+      }
+      case 'paypal_import': {
+        let entries;
+        try { entries = parsePayPalActivity(body.csv, body.date_format); }
+        catch { throw new AccountingError(400, 'INVALID_PAYPAL_CSV'); }
+        const stored = entries.length ? await rest('/accounting_paypal_movements?on_conflict=reference&select=reference', {
+          method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+          body: JSON.stringify(entries.map(entry => ({ ...entry, imported_by: session.user_id })))
+        }) : [];
+        result = { imported: stored.length, duplicates: entries.length - stored.length };
+        break;
+      }
       case 'billing_sales': {
         const rows = await listBillingSales(body);
         result = { sales: rows.slice(0, 100), more: rows.length > 100 };
