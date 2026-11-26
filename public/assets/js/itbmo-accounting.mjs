@@ -26,6 +26,7 @@ const errorMessages = {
   INVALID_FILE_TYPE: 'Selecciona un XML, PDF, JPG, PNG o WebP.',
   INVALID_FILE: 'El archivo no coincide con su formato o está dañado.',
   INVALID_DOCUMENT: 'Revisa la fecha, los importes y la información del comprobante.',
+  INVALID_BILLING_REVIEW: 'Revisa la clasificación y la evidencia. Si la venta ya fue revisada, vuelve a consultar.',
   ACCOUNTING_STORAGE_ERROR: 'No pudimos guardar o consultar el archivo. Si estabas cargándolo, conserva esta selección y vuelve a intentar.'
 };
 let file;
@@ -132,7 +133,8 @@ function updateCategoryOptions() {
 function renderFiscalProfile(profile) {
   if (!profile) return;
   fiscalProfile = profile;
-  for (const [id, info] of [['fiscal-activity', profile.activity], ['fiscal-cabys', profile.itinerary_cabys]]) {
+  for (const [id, info] of [['fiscal-activity', profile.activity], ['fiscal-cabys', profile.itinerary_cabys], ['fiscal-affiliate', profile.affiliate_activity]]) {
+    if (!info) continue;
     const link = makeNode('a', `${info.code} · ${info.label}`);
     link.href = info.source_url;
     link.target = '_blank';
@@ -280,6 +282,87 @@ intake.elements.direction.addEventListener('change', updateCategoryOptions);
 byId('retry').addEventListener('click', () => { void loadArchive(); });
 byId('more').addEventListener('click', () => { void loadArchive(true); });
 period.addEventListener('submit', event => { event.preventDefault(); void loadArchive(); });
+
+let salesPeriod;
+let salesOffset = 0;
+const salesStatus = byId('billing-status');
+const salesMore = byId('billing-more');
+const salesLoad = byId('billing-load');
+const salesContainer = byId('billing-sales');
+const saleDate = new Intl.DateTimeFormat('es-CR', { dateStyle: 'medium', timeZone: 'America/Costa_Rica' });
+const saleStates = { pending_review: 'Pendiente de revisión fiscal', ready: 'Revisión fiscal completada',
+  submitted: 'En validación', accepted: 'Aceptado por Hacienda', rejected: 'Rechazado por Hacienda' };
+
+function billingReview(row) {
+  const form = makeNode('form', '', 'fields');
+  const typeLabel = makeNode('label', 'Tratamiento y comprobante');
+  const type = makeNode('select');
+  type.required = true;
+  type.append(new Option('Seleccionar', ''), new Option('Costa Rica · Factura', '01'),
+    new Option('Costa Rica · Tiquete', '04'), new Option('Exportación · Factura de exportación', '09'));
+  typeLabel.append(type);
+  const evidenceLabel = makeNode('label', 'Evidencia del lugar de uso');
+  const evidence = makeNode('input');
+  evidence.minLength = 5;
+  evidence.maxLength = 500;
+  evidence.required = true;
+  evidenceLabel.append(evidence);
+  const submit = makeNode('button', 'Guardar revisión');
+  form.append(typeLabel, evidenceLabel, submit);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    submit.disabled = true;
+    try {
+      await request('billing_review', { id: row.payment_id, document_type: type.value,
+        treatment: type.value === '09' ? 'export' : 'domestic', evidence: evidence.value });
+      await loadBillingSales();
+    } catch (error) {
+      salesStatus.textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  const details = makeNode('details');
+  details.append(makeNode('summary', 'Revisar venta'), form);
+  return details;
+}
+
+async function loadBillingSales(append = false) {
+  if (!append && !period.reportValidity()) return;
+  salesLoad.disabled = salesMore.disabled = true;
+  const filters = append ? salesPeriod : Object.fromEntries(new FormData(period));
+  const offset = append ? salesOffset : 0;
+  salesStatus.textContent = 'Buscando ventas…';
+  try {
+    const data = await request('billing_sales', { ...filters, offset });
+    const items = data.sales.map(row => {
+      const entry = makeNode('article', '', 'document');
+      const detail = makeNode('div');
+      detail.append(makeNode('p', `${saleDate.format(new Date(row.paid_at))} · ${row.currency} ${row.gross_amount}`),
+        makeNode('p', `PayPal · ${row.capture_reference} · ${saleStates[row.fiscal_status]}`, 'metadata'));
+      entry.append(detail);
+      if (row.fiscal_status === 'pending_review') entry.append(billingReview(row));
+      if (row.vat_amount != null) {
+        detail.append(makeNode('p', `Base ${row.net_amount} · IVA ${row.vat_amount} ${row.currency}`, 'metadata'));
+      }
+      return entry;
+    });
+    if (!append) salesContainer.replaceChildren();
+    salesContainer.append(...items);
+    salesPeriod = filters;
+    salesOffset = offset + data.sales.length;
+    salesMore.hidden = !data.more;
+    const label = filters.month ? `${filters.year}/${String(filters.month).padStart(2, '0')}` : filters.year;
+    salesStatus.textContent = salesOffset ? `${label} · ${salesOffset} ventas en pantalla.` : `${label} · Sin ventas de prueba.`;
+  } catch (error) {
+    salesStatus.textContent = error.message;
+  } finally {
+    salesLoad.disabled = salesMore.disabled = false;
+  }
+}
+
+salesLoad.addEventListener('click', () => { void loadBillingSales(); });
+salesMore.addEventListener('click', () => { void loadBillingSales(true); });
 
 intake.addEventListener('submit', async event => {
   event.preventDefault();

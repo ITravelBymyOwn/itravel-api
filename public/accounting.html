@@ -31,6 +31,8 @@
           <dd id="fiscal-activity"></dd>
           <dt>Descripción de ITBMO</dt>
           <dd id="fiscal-description"></dd>
+          <dt>Actividad secundaria para publicidad y afiliados</dt>
+          <dd id="fiscal-affiliate"></dd>
           <dt>CABYS candidato para itinerarios</dt>
           <dd id="fiscal-cabys"></dd>
         </dl>
@@ -80,6 +82,14 @@
         <p id="archive-status" role="status"></p>
         <div id="documents"></div>
         <button id="more" type="button" hidden>Cargar más comprobantes</button>
+      </section>
+      <section class="card" aria-labelledby="billing-title">
+        <h2 id="billing-title">Ventas y comprobantes</h2>
+        <p class="hint">Capturas de PayPal Sandbox para el período consultado.</p>
+        <button id="billing-load" type="button">Consultar ventas</button>
+        <p id="billing-status" role="status"></p>
+        <div id="billing-sales"></div>
+        <button id="billing-more" type="button" hidden>Cargar más ventas</button>
       </section>
     </div>
   </main>

@@ -10,6 +10,11 @@ export const accountingFiscalProfile = {
     source_url: 'https://www.hacienda.go.cr/ClasificacionActividadesEconomicas.html',
     business_description: 'Servicio de acceso a una aplicación web propia para generar itinerarios personalizados, con cobro por generación.'
   },
+  affiliate_activity: {
+    code: '7310.0',
+    label: 'Publicidad',
+    source_url: 'https://www.hacienda.go.cr/ClasificacionActividadesEconomicas.html'
+  },
   itinerary_cabys: {
     code: '8439200000000',
     label: 'Servicios de programas informáticos (software) en línea (on-line), n.c.p.',

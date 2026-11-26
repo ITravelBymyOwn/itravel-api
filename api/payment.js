@@ -71,6 +71,13 @@ const PAYPAL_API_BASE =
 const TILOPAY_ENABLED =
   String(process.env.TILOPAY_ENABLED || "false").toLowerCase() === "true";
 
+const accountingPreview = process.env.VERCEL_ENV === "preview" &&
+  process.env.VERCEL_GIT_COMMIT_REF === "preview/accounting";
+const accountingSandboxCheckout = accountingPreview && PAYPAL_ENV === "sandbox" &&
+  SUPABASE_URL?.replace(/\/$/, "") === "https://gpfoqnnznncqisunmrlc.supabase.co";
+const paypalCheckoutAllowed = !sharedCampaignPreview && (!accountingPreview || accountingSandboxCheckout);
+const tilopayCheckoutAllowed = !sharedCampaignPreview && !accountingPreview;
+
 function jsonHeaders(extra = {}) {
   return {
     apikey: SUPABASE_SECRET_KEY,
@@ -440,10 +447,10 @@ async function handleConfig(res) {
       price: pricing.base_price
     },
     configurable_promotions: true,
-    paypal_enabled: !sharedCampaignPreview && Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET),
-    paypal_client_id: sharedCampaignPreview ? null : PAYPAL_CLIENT_ID || null,
+    paypal_enabled: paypalCheckoutAllowed && Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET),
+    paypal_client_id: paypalCheckoutAllowed ? PAYPAL_CLIENT_ID || null : null,
     paypal_environment: PAYPAL_ENV,
-    tilopay_enabled: !sharedCampaignPreview && TILOPAY_ENABLED
+    tilopay_enabled: tilopayCheckoutAllowed && TILOPAY_ENABLED
   });
 }
 
@@ -902,7 +909,8 @@ export default async function handler(req, res) {
         : req.body || {};
 
     const action = String(body.action || "").trim().toLowerCase();
-    if (sharedCampaignPreview && ["paypal_create_order", "paypal_capture_order", "tilopay_create_checkout"].includes(action)) {
+    if ((!paypalCheckoutAllowed && ["paypal_create_order", "paypal_capture_order"].includes(action)) ||
+        (!tilopayCheckoutAllowed && action === "tilopay_create_checkout")) {
       return res.status(403).json({ ok: false, code: "PREVIEW_CHECKOUT_DISABLED" });
     }
 

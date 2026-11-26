@@ -129,7 +129,7 @@ async function saveDocument(profileId, body) {
 
 const SELECT_FIELDS = 'id,issue_date,direction,document_kind,jurisdiction,issuer,issuer_id,document_number,document_key,currency,subtotal::text,tax::text,total::text,exchange_rate::text,category,vat_treatment,income_tax_treatment,extraction_method,notes,original_name,byte_size,created_at';
 
-function listDocuments(body) {
+function listPeriod(body, dateField, timeSuffix = '') {
   const year = Number(body.year);
   const month = Number(body.month || 0);
   const offset = Number(body.offset || 0);
@@ -138,10 +138,25 @@ function listDocuments(body) {
     Number.isSafeInteger(offset) && offset >= 0, 'INVALID_PERIOD');
   const start = `${year}-${String(month || 1).padStart(2, '0')}-01`;
   const end = new Date(Date.UTC(year, month || 12, 1)).toISOString().slice(0, 10);
-  const query = new URLSearchParams({ select: SELECT_FIELDS, ready: 'eq.true', order: 'issue_date.desc,id.asc', limit: '101', offset: String(offset) });
-  query.append('issue_date', 'gte.' + start);
-  query.append('issue_date', 'lt.' + end);
+  const query = new URLSearchParams({ limit: '101', offset: String(offset) });
+  query.append(dateField, 'gte.' + start + timeSuffix);
+  query.append(dateField, 'lt.' + end + timeSuffix);
+  return query;
+}
+
+function listDocuments(body) {
+  const query = listPeriod(body, 'issue_date');
+  query.set('select', SELECT_FIELDS);
+  query.set('ready', 'eq.true');
+  query.set('order', 'issue_date.desc,id.asc');
   return rest('/accounting_documents?' + query);
+}
+
+function listBillingSales(body) {
+  const query = listPeriod(body, 'paid_at', 'T00:00:00-06:00');
+  query.set('select', 'payment_id,provider,capture_reference,paid_at,gross_amount::text,net_amount::text,vat_amount::text,currency,fiscal_status,delivery_status,document_type');
+  query.set('order', 'paid_at.desc,payment_id.asc');
+  return rest('/accounting_billing_sales?' + query);
 }
 
 async function downloadDocument(body) {
@@ -179,6 +194,26 @@ export default async function accounting(req, res) {
         break;
       }
       case 'upload': result = await saveDocument(session.user_id, body); break;
+      case 'billing_sales': {
+        const rows = await listBillingSales(body);
+        result = { sales: rows.slice(0, 100), more: rows.length > 100 };
+        break;
+      }
+      case 'billing_review': {
+        requireValue(typeof body.id === 'string' && UUID.test(body.id) && typeof body.evidence === 'string' &&
+          body.evidence.trim().length >= 5 && body.evidence.trim().length <= 500 &&
+          ['domestic', 'export'].includes(body.treatment) && ['01', '04', '09'].includes(body.document_type),
+        'INVALID_BILLING_REVIEW');
+        const reviewed = await rest('/rpc/itbmo_review_billing_sale', {
+          method: 'POST', body: JSON.stringify({
+            p_payment: body.id, p_treatment: body.treatment, p_type: body.document_type,
+            p_evidence: body.evidence.trim(), p_profile: session.user_id
+          })
+        });
+        if (!reviewed) throw new AccountingError(409, 'INVALID_BILLING_REVIEW');
+        result = {};
+        break;
+      }
       case 'download': result = await downloadDocument(body); break;
       default: throw new AccountingError(400, 'UNKNOWN_ACTION');
     }
