@@ -24,6 +24,18 @@
       <button id="retry" type="button">Verificar acceso</button>
     </section>
     <div id="ledger" hidden>
+      <details id="fiscal-profile" class="card" hidden>
+        <summary>Perfil fiscal · Borrador</summary>
+        <dl class="fiscal-details">
+          <dt>Actividad propuesta en TRIBU-CR</dt>
+          <dd id="fiscal-activity"></dd>
+          <dt>Descripción de ITBMO</dt>
+          <dd id="fiscal-description"></dd>
+          <dt>CABYS candidato para itinerarios</dt>
+          <dd id="fiscal-cabys"></dd>
+        </dl>
+        <p class="hint">Pendiente de confirmar en OVi. La clasificación de comisiones de afiliados y el tratamiento de IVA se revisan por separado.</p>
+      </details>
       <section class="card">
         <h2>Cargar comprobante</h2>
         <p class="hint">XML, PDF, JPG, PNG o WebP. Hasta 3 MB por archivo.</p>
@@ -49,7 +61,7 @@
             <label>Total<input name="total" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?" required></label>
             <label>Tipo de cambio a CRC<input name="exchange_rate" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?"></label>
             <label>Categoría<input name="category" list="categories" maxlength="100" placeholder="Por clasificar"></label>
-            <datalist id="categories"><option>Ventas de itinerarios</option><option>Infraestructura y software</option><option>Publicidad</option><option>Comisiones de pago</option><option>Servicios profesionales</option><option>Reembolsos</option></datalist>
+            <datalist id="categories"></datalist>
             <label>Crédito de IVA<select name="vat_treatment" data-fiscal></select></label>
             <label>Deducibilidad para renta<select name="income_tax_treatment" data-fiscal></select></label>
             <label class="full">Notas<textarea name="notes" maxlength="800" rows="2"></textarea></label>

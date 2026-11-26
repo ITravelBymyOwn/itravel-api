@@ -34,6 +34,7 @@ let selectionVersion = 0;
 let periodVersion = 0;
 let rows = [];
 let activePeriod;
+let fiscalProfile;
 
 for (const select of document.querySelectorAll('[data-fiscal]')) {
   for (const [value, label] of Object.entries(fiscalLabels)) select.append(new Option(label, value));
@@ -67,6 +68,7 @@ function resetSelection() {
   file = undefined;
   extractionMethod = 'manual';
   intake.reset();
+  updateCategoryOptions();
   intake.hidden = true;
   intakeStatus.textContent = '';
   byId('file').value = byId('camera').value = '';
@@ -120,6 +122,26 @@ function makeNode(tag, label, className) {
   if (label) element.textContent = label;
   if (className) element.className = className;
   return element;
+}
+
+function updateCategoryOptions() {
+  const choices = fiscalProfile?.categories[intake.elements.direction.value] || [];
+  byId('categories').replaceChildren(...choices.map(category => new Option(category)));
+}
+
+function renderFiscalProfile(profile) {
+  if (!profile) return;
+  fiscalProfile = profile;
+  for (const [id, info] of [['fiscal-activity', profile.activity], ['fiscal-cabys', profile.itinerary_cabys]]) {
+    const link = makeNode('a', `${info.code} · ${info.label}`);
+    link.href = info.source_url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    byId(id).replaceChildren(link);
+  }
+  byId('fiscal-description').textContent = profile.activity.business_description;
+  byId('fiscal-profile').hidden = false;
+  updateCategoryOptions();
 }
 
 function documentRow(row) {
@@ -187,6 +209,7 @@ async function loadArchive(append = false) {
     const data = await request('list', { ...activePeriod, offset });
     if (version !== periodVersion) return;
     rows = append ? [...rows, ...data.documents] : data.documents;
+    renderFiscalProfile(data.fiscal_profile);
     renderArchive();
     byId('ledger').hidden = false;
     byId('login').hidden = true;
@@ -253,6 +276,7 @@ for (const id of ['file', 'camera']) {
   byId(id).addEventListener('change', event => { void selectFile(event.currentTarget, id === 'camera'); });
 }
 byId('clear').addEventListener('click', resetSelection);
+intake.elements.direction.addEventListener('change', updateCategoryOptions);
 byId('retry').addEventListener('click', () => { void loadArchive(); });
 byId('more').addEventListener('click', () => { void loadArchive(true); });
 period.addEventListener('submit', event => { event.preventDefault(); void loadArchive(); });

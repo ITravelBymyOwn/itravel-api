@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { resolveSession } from './itbmo-foundation.js';
+import { accountingFiscalProfile } from './accounting-fiscal.js';
 
 const QA_PROJECT = 'https://gpfoqnnznncqisunmrlc.supabase.co';
 const BUCKET = 'itbmo-accounting';
@@ -174,7 +175,7 @@ export default async function accounting(req, res) {
     switch (body.action) {
       case 'list': {
         const rows = await listDocuments(body);
-        result = { documents: rows.slice(0, 100), more: rows.length > 100 };
+        result = { documents: rows.slice(0, 100), more: rows.length > 100, fiscal_profile: accountingFiscalProfile };
         break;
       }
       case 'upload': result = await saveDocument(session.user_id, body); break;

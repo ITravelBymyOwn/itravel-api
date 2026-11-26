@@ -15,6 +15,16 @@ La API requiere la rama `preview/accounting`, el proyecto Supabase QA y `ITBMO_A
 
 Las dependencias de extracción se construyen con `npm ci --prefix accounting-assets && npm run --prefix accounting-assets build`. El constructor estático de Vercel publica esos recursos en `/accounting-assets/`.
 
+## Perfil fiscal propuesto
+
+ITBMO cobra por generar un itinerario con su aplicación web. Con ese modelo, la candidata principal en TRIBU-CR es **6311.0 — Procesamiento de datos, hospedaje y actividades conexas**. La clase CIIU 6311 incluye la provisión de servicios de aplicaciones y el procesamiento de datos facilitados por clientes. [Clasificador de Hacienda](https://www.hacienda.go.cr/ClasificacionActividadesEconomicas.html) · [Detalle de la CIIU Rev. 4](https://unstats.un.org/unsd/classifications/Econ/Detail/EN/27/6311)
+
+La clase **7990** merece validación si Hacienda considera que el servicio contratado consiste principalmente en entregar información turística al viajero. Su alcance incluye información al visitante, además de reservas. Cuando el cliente compra el uso de la aplicación para generar el itinerario, la clase 6311 es la hipótesis de trabajo. [Alcance de la clase 7990](https://unstats.un.org/unsd/classifications/Econ/Structure/Detail/EN/27/7990)
+
+El CABYS candidato para la línea del itinerario es **8439200000000 — Servicios de programas informáticos en línea, n.c.p.**. Si se confirma que lo facturado es información al visitante, revisar **8556200000000**. Las comisiones de afiliados se registran por separado y su clasificación se confirma según el servicio previsto en cada contrato. [Catálogo CABYS del BCCR](https://www.bccr.fi.cr/cr/es/noticias/listado-de-noticias/2025/actualizacion-del-catalogo-de-bienes-y-servicios-cabys-2025.html)
+
+El perfil interno queda en estado borrador hasta contrastar la actividad y el CABYS con OVi. Para valorar una exportación de servicios se documentará dónde se utiliza el servicio. La moneda, el medio de pago y el destino del itinerario no sustituyen esa evidencia. [Artículo 8 de la Ley 6826](https://www.pgrweb.go.cr/DOCS/NORMAS/1/VIGENTE/L/1980-1989/1980-1984/1982/7F0E/16282E.HTML)
+
 ## Siguiente incremento
 
 1. **Libro y correcciones.** Asociar XML, PDF y confirmación de Hacienda a una misma ficha. Permitir corregir metadatos con historial, conservar el documento original y registrar notas de crédito y débito con sus referencias.
