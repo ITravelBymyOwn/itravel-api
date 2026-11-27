@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Contabilidad privada · ITBMO</title>
+  <link rel="icon" href="/assets/img/favicon-32.png">
+  <meta name="theme-color" content="#087ff2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap">
+  <link rel="stylesheet" href="/assets/css/itbmo-growth.css?v=297.7">
+  <link rel="stylesheet" href="/assets/css/itbmo-accounting.css?v=2">
+  <script type="module" src="/assets/js/itbmo-accounting.mjs?v=4"></script>
+</head>
+<body>
+  <a class="g-skip" href="#contenido">Ir al contenido</a>
+  <header class="g-header">
+    <div class="g-header__inner accounting-header">
+      <a class="g-brand" href="/"><img src="/assets/img/itbmo-logo-premium.webp" alt="I Travel By My Own" width="154" height="59"></a>
+      <a class="g-button g-button--ghost g-button--compact" href="/">Inicio</a>
+    </div>
+  </header>
+  <main class="g-shell accounting-main" id="contenido">
+    <header class="top">
+      <h1>Contabilidad</h1>
+      <p>Comprobantes, movimientos y comisiones de ITBMO.</p>
+    </header>
+    <p id="status" role="status">Verificando acceso…</p>
+    <section id="login" class="card" hidden>
+      <p>Inicia sesión con tu cuenta autorizada de ITBMO y vuelve a esta página.</p>
+      <a class="g-button g-button--primary" href="/planner.html?lang=es&amp;mode=access" target="_blank" rel="noopener">Abrir acceso de ITBMO</a>
+      <button id="retry" type="button">Verificar acceso</button>
+    </section>
+    <div id="ledger" hidden>
+      <details id="fiscal-profile" class="card" hidden>
+        <summary>Perfil fiscal · Borrador</summary>
+        <dl class="fiscal-details">
+          <dt>Actividad propuesta en TRIBU-CR</dt>
+          <dd id="fiscal-activity"></dd>
+          <dt>Descripción de ITBMO</dt>
+          <dd id="fiscal-description"></dd>
+          <dt>Actividad secundaria para publicidad y afiliados</dt>
+          <dd id="fiscal-affiliate"></dd>
+          <dt>CABYS candidato para itinerarios</dt>
+          <dd id="fiscal-cabys"></dd>
+        </dl>
+        <p class="hint">Pendiente de confirmar en OVi. La clasificación de comisiones de afiliados y el tratamiento de IVA se revisan por separado.</p>
+      </details>
+      <section class="card">
+        <h2>Cargar comprobante</h2>
+        <p class="hint">XML, PDF, JPG, PNG o WebP. Hasta 3 MB por archivo.</p>
+        <div class="actions">
+          <label class="g-button g-button--light pick">Elegir archivo<input id="file" type="file" accept=".xml,.pdf,.jpg,.jpeg,.png,.webp"></label>
+          <label class="g-button g-button--light pick">Tomar foto<input id="camera" type="file" accept="image/*" capture="environment"></label>
+        </div>
+        <p id="intake-status" role="status"></p>
+        <form id="intake" hidden>
+          <h3>Revisar comprobante</h3>
+          <div class="fields">
+            <label>Fecha de emisión<input type="date" name="issue_date" min="1900-01-01" max="2199-12-31" required></label>
+            <label>Emisor<input name="issuer" maxlength="200" required></label>
+            <label>Identificación del emisor<input name="issuer_id" maxlength="50"></label>
+            <label>Tipo de movimiento<select name="direction" required><option value="">Seleccionar</option><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="transfer">Transferencia propia</option></select></label>
+            <label>Tipo de comprobante<select name="document_kind"><option value="invoice">Factura</option><option value="receipt">Tiquete o recibo</option><option value="credit_note">Nota de crédito</option><option value="debit_note">Nota de débito</option><option value="other">Otro</option></select></label>
+            <label>Origen fiscal<select name="jurisdiction"><option value="pending">Por revisar</option><option value="CR">Costa Rica</option><option value="foreign">Exterior</option></select></label>
+            <label>Número de comprobante<input name="document_number" maxlength="90"></label>
+            <label>Clave electrónica<input name="document_key" pattern="[0-9]{50}" maxlength="50" inputmode="numeric"></label>
+            <label>Moneda (ISO 4217)<input name="currency" pattern="[A-Za-z]{3}" maxlength="3" value="" placeholder="CRC, USD…" required></label>
+            <label>Subtotal<input name="subtotal" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?"></label>
+            <label>Impuesto del comprobante<input name="tax" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?"></label>
+            <label>Total<input name="total" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?" required></label>
+            <label>Tipo de cambio a CRC<input name="exchange_rate" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?"></label>
+            <label>Categoría<input name="category" list="categories" maxlength="100" placeholder="Por clasificar"></label>
+            <datalist id="categories"></datalist>
+            <label>Crédito de IVA<select name="vat_treatment" data-fiscal></select></label>
+            <label>Deducibilidad para renta<select name="income_tax_treatment" data-fiscal></select></label>
+            <label class="full">Notas<textarea name="notes" maxlength="800" rows="2"></textarea></label>
+          </div>
+          <div class="actions"><button id="save" class="g-button g-button--primary" type="submit">Guardar comprobante</button><button id="clear" type="button">Descartar selección</button></div>
+        </form>
+      </section>
+      <section class="card" aria-labelledby="affiliate-title">
+        <h2 id="affiliate-title">Registrar comisiones de afiliados</h2>
+        <p class="hint">Para programas sin conexión automática. Registra una sola vez el total bruto de cada liquidación pagada. Usa la fecha y referencia del comprobante.</p>
+        <div class="actions">
+          <label class="g-button g-button--light pick">Adjuntar PDF o imagen<input id="affiliate-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></label>
+          <label class="g-button g-button--light pick">Tomar foto<input id="affiliate-camera" type="file" accept="image/*" capture="environment"></label>
+        </div>
+        <p id="affiliate-status" role="status"></p>
+        <form id="affiliate-intake">
+          <div class="fields">
+            <label>Programa de afiliados<input name="issuer" list="affiliate-programs" maxlength="150" required></label>
+            <datalist id="affiliate-programs"><option value="GetYourGuide"><option value="Viator"><option value="Holafly"><option value="DiscoverCars"><option value="12Go"><option value="Bookaway"><option value="Rise &amp; Shield"><option value="Heymondo"></datalist>
+            <label>Fecha de liquidación<input type="date" name="issue_date" min="1900-01-01" max="2199-12-31" required></label>
+            <label>Referencia de la liquidación<input name="document_number" maxlength="90" required></label>
+            <label>ID de PayPal (si aplica)<input name="paypal_reference" pattern="[A-Za-z0-9\-]{1,64}" maxlength="64"></label>
+            <label>Moneda<input name="currency" pattern="[A-Za-z]{3}" maxlength="3" placeholder="USD, EUR…" required></label>
+            <label>Comisión bruta<input name="total" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?" required></label>
+            <label class="full">Notas<textarea name="notes" maxlength="800" rows="2"></textarea></label>
+          </div>
+          <p class="confirmation"><label><input type="checkbox" name="confirmed" required> Confirmo que corresponde a una liquidación pagada y que verifiqué el importe y la referencia.</label></p>
+          <div class="actions"><button class="g-button g-button--primary" type="submit">Registrar ingreso</button><button id="affiliate-clear" type="button" hidden>Quitar respaldo</button></div>
+        </form>
+      </section>
+      <section class="card accounting-payment" aria-labelledby="creator-payment-title">
+        <h2 id="creator-payment-title">Registrar pago de comisiones a un colaborador</h2>
+        <p class="hint">Usa el código del colaborador y la referencia de un pago que ya realizaste. El registro descuenta el importe de su saldo y aparece en su historial. Entorno de pruebas.</p>
+        <form id="creator-payment">
+          <div class="fields">
+            <label>Código del colaborador<input name="code" maxlength="40" required></label>
+            <div class="actions"><button id="creator-lookup" type="button">Consultar colaborador</button></div>
+          </div>
+          <p id="creator-result" role="status"></p>
+          <fieldset id="creator-payment-details" hidden disabled>
+            <legend>Datos del pago</legend>
+            <div class="fields">
+              <label>Importe pagado (USD)<input name="amount" inputmode="decimal" pattern="[0-9]{1,8}([.][0-9]{1,2})?" required></label>
+              <label>Fecha de pago<input type="date" name="date" min="1900-01-01" required></label>
+              <label>Medio<select name="method" required><option value="">Selecciona</option><option value="bank">Transferencia bancaria</option><option value="paypal">PayPal</option><option value="other">Otro</option></select></label>
+              <label>Referencia del pago<input name="reference" maxlength="90" required></label>
+            </div>
+            <p class="confirmation"><label><input type="checkbox" name="confirmed" required> Confirmo que ya realicé este pago al colaborador indicado.</label></p>
+            <button class="g-button g-button--primary" type="submit">Registrar pago</button>
+          </fieldset>
+          <p id="creator-payment-status" role="status"></p>
+        </form>
+      </section>
+      <section class="card" aria-labelledby="archive-title">
+        <h2 id="archive-title">Archivo por fecha de emisión</h2>
+        <form id="period" class="filters">
+          <label>Año<input name="year" type="number" min="1900" max="2199" required></label>
+          <label>Mes<select name="month"><option value="">Todos los meses</option></select></label>
+          <button type="submit">Consultar</button>
+          <button id="export" type="button">Exportar período a CSV</button>
+        </form>
+        <p id="archive-status" role="status"></p>
+        <div id="documents"></div>
+        <button id="more" type="button" hidden>Cargar más comprobantes</button>
+      </section>
+      <section class="card" aria-labelledby="journal-title">
+        <h2 id="journal-title">Libro de movimientos</h2>
+        <p class="hint">Usa los filtros de año y mes para consultar ventas, gastos y comisiones por programa. Para cotejar cobros en PayPal, importa el CSV Activity Download en inglés con código de evento.</p>
+        <form id="paypal-import" class="filters">
+          <label>Archivo PayPal<input name="file" type="file" accept=".csv,text/csv" required></label>
+          <label>Fechas del CSV<select name="format" required><option value="">Selecciona el orden</option><option value="MDY">Mes/día/año o ISO</option><option value="DMY">Día/mes/año o ISO</option></select></label>
+          <button type="submit">Importar actividad</button>
+        </form>
+        <p id="paypal-status" role="status"></p>
+        <button id="journal-load" type="button">Consultar movimientos</button>
+        <p id="journal-status" role="status"></p>
+        <div id="journal-entries"></div>
+        <button id="journal-more" type="button" hidden>Cargar más movimientos</button>
+      </section>
+      <section class="card" aria-labelledby="billing-title">
+        <h2 id="billing-title">Ventas y comprobantes</h2>
+        <p class="hint">Capturas de PayPal Sandbox para el período consultado.</p>
+        <button id="billing-load" type="button">Consultar ventas</button>
+        <p id="billing-status" role="status"></p>
+        <div id="billing-sales"></div>
+        <button id="billing-more" type="button" hidden>Cargar más ventas</button>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

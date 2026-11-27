@@ -1,0 +1,91 @@
+:root { color-scheme: light; }
+[hidden] { display: none !important; }
+body { background: linear-gradient(165deg, #f2faff 0, #f8fbfd 26rem, #fff 72rem); }
+.accounting-header { justify-content: space-between; }
+.accounting-main { max-width: 66rem; padding-block: clamp(1.5rem, 4vw, 3.75rem) 4rem; overflow: visible; }
+.accounting-main .top {
+  padding: clamp(1.5rem, 4vw, 2.75rem);
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--g-line);
+  border-radius: var(--g-radius);
+  background: radial-gradient(ellipse at top right, #dff6fa 0, transparent 70%), linear-gradient(145deg, #fff, #f6fbff);
+  box-shadow: var(--g-shadow-soft);
+}
+.accounting-main h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.6rem); font-weight: 850; letter-spacing: -.06em; line-height: 1.05; }
+.accounting-main h2, .accounting-main h3, .accounting-main p { margin: 0 0 .8rem; }
+.accounting-main h2 { font-size: clamp(1.2rem, 3vw, 1.55rem); letter-spacing: -.035em; }
+.accounting-main .top p { color: var(--g-text); margin: .65rem 0 0; }
+.accounting-main .hint, .accounting-main p[role="status"] { color: var(--g-text); line-height: 1.5; }
+.accounting-main p[role="status"]:empty { display: none; }
+.accounting-main .card {
+  background: linear-gradient(150deg, #fff 35%, #f7fbfd);
+  border: 1px solid var(--g-line);
+  border-radius: 24px;
+  padding: clamp(1rem, 3vw, 1.8rem);
+  margin-bottom: 1rem;
+  box-shadow: var(--g-shadow-soft);
+}
+.accounting-main .accounting-payment { border-top: 3px solid #f17c4a; }
+.accounting-main .actions, .accounting-main .filters { display: flex; flex-wrap: wrap; align-items: end; gap: .65rem; margin: .8rem 0; }
+.accounting-main .filters > * { max-width: 100%; }
+.accounting-main .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .8rem 1rem; }
+.accounting-main .fields > .actions { margin: 0; }
+.accounting-main .full { grid-column: 1 / -1; }
+.accounting-main label { display: grid; gap: .35rem; font-size: .9rem; font-weight: 650; }
+.accounting-main :is(input:not([type="checkbox"]), select, textarea) {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: .55rem .75rem;
+  border: 1px solid #cbdde8;
+  border-radius: 14px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+.accounting-main .confirmation { margin-top: .9rem; }
+.accounting-main .confirmation label { grid-template-columns: auto 1fr; align-items: start; gap: .65rem; line-height: 1.45; }
+.accounting-main input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: .1rem 0 0; accent-color: var(--g-blue); }
+.accounting-main button:not(.g-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: .58rem .9rem;
+  border: 1px solid #cbdde8;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--g-ink);
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.accounting-main button:not(.g-button):hover:not(:disabled) { background: #eaf6fb; }
+.accounting-main button:disabled { opacity: .6; cursor: wait; }
+.accounting-main :focus-visible, .accounting-main .pick:focus-within { outline: 2px solid #067ab9; outline-offset: 3px; }
+.accounting-main .pick { position: relative; }
+.accounting-main .pick input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; padding: 0; }
+.accounting-main fieldset { min-width: 0; padding: 1rem; margin: 1rem 0; border: 1px solid var(--g-line); border-radius: 16px; }
+.accounting-main legend { font-size: .9rem; font-weight: 750; }
+#creator-result:not(:empty) { margin-top: .9rem; font-weight: 650; }
+#documents, #journal-entries, #billing-sales { display: grid; gap: .55rem; }
+#documents h3 { margin: .8rem 0 .2rem; text-transform: capitalize; }
+#documents h4 { margin: .65rem 0 .25rem; color: var(--g-text); }
+.accounting-main .document { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .3rem 1rem; align-items: start; padding: .85rem; border: 1px solid var(--g-line); border-radius: 16px; background: #fff; }
+.accounting-main .document p { margin: 0; overflow-wrap: anywhere; }
+.accounting-main .document .metadata { color: var(--g-text); font-size: .9rem; }
+.accounting-main .document details { grid-column: 1 / -1; }
+.accounting-main summary { cursor: pointer; }
+.accounting-main .document dl { display: grid; grid-template-columns: minmax(6rem, auto) minmax(0, 1fr); gap: .25rem .7rem; margin: .55rem 0 0; font-size: .9rem; }
+.accounting-main .document dd { margin: 0; overflow-wrap: anywhere; }
+#more, #journal-more, #billing-more { margin-top: .8rem; }
+#fiscal-profile summary { font-weight: 750; }
+.fiscal-details { margin: .9rem 0; }
+.fiscal-details dt { font-weight: 650; }
+.fiscal-details dd { margin: 0 0 .65rem; }
+.fiscal-details a { color: #075b79; text-decoration: underline; text-underline-offset: .15em; }
+@media (max-width: 420px) {
+  .accounting-main .document { grid-template-columns: minmax(0, 1fr); }
+  .accounting-main .document button { justify-self: start; }
+}
