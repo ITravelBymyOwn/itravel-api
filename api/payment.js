@@ -173,7 +173,8 @@ function defaultOffer(pricing) {
     amount: price,
     regularAmount: regular,
     baseAmount: price,
-    discountAmount: 0
+    discountAmount: 0,
+    campaignId: pricing.campaign_id || null
   };
 }
 
@@ -223,7 +224,8 @@ async function resolveCheckoutOffer(body, session, trip) {
     regularAmount: Number(redemption.metadata?.checkout_pricing?.regular_amount ??
       (await commercePricing()).regular_price),
     baseAmount: Number(redemption.base_amount),
-    discountAmount: Number(redemption.discount_amount)
+    discountAmount: Number(redemption.discount_amount),
+    campaignId: redemption.metadata?.checkout_pricing?.campaign_id || null
   };
 }
 
@@ -314,7 +316,9 @@ async function createPaymentRow({
         promo_redemption_id: offer.promoRedemptionId || null,
         promo_code_id: offer.promoCodeId || null,
         base_amount: offer.baseAmount ?? offer.amount,
-        discount_amount: offer.discountAmount || 0
+        discount_amount: offer.discountAmount || 0,
+        website_discount_amount: Number(Math.max(0, offer.regularAmount - offer.baseAmount).toFixed(2)),
+        offer_campaign_id: offer.campaignId || null
       }
     })
   });
@@ -698,18 +702,27 @@ async function handlePayPalCaptureOrder(res, body, session) {
   }
 
   try {
-    const order = await paypalRequest(
-      `/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`,
-      {
+    const orderPath = `/v2/checkout/orders/${encodeURIComponent(orderId)}`;
+    let order;
+    try {
+      order = await paypalRequest(orderPath + "/capture", {
         method: "POST",
         headers: {
           "PayPal-Request-Id": `${payment.id}-capture`
         },
         body: JSON.stringify({})
-      }
-    );
+      });
+    } catch (error) {
+      const details = error?.data?.details;
+      if (!Array.isArray(details) || !details.some(detail => detail.issue === "ORDER_ALREADY_CAPTURED")) throw error;
+      order = await paypalRequest(orderPath, { method: "GET" });
+    }
 
     const capture = extractPayPalCapture(order);
+    if (capture?.status === "PENDING") {
+      await patchPayment(payment.id, { provider_status: "PENDING" });
+      return res.status(409).json({ ok: false, paid: false, code: "PAYMENT_PENDING" });
+    }
 
     const capturedCurrency = String(
       capture?.amount?.currency_code || ""
@@ -987,8 +1000,11 @@ export default async function handler(req, res) {
         ? error.status
         : 500;
 
+    const checkoutError = ['PROMO_REDEMPTION_INVALID','PROMO_RESERVATION_EXPIRED','PROMO_CODE_NOT_FOUND']
+      .includes(error?.message) ? error.message : null;
     return res.status(status).json({
       ok: false,
+      ...(checkoutError ? { code: checkoutError } : {}),
       error:
         status >= 500
           ? "Payment service error"

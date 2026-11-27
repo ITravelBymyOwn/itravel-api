@@ -15280,8 +15280,12 @@ function applyCommerceI18n(){
   const newP = qs('#checkout-price-new');
   const basePrice=Number(commerceServerConfig?.base_price);
   const finalPrice=Number(activePromoReservation?.final_amount ?? basePrice);
-  if(newP && !activePromoReservation && window.ITBMOPrice){
-    window.ITBMOPrice.render(newP,commerceServerConfig,es?'es':'en');
+  if(newP && window.ITBMOPrice){
+    const offer = activePromoReservation ? {
+      base_price: activePromoReservation.final_amount,
+      regular_price: activePromoReservation.regular_amount ?? commerceServerConfig?.regular_price
+    } : commerceServerConfig;
+    window.ITBMOPrice.render(newP,offer,es?'es':'en');
   }else if(newP){
     newP.textContent=Number.isFinite(finalPrice)?`US$${finalPrice.toFixed(2)}`:'—';
   }
@@ -15460,7 +15464,7 @@ async function paymentApi(payload){
   let data={};
   try{ data=await response.json(); }catch(_){}
   if(!response.ok || data?.ok===false){
-    throw new Error(data?.error || `PAYMENT_HTTP_${response.status}`);
+    throw new Error(data?.code || data?.error || `PAYMENT_HTTP_${response.status}`);
   }
   return data;
 }
@@ -15729,12 +15733,25 @@ async function renderPayPalButtonsIfAvailable(){
         setCheckoutStatus('');
       },
       onError:async(err)=>{
-        if(err?.message==='PRICE_CHANGED'){
+        const promoExpired=['PROMO_REDEMPTION_INVALID','PROMO_RESERVATION_EXPIRED','PROMO_CODE_NOT_FOUND'].includes(err?.message);
+        if(err?.message==='PRICE_CHANGED' || promoExpired){
+          if(promoExpired) {
+            activePromoReservation=null;
+            setPromoMessage(getLang()==='es'
+              ? 'Vuelve a aplicar el código para confirmar si sigue disponible.'
+              : 'Apply the code again to check whether it is still available.', 'error');
+          }
           await loadCommerceServerConfig();
           applyCommerceI18n();
           setCheckoutStatus(getLang()==='es'
             ? 'El precio cambió. Revisa el total actualizado antes de pagar.'
             : 'The price changed. Review the updated total before paying.', 'error');
+          return;
+        }
+        if(err?.message==='PAYMENT_PENDING'){
+          setCheckoutStatus(getLang()==='es'
+            ? 'PayPal todavía está confirmando el pago. Revisa tu actividad en PayPal antes de volver a pagar.'
+            : 'PayPal is still confirming the payment. Check your PayPal activity before paying again.');
           return;
         }
         console.error('[PAYPAL]',err);
