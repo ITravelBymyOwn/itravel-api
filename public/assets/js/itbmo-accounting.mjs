@@ -415,10 +415,15 @@ async function loadBillingSales(append = false) {
         makeNode('p', `PayPal · ${row.capture_reference} · ${saleStates[row.fiscal_status]}`, 'metadata'));
       if (row.promotion_code) {
         const figures = [
-          ['Código', row.promotion_code], ['Precio regular', row.regular_amount],
-          ['Facturado', row.gross_amount], ['Comisión', row.creator_commission],
-          ['ITBMO antes de cargos e impuestos', row.itbmo_share]
+          ['Precio regular', row.regular_amount]
         ];
+        if (Number(row.web_discount) > 0) figures.push(['Descuento de la web', row.web_discount]);
+        if (row.promotion_code !== 'site_promotion') {
+          figures.push(['Código', row.promotion_code]);
+          if (Number(row.code_discount) > 0) figures.push(['Descuento por código', row.code_discount]);
+        }
+        figures.push(['Facturado', row.gross_amount], ['Comisión', row.creator_commission],
+          ['ITBMO antes de cargos e impuestos', row.itbmo_share]);
         if (Number(row.refund_amount) > 0) figures.push(['Reembolso', row.refund_amount]);
         if (Number(row.creator_commission_reversed) > 0) figures.push(['Comisión revertida', row.creator_commission_reversed]);
         const breakdown = makeNode('dl');

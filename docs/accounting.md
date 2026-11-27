@@ -80,3 +80,7 @@ La migración de sincronización necesita los esquemas de Colaboradores y Contab
 El administrador de Contabilidad autorizado también puede crear o cambiar un convenio por código en el portal de colaboradores. Puede ingresar descuento porcentual o en USD y una comisión fija en USD por compra. El descuento se aplica al precio base vigente de Preview. La reserva guarda la comisión vigente para que las ventas ya reservadas conserven su acuerdo anterior. El módulo de ventas muestra el precio regular, el importe facturado, la comisión y el importe de ITBMO antes de impuestos y cargos. Los reembolsos y las reversiones se muestran aparte.
 
 El acceso se valida en el servidor contra los perfiles autorizados de Supabase QA, por identificador de perfil asociado a la cuenta verificada. La promoción de este flujo a producción requiere configurar los perfiles autorizados y aplicar las migraciones de ambos módulos en orden.
+
+### Promociones generales de la web
+
+La web y el checkout consultan la misma oferta. El libro separa el descuento de la web y el del código. Una reserva vigente conserva su precio y comisión y los pagos en curso se cotejan con su importe guardado.
