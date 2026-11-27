@@ -195,9 +195,9 @@ function listDocuments(body) {
 
 function listBillingSales(body) {
   const query = listPeriod(body, 'paid_at', 'T00:00:00-06:00');
-  query.set('select', 'payment_id,provider,capture_reference,paid_at,gross_amount::text,net_amount::text,vat_amount::text,currency,fiscal_status,delivery_status,document_type');
+  query.set('select', 'payment_id,provider,capture_reference,paid_at,gross_amount::text,net_amount::text,vat_amount::text,currency,fiscal_status,delivery_status,document_type,regular_amount::text,promotion_code,creator_commission::text,creator_commission_reversed::text,itbmo_share::text,refund_amount::text');
   query.set('order', 'paid_at.desc,payment_id.asc');
-  return rest('/accounting_billing_sales?' + query);
+  return rest('/accounting_sale_breakdown?' + query);
 }
 
 async function downloadDocument(body) {

@@ -413,6 +413,21 @@ async function loadBillingSales(append = false) {
       const detail = makeNode('div');
       detail.append(makeNode('p', `${saleDate.format(new Date(row.paid_at))} · ${row.currency} ${row.gross_amount}`),
         makeNode('p', `PayPal · ${row.capture_reference} · ${saleStates[row.fiscal_status]}`, 'metadata'));
+      if (row.promotion_code) {
+        const figures = [
+          ['Código', row.promotion_code], ['Precio regular', row.regular_amount],
+          ['Facturado', row.gross_amount], ['Comisión', row.creator_commission],
+          ['ITBMO antes de cargos e impuestos', row.itbmo_share]
+        ];
+        if (Number(row.refund_amount) > 0) figures.push(['Reembolso', row.refund_amount]);
+        if (Number(row.creator_commission_reversed) > 0) figures.push(['Comisión revertida', row.creator_commission_reversed]);
+        const breakdown = makeNode('dl');
+        for (const [label, value] of figures) {
+          breakdown.append(makeNode('dt', label), makeNode('dd',
+            label === 'Código' ? value : new Intl.NumberFormat('es-CR', { style: 'currency', currency: row.currency }).format(Number(value))));
+        }
+        detail.append(breakdown);
+      }
       entry.append(detail);
       if (row.fiscal_status === 'pending_review') entry.append(billingReview(row));
       if (row.vat_amount != null) {
