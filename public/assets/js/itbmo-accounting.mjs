@@ -14,7 +14,7 @@ const kindLabels = { invoice: 'Factura', receipt: 'Tiquete o recibo', credit_not
 const fieldLabels = {
   document_kind: 'Tipo', jurisdiction: 'Origen fiscal', issuer_id: 'Identificación del emisor', document_number: 'Número', document_key: 'Clave electrónica',
   subtotal: 'Subtotal', tax: 'Impuesto', exchange_rate: 'Tipo de cambio a CRC', vat_treatment: 'Crédito de IVA',
-  income_tax_treatment: 'Deducibilidad de renta', notes: 'Notas', original_name: 'Archivo'
+  income_tax_treatment: 'Deducibilidad de renta', paypal_reference: 'ID de PayPal', notes: 'Notas', original_name: 'Archivo'
 };
 const errorMessages = {
   ACCOUNTING_UNAVAILABLE: 'El módulo aún no está habilitado en este entorno.',
@@ -26,6 +26,7 @@ const errorMessages = {
   INVALID_FILE_TYPE: 'Selecciona un XML, PDF, JPG, PNG o WebP.',
   INVALID_FILE: 'El archivo no coincide con su formato o está dañado.',
   INVALID_DOCUMENT: 'Revisa la fecha, los importes y la información del comprobante.',
+  INVALID_AFFILIATE_SETTLEMENT: 'Confirma una liquidación pagada y revisa el programa, la fecha, la referencia y la comisión bruta. Omio y Airalo corresponden a Impact.',
   INVALID_PAYPAL_CSV: 'Usa el CSV de actividad de PayPal en inglés con código de evento, hasta 1.000 filas y el orden de fechas correcto.',
   INVALID_BILLING_REVIEW: 'Revisa la clasificación y la evidencia. Si la venta ya fue revisada, vuelve a consultar.',
   ACCOUNTING_STORAGE_ERROR: 'No pudimos guardar o consultar el archivo. Si estabas cargándolo, conserva esta selección y vuelve a intentar.'
@@ -178,7 +179,10 @@ function documentRow(row) {
     if (value != null && value !== '') values.append(makeNode('dt', label), makeNode('dd', String(value)));
   }
   details.append(makeNode('summary', 'Ver ficha'), values);
-  card.append(heading, download, details);
+  if (row.affiliate_settlement) heading.append(makeNode('p', 'Liquidación de afiliados · Revisión fiscal pendiente', 'metadata'));
+  card.append(heading);
+  if (row.original_name) card.append(download);
+  card.append(details);
   return card;
 }
 
@@ -235,7 +239,7 @@ const columns = {
   issuer_id: 'Identificación del emisor', jurisdiction: 'Origen fiscal', document_number: 'Número', document_key: 'Clave', currency: 'Moneda',
   subtotal: 'Subtotal', tax: 'Impuesto', total: 'Total', exchange_rate: 'Tipo de cambio a CRC',
   category: 'Categoría', vat_treatment: 'Crédito de IVA', income_tax_treatment: 'Deducibilidad de renta',
-  notes: 'Notas', original_name: 'Archivo'
+  paypal_reference: 'ID de PayPal', notes: 'Notas', original_name: 'Archivo'
 };
 
 function csv(value) {
@@ -307,6 +311,7 @@ async function loadJournal(append = false) {
       const detail = makeNode('div');
       const review = {
         matched: 'Conciliado por referencia', pending_review: 'Pendiente de revisión',
+        affiliate_settlement: 'Liquidación registrada · Revisión fiscal pendiente',
         pending: 'Comisión pendiente', approved: 'Comisión aprobada', reversed: 'Comisión anulada'
       }[row.review_status];
       detail.append(makeNode('p', `${row.entry_date} · ${row.description} · ${row.currency} ${row.amount}`),
@@ -446,6 +451,89 @@ intake.addEventListener('submit', async event => {
     intakeStatus.textContent = 'Comprobante archivado por su fecha de emisión.';
   } catch (error) {
     intakeStatus.textContent = error.message;
+  } finally {
+    for (const control of controls) control.disabled = false;
+  }
+});
+
+const affiliateIntake = byId('affiliate-intake');
+const affiliateStatus = byId('affiliate-status');
+const affiliateClear = byId('affiliate-clear');
+let affiliateAttachment;
+let affiliateExtraction = 'manual';
+let affiliateSelection = 0;
+
+function clearAffiliateAttachment() {
+  affiliateSelection++;
+  affiliateAttachment = undefined;
+  affiliateExtraction = 'manual';
+  byId('affiliate-file').value = byId('affiliate-camera').value = '';
+  affiliateClear.hidden = true;
+}
+
+async function readAffiliateAttachment(input) {
+  const selected = input.files[0];
+  if (!selected) return;
+  clearAffiliateAttachment();
+  const version = affiliateSelection;
+  const submit = affiliateIntake.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  affiliateIntake.elements.confirmed.checked = false;
+  affiliateStatus.textContent = 'Leyendo el respaldo en tu dispositivo…';
+  try {
+    const prepared = input.id === 'affiliate-camera' ? await prepareCameraPhoto(selected) : selected;
+    if (version !== affiliateSelection) return;
+    if (prepared.size > 3 * 1024 * 1024) throw new Error(errorMessages.FILE_TOO_LARGE);
+    if (!prepared.size || !/\.(pdf|jpe?g|png|webp)$/i.test(prepared.name)) throw new Error(errorMessages.INVALID_FILE_TYPE);
+    affiliateAttachment = prepared;
+    affiliateClear.hidden = false;
+    const { fields, method, limited } = await extractAccountingFile(prepared, { affiliate: true });
+    if (version !== affiliateSelection) return;
+    affiliateExtraction = method;
+    for (const [name, value] of Object.entries(fields)) {
+      if (value && !affiliateIntake.elements[name].value) affiliateIntake.elements[name].value = value;
+    }
+    affiliateStatus.textContent = limited
+      ? 'Se leyeron las primeras 8 páginas. Verifica los datos contra el respaldo completo.'
+      : 'Respaldo listo. Verifica los datos sugeridos y completa los campos faltantes.';
+  } catch (error) {
+    if (version === affiliateSelection) {
+      affiliateStatus.textContent = affiliateAttachment
+        ? 'Se adjuntó el respaldo. Completa los datos manualmente.'
+        : error.message;
+    }
+  } finally {
+    if (version === affiliateSelection) submit.disabled = false;
+  }
+}
+
+for (const id of ['affiliate-file', 'affiliate-camera']) {
+  byId(id).addEventListener('change', event => { void readAffiliateAttachment(event.currentTarget); });
+}
+affiliateClear.addEventListener('click', () => {
+  clearAffiliateAttachment();
+  affiliateIntake.elements.confirmed.checked = false;
+  affiliateIntake.querySelector('button[type="submit"]').disabled = false;
+  affiliateStatus.textContent = 'Respaldo quitado. Revisa los datos antes de registrar.';
+});
+affiliateIntake.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = Object.fromEntries(new FormData(affiliateIntake));
+  const attachment = affiliateAttachment;
+  const controls = [...affiliateIntake.elements, byId('affiliate-file'), byId('affiliate-camera')];
+  for (const control of controls) control.disabled = true;
+  affiliateStatus.textContent = 'Registrando liquidación…';
+  try {
+    const evidence = attachment ? { name: attachment.name, file: await fileBase64(attachment) } : {};
+    await request('affiliate_settlement', { document: { ...form, extraction_method: affiliateExtraction }, ...evidence });
+    affiliateIntake.reset();
+    clearAffiliateAttachment();
+    period.elements.year.value = form.issue_date.slice(0, 4);
+    period.elements.month.value = String(Number(form.issue_date.slice(5, 7)));
+    await Promise.all([loadArchive(), loadJournal()]);
+    affiliateStatus.textContent = 'Comisión registrada como ingreso. Revisión fiscal pendiente.';
+  } catch (error) {
+    affiliateStatus.textContent = error.message;
   } finally {
     for (const control of controls) control.disabled = false;
   }

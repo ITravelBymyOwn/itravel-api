@@ -110,14 +110,52 @@ export function parseAccountingUpload(body) {
   return { metadata, bytes };
 }
 
-async function saveDocument(profileId, body) {
-  const { metadata, bytes } = parseAccountingUpload(body);
+const affiliatePrograms = {
+  getyourguide: 'GetYourGuide', viator: 'Viator', viatorinc: 'Viator',
+  viatorlimited: 'Viator', viatorsystemsptylimited: 'Viator', owlpaymentslimited: 'Viator',
+  holafly: 'Holafly', discovercars: 'DiscoverCars', '12go': '12Go', bookaway: 'Bookaway',
+  riseshield: 'Rise & Shield', riseandshield: 'Rise & Shield', heymondo: 'Heymondo'
+};
+
+export function parseAffiliateSettlement(body) {
+  const form = body.document || {};
+  const issuerInput = field(form.issuer, 151);
+  const issuerKey = issuerInput.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const issuer = Object.hasOwn(affiliatePrograms, issuerKey) ? affiliatePrograms[issuerKey] : issuerInput.replace(/ +/g, ' ');
+  const reference = field(form.document_number, 91);
+  const paypal = field(form.paypal_reference, 65).toUpperCase();
+  const currency = field(form.currency, 4).toUpperCase();
+  const total = money(form.total, true);
+  requireValue(issuer.length > 0 && issuerInput.length <= 150 && !/[\x00-\x1f]/.test(issuer) &&
+    !/\b(?:omio|airalo|impact(?:\.com)?)\b/i.test(issuer) &&
+    reference.length > 0 && reference.length <= 90 && !/[\x00-\x1f]/.test(reference) &&
+    (!paypal || /^[A-Z0-9-]{1,64}$/.test(paypal)) && validDate(field(form.issue_date, 11)) &&
+    /^[A-Z]{3}$/.test(currency) && Number(total) > 0 && form.confirmed === 'on', 'INVALID_AFFILIATE_SETTLEMENT');
+
+  const document = {
+    issue_date: form.issue_date, issuer, document_number: reference, currency, total,
+    direction: 'income', document_kind: 'receipt', jurisdiction: 'pending',
+    category: 'Comisiones de afiliados', vat_treatment: 'pending', income_tax_treatment: 'pending',
+    notes: field(form.notes, 800) || null, extraction_method: 'manual'
+  };
+  if (body.file !== undefined) {
+    requireValue(/\.(pdf|jpe?g|png|webp)$/i.test(body.name || ''), 'INVALID_FILE_TYPE');
+    document.extraction_method = form.extraction_method;
+    const parsed = parseAccountingUpload({ ...body, document });
+    return { ...parsed, metadata: { ...parsed.metadata, affiliate_settlement: true, paypal_reference: paypal || null } };
+  }
+  return { metadata: { ...document, affiliate_settlement: true, paypal_reference: paypal || null } };
+}
+
+async function saveDocument(profileId, { metadata, bytes }) {
   const [reservation] = await rest('/rpc/itbmo_accounting_reserve', {
     method: 'POST', body: JSON.stringify({ p_profile: profileId, p_document: metadata })
   });
   if (reservation.outcome === 'duplicate') throw new AccountingError(409, 'DUPLICATE_DOCUMENT');
   if (reservation.outcome === 'quota') throw new AccountingError(409, 'ACCOUNTING_QUOTA');
   if (!['reserved', 'retry'].includes(reservation.outcome)) throw new AccountingError(403, 'ACCOUNTING_FORBIDDEN');
+
+  if (!bytes) return { id: reservation.document_id };
 
   // Retrying the same bytes after an interruption reuses the reserved path and digest.
   await privateRequest(`/storage/v1/object/${BUCKET}/${reservation.object_path}`, {
@@ -129,7 +167,7 @@ async function saveDocument(profileId, body) {
   return { id: reservation.document_id };
 }
 
-const SELECT_FIELDS = 'id,issue_date,direction,document_kind,jurisdiction,issuer,issuer_id,document_number,document_key,currency,subtotal::text,tax::text,total::text,exchange_rate::text,category,vat_treatment,income_tax_treatment,extraction_method,notes,original_name,byte_size,created_at';
+const SELECT_FIELDS = 'id,issue_date,direction,document_kind,jurisdiction,issuer,issuer_id,document_number,document_key,currency,subtotal::text,tax::text,total::text,exchange_rate::text,category,vat_treatment,income_tax_treatment,extraction_method,notes,original_name,byte_size,created_at,affiliate_settlement,paypal_reference';
 
 function listPeriod(body, dateField, timeSuffix = '') {
   const year = Number(body.year);
@@ -164,7 +202,7 @@ function listBillingSales(body) {
 async function downloadDocument(body) {
   requireValue(typeof body.id === 'string' && UUID.test(body.id), 'INVALID_DOCUMENT');
   const [document] = await rest(`/accounting_documents?id=eq.${body.id}&ready=eq.true&select=storage_path`);
-  if (!document) throw new AccountingError(404, 'DOCUMENT_NOT_FOUND');
+  if (!document?.storage_path) throw new AccountingError(404, 'DOCUMENT_NOT_FOUND');
   const signed = await privateRequest(`/storage/v1/object/sign/${BUCKET}/${document.storage_path}`, {
     method: 'POST', body: JSON.stringify({ expiresIn: 60 })
   });
@@ -199,7 +237,8 @@ export default async function accounting(req, res, impactPostback = false) {
         result = { documents: rows.slice(0, 100), more: rows.length > 100, fiscal_profile: accountingFiscalProfile };
         break;
       }
-      case 'upload': result = await saveDocument(session.user_id, body); break;
+      case 'upload': result = await saveDocument(session.user_id, parseAccountingUpload(body)); break;
+      case 'affiliate_settlement': result = await saveDocument(session.user_id, parseAffiliateSettlement(body)); break;
       case 'journal': {
         const query = listPeriod(body, 'entry_date');
         query.set('select', 'entry_id,entry_date,source,description,reference,currency,amount::text,direction,category,review_status');

@@ -84,3 +84,36 @@ test('Impact postbacks read commission and state from the provider, using the sa
   assert.equal(saved[1].action_id, saved[0].action_id);
   assert.equal(saved[1].source_state, 'reversed');
 });
+
+test('manual affiliate settlements require a confirmed positive commission and use the income category', async () => {
+  const { parseAffiliateSettlement } = await accounting;
+  const document = { issuer: 'Viator', issue_date: '2026-11-22', document_number: 'V-998',
+    paypal_reference: 'abc123', currency: 'USD', total: '14.35', confirmed: 'on' };
+  const { metadata, bytes } = parseAffiliateSettlement({ document });
+  assert.equal(bytes, undefined);
+  assert.equal(metadata.total, '14.35');
+  assert.equal(metadata.paypal_reference, 'ABC123');
+  assert.equal(metadata.affiliate_settlement, true);
+  assert.equal(metadata.category, 'Comisiones de afiliados');
+  assert.equal(metadata.vat_treatment, 'pending');
+  for (const invalid of [{ document_number: '' }, { confirmed: '' }, { issuer: 'Omio' }, { total: '0' }]) {
+    assert.throws(() => parseAffiliateSettlement({ document: { ...document, ...invalid } }));
+  }
+  const pdf = Buffer.from('%PDF-1.7\n');
+  const result = parseAffiliateSettlement({ document: { ...document, extraction_method: 'pdf_text' },
+    name: 'viator.pdf', file: pdf.toString('base64') });
+  assert.deepEqual(result.bytes, pdf);
+  assert.equal(result.metadata.extraction_method, 'pdf_text');
+  assert.equal(result.metadata.affiliate_settlement, true);
+});
+
+test('affiliate document intake distinguishes gross commission from the net PayPal deposit', async () => {
+  const { suggestAffiliateSettlement } = await extraction;
+  const fields = suggestAffiliateSettlement([
+    'Viator, Inc.', 'Payout date: 2026-11-22', 'Payout reference: V-998',
+    'PayPal transaction ID: ABC123', 'Gross commission: USD 14.35', 'Net amount: USD 13.90'
+  ].join('\n'));
+  assert.deepEqual(fields, { issuer: 'Viator', issue_date: '2026-11-22', currency: 'USD',
+    document_number: 'V-998', paypal_reference: 'ABC123', total: '14.35' });
+  assert.equal(suggestAffiliateSettlement('GetYourGuide\nNet amount: USD 13.90').total, '');
+});

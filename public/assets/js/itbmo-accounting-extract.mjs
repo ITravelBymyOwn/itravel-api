@@ -86,6 +86,31 @@ export function suggestFromText(text) {
   };
 }
 
+const affiliatePrograms = [
+  [/(?:get\s*your\s*guide)/i, 'GetYourGuide'],
+  [/\bviator\b|\bowl payments limited\b/i, 'Viator'],
+  [/\bholafly\b/i, 'Holafly'], [/\bdiscover\s*cars\b/i, 'DiscoverCars'],
+  [/\b12go\b/i, '12Go'], [/\bbookaway\b/i, 'Bookaway'],
+  [/\brise\s*(?:&|and)\s*shield\b/i, 'Rise & Shield'], [/\bheymondo\b/i, 'Heymondo']
+];
+
+export function suggestAffiliateSettlement(text) {
+  const { currency } = suggestFromText(text);
+  const programs = affiliatePrograms.filter(([pattern]) => pattern.test(text));
+  const date = text.match(/(?:^|\n)\s*(?:payout date|payment date|fecha (?:de )?(?:pago|liquidaci[oó]n))\s*[:=]?\s*([^\n]+)/i);
+  const getId = label => text.match(new RegExp(String.raw`(?:^|\n)\s*(?:${label})\s*[:=#]?\s*([A-Z0-9][A-Z0-9./-]{2,89})\s*(?:$|\n)`, 'i'))?.[1] || '';
+  const paypal = getId('paypal transaction id|id (?:de )?transacci[oó]n(?: de)? paypal') ||
+    (/\bpaypal\b/i.test(text) ? getId('transaction id|id de transacci[oó]n') : '');
+  return {
+    issuer: programs.length === 1 ? programs[0][1] : '',
+    issue_date: date ? dateFromText(date[1]) : '',
+    currency,
+    document_number: getId('(?:payout|remittance) (?:id|reference)|referencia (?:del pago|de liquidaci[oó]n)') || paypal,
+    paypal_reference: /^[A-Z0-9-]{1,64}$/i.test(paypal) ? paypal.toUpperCase() : '',
+    total: labeledAmount(text, 'gross (?:commission|amount|payout)|total commissions?|commission total|comisi[oó]n bruta|comisiones totales|monto bruto')
+  };
+}
+
 let tesseractReady;
 function tesseract() {
   if (globalThis.Tesseract) return Promise.resolve(globalThis.Tesseract);
@@ -107,7 +132,7 @@ async function createOcr() {
   });
 }
 
-async function textFromPdf(file) {
+async function textFromPdf(file, interpret) {
   const pdf = await import(ASSETS + 'pdf.min.mjs');
   pdf.GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
   const task = pdf.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false, disableFontFace: true, useWasm: false });
@@ -140,20 +165,21 @@ async function textFromPdf(file) {
       }
       page.cleanup();
     }
-    return { fields: suggestFromText(parts.join('\n')), method: worker ? (usedText ? 'mixed' : 'ocr') : 'pdf_text', limited: document.numPages > maxPages };
+    return { fields: interpret(parts.join('\n')), method: worker ? (usedText ? 'mixed' : 'ocr') : 'pdf_text', limited: document.numPages > maxPages };
   } finally {
     await Promise.allSettled([worker?.terminate(), task.destroy()]);
   }
 }
 
-export async function extractAccountingFile(file) {
+export async function extractAccountingFile(file, { affiliate = false } = {}) {
+  const interpret = affiliate ? suggestAffiliateSettlement : suggestFromText;
   const extension = file.name.split('.').pop().toLowerCase();
   if (extension === 'xml') return extractXml(await file.text());
-  if (extension === 'pdf') return textFromPdf(file);
+  if (extension === 'pdf') return textFromPdf(file, interpret);
   const worker = await createOcr();
   try {
     const { data } = await worker.recognize(file);
-    return { fields: suggestFromText(data.text), method: 'ocr' };
+    return { fields: interpret(data.text), method: 'ocr' };
   } finally {
     await worker.terminate();
   }

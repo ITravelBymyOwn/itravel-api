@@ -71,6 +71,29 @@
           <div class="actions"><button id="save" class="button" type="submit">Guardar comprobante</button><button id="clear" type="button">Descartar selección</button></div>
         </form>
       </section>
+      <section class="card" aria-labelledby="affiliate-title">
+        <h2 id="affiliate-title">Registrar comisiones de afiliados</h2>
+        <p class="hint">Para programas sin conexión automática. Registra una sola vez el total bruto de cada liquidación pagada. Usa la fecha y referencia del comprobante.</p>
+        <div class="actions">
+          <label class="button pick">Adjuntar PDF o imagen<input id="affiliate-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></label>
+          <label class="button pick">Tomar foto<input id="affiliate-camera" type="file" accept="image/*" capture="environment"></label>
+        </div>
+        <p id="affiliate-status" role="status"></p>
+        <form id="affiliate-intake">
+          <div class="fields">
+            <label>Programa de afiliados<input name="issuer" list="affiliate-programs" maxlength="150" required></label>
+            <datalist id="affiliate-programs"><option value="GetYourGuide"><option value="Viator"><option value="Holafly"><option value="DiscoverCars"><option value="12Go"><option value="Bookaway"><option value="Rise &amp; Shield"><option value="Heymondo"></datalist>
+            <label>Fecha de liquidación<input type="date" name="issue_date" min="1900-01-01" max="2199-12-31" required></label>
+            <label>Referencia de la liquidación<input name="document_number" maxlength="90" required></label>
+            <label>ID de PayPal (si aplica)<input name="paypal_reference" pattern="[A-Za-z0-9\-]{1,64}" maxlength="64"></label>
+            <label>Moneda<input name="currency" pattern="[A-Za-z]{3}" maxlength="3" placeholder="USD, EUR…" required></label>
+            <label>Comisión bruta<input name="total" inputmode="decimal" pattern="[0-9]{1,13}([.][0-9]{1,5})?" required></label>
+            <label class="full">Notas<textarea name="notes" maxlength="800" rows="2"></textarea></label>
+          </div>
+          <p><label><input type="checkbox" name="confirmed" required> Confirmo que corresponde a una liquidación pagada y que verifiqué el importe y la referencia.</label></p>
+          <div class="actions"><button class="button" type="submit">Registrar ingreso</button><button id="affiliate-clear" type="button" hidden>Quitar respaldo</button></div>
+        </form>
+      </section>
       <section class="card" aria-labelledby="archive-title">
         <h2 id="archive-title">Archivo por fecha de emisión</h2>
         <form id="period" class="filters">
