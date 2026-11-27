@@ -30,7 +30,7 @@ export async function creatorPortal(req, res, body) {
     return res.status(401).json({ ok: false, code: 'REGISTERED_SESSION_REQUIRED' });
   }
 
-  const isAdmin = ['creator_summary', 'creator_create'].includes(body.action) &&
+  const isAdmin = ['creator_summary', 'creator_create', 'creator_web_offer'].includes(body.action) &&
     await supabaseFetch('/rpc/itbmo_accounting_admin', {
       method: 'POST', body: JSON.stringify({ p_profile: session.user_id })
     }) === true;
@@ -39,7 +39,10 @@ export async function creatorPortal(req, res, body) {
       method: 'POST',
       body: JSON.stringify({ p_profile: session.user_id, p_environment: 'sandbox' })
     });
-    return res.status(200).json({ ok: true, summary, is_admin: isAdmin });
+    const webOffer = isAdmin ? await supabaseFetch('/rpc/itbmo_admin_web_offer', {
+      method: 'POST', body: JSON.stringify({ p_profile: session.user_id })
+    }) : null;
+    return res.status(200).json({ ok: true, summary, is_admin: isAdmin, web_offer: webOffer });
   }
 
   if (body.action === 'creator_payment_history') {
@@ -73,6 +76,25 @@ export async function creatorPortal(req, res, body) {
 
   if (!isAdmin) {
     return res.status(403).json({ ok: false, code: 'ADMIN_ACCESS_REQUIRED' });
+  }
+
+  if (body.action === 'creator_web_offer') {
+    const toCents = value => {
+      if (typeof value !== 'string' || !/^\d{1,6}(\.\d{1,2})?$/.test(value)) return null;
+      const [units, fraction = ''] = value.split('.');
+      return Number(units) * 100 + Number(fraction.padEnd(2, '0'));
+    };
+    const regular = toCents(body.regular);
+    const promotion = body.promotion === '' ? null : toCents(body.promotion);
+    if (regular === null || (body.promotion !== '' && promotion === null)) {
+      return res.status(400).json({ ok: false, code: 'INVALID_WEB_OFFER' });
+    }
+    const offer = await supabaseFetch('/rpc/itbmo_admin_web_offer', {
+      method: 'POST', body: JSON.stringify({ p_profile: session.user_id, p_regular: regular, p_promotion: promotion })
+    });
+    if (!offer) return res.status(403).json({ ok: false, code: 'ADMIN_ACCESS_REQUIRED' });
+    if (offer.outcome === 'invalid') return res.status(400).json({ ok: false, code: 'INVALID_WEB_OFFER' });
+    return res.status(200).json({ ok: true, offer });
   }
 
   const code = String(body.code || '').trim().toUpperCase();

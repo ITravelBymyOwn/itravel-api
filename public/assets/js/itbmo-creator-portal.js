@@ -281,7 +281,8 @@
       el('entry').hidden = data.ok && Boolean(data.summary || data.is_admin);
       el('steps').hidden = el('entry').hidden;
       if (data.summary) render(data.summary);
-      if (data.is_admin) el('admin').hidden = false;
+      el('admin').hidden = !data.is_admin;
+      if (data.web_offer) renderWebOffer(data.web_offer);
     } catch {
       el('notice').textContent = unavailable;
     }
@@ -411,6 +412,44 @@
     el('admin-title').textContent = 'Creator agreements';
     el('save').textContent = 'Save agreement';
   }
+
+  if (en) {
+    el('web-offer-title').textContent = 'Website offer';
+    el('regular-label').textContent = 'Regular price (USD)';
+    el('promotion-label').textContent = 'Promotional price (USD)';
+    el('promotion-help').textContent = 'Leave the promotional price blank to remove the website offer.';
+    el('save-web-offer').textContent = 'Save Preview prices';
+  }
+  const webOfferForm = el('web-offer-form');
+  const webOfferStatus = el('web-offer-status');
+
+  function renderWebOffer(offer) {
+    webOfferForm.elements.regular.value = (offer.regular_price_cents / 100).toFixed(2);
+    webOfferForm.elements.promotion.value = offer.promotion_cents == null ? '' : (offer.promotion_cents / 100).toFixed(2);
+    webOfferStatus.textContent = t('Precio vigente en checkout', 'Current checkout price') + ' ' + usd(offer.base_price_cents) +
+      (offer.campaign_id ? ' · ' + t('La campaña activa tiene prioridad.', 'The active campaign takes precedence.') : '');
+  }
+
+  webOfferForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const save = el('save-web-offer');
+    save.disabled = true;
+    try {
+      const result = await request('creator_web_offer', Object.fromEntries(new FormData(webOfferForm)));
+      if (!result.ok) {
+        webOfferStatus.textContent = result.code === 'INVALID_WEB_OFFER'
+          ? t('El precio promocional debe ser mayor que cero y menor que el regular.', 'The promotional price must be above zero and below the regular price.')
+          : errors[result.code] || unavailable;
+        return;
+      }
+      renderWebOffer(result.offer);
+      webOfferStatus.textContent = t('Guardado.', 'Saved.') + ' ' + webOfferStatus.textContent;
+    } catch {
+      webOfferStatus.textContent = unavailable;
+    } finally {
+      save.disabled = false;
+    }
+  });
 
   el('enroll-form').addEventListener('submit', async event => {
     event.preventDefault();

@@ -51,6 +51,7 @@ function normalizeReservation(row) {
     promo_type: row.promo_type,
     discount_value: Number(row.discount_value || 0),
     base_amount: money(row.base_amount),
+    regular_amount: row.regular_amount == null ? null : money(row.regular_amount),
     discount_amount: money(row.discount_amount),
     final_amount: money(row.final_amount),
     currency: row.currency || CURRENCY,
@@ -96,22 +97,22 @@ export async function reservePromotion({ session_token, trip_id, code }) {
   const isVerified = Boolean(profile?.email_verified);
 
   try {
-    const pricing = await commercePricing();
-    const rows = await supabaseFetch('/rpc/itbmo_reserve_promo', {
-      method: 'POST',
-      body: JSON.stringify({
-        p_code: promoCode,
-        p_user_id: session.user_id,
-        p_trip_id: trip.id,
-        p_session_id: session.id,
-        p_base_amount: Number(pricing.base_price),
-        p_currency: CURRENCY,
-        p_is_registered: isRegistered,
-        p_is_verified: isVerified
-      })
+    const qaCheckout = process.env.VERCEL_ENV === 'preview' &&
+      process.env.VERCEL_GIT_COMMIT_REF === 'preview/creator-affiliates' &&
+      process.env.SUPABASE_URL?.replace(/\/$/, '') === 'https://gpfoqnnznncqisunmrlc.supabase.co';
+    const inputs = {
+      p_code: promoCode, p_user_id: session.user_id, p_trip_id: trip.id,
+      p_session_id: session.id, p_is_registered: isRegistered, p_is_verified: isVerified
+    };
+    if (!qaCheckout) {
+      const pricing = await commercePricing();
+      inputs.p_base_amount = Number(pricing.base_price);
+      inputs.p_currency = CURRENCY;
+    }
+    const rows = await supabaseFetch(qaCheckout ? '/rpc/itbmo_reserve_checkout_promo' : '/rpc/itbmo_reserve_promo', {
+      method: 'POST', body: JSON.stringify(inputs)
     });
-
-    const reservation = normalizeReservation(Array.isArray(rows) ? rows[0] || null : null);
+    const reservation = normalizeReservation(qaCheckout ? rows : Array.isArray(rows) ? rows[0] : null);
     if (!reservation) return { ok: false, code: 'PROMO_UNAVAILABLE' };
 
     if (reservation.creator_id || reservation.campaign_id || reservation.promo_code_id) {
@@ -145,7 +146,7 @@ export async function reservePromotion({ session_token, trip_id, code }) {
 export async function getPromotionReservation({ redemption_id, session, trip_id }) {
   if (!redemption_id || !session?.user_id || !trip_id) return null;
   const rows = await supabaseFetch(
-    `/promo_redemptions?select=id,promo_code_id,user_id,trip_id,status,base_amount,discount_amount,final_amount,currency,reservation_expires_at&` +
+    `/promo_redemptions?select=id,promo_code_id,user_id,trip_id,status,base_amount,discount_amount,final_amount,currency,reservation_expires_at,metadata&` +
     `id=eq.${encodeURIComponent(redemption_id)}&` +
     `user_id=eq.${encodeURIComponent(session.user_id)}&` +
     `trip_id=eq.${encodeURIComponent(trip_id)}&limit=1`

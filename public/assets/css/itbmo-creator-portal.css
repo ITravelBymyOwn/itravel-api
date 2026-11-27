@@ -206,3 +206,6 @@
   .creator-entry__side { padding: 1.5rem; }
   .creator-steps { grid-template-columns: minmax(0, 1fr); gap: .8rem; }
 }
+
+#web-offer-form { margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--g-line); }
+#web-offer-form p { margin: 0; color: var(--g-text); }

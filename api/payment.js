@@ -179,8 +179,7 @@ function defaultOffer(pricing) {
 
 async function resolveCheckoutOffer(body, session, trip) {
   const redemptionId = normalizeString(body?.promo_redemption_id, 100);
-  const pricing = await commercePricing();
-  if (!redemptionId) return defaultOffer(pricing);
+  if (!redemptionId) return defaultOffer(await commercePricing());
 
   const redemption = await getPromotionReservation({
     redemption_id: redemptionId,
@@ -221,7 +220,8 @@ async function resolveCheckoutOffer(body, session, trip) {
     promoRedemptionId: redemption.id,
     promoCodeId: redemption.promo_code_id,
     amount,
-    regularAmount: Number(pricing.regular_price),
+    regularAmount: Number(redemption.metadata?.checkout_pricing?.regular_amount ??
+      (await commercePricing()).regular_price),
     baseAmount: Number(redemption.base_amount),
     discountAmount: Number(redemption.discount_amount)
   };
@@ -429,6 +429,7 @@ async function paypalRequest(path, options = {}) {
 }
 
 async function handleConfig(res) {
+  res.setHeader("Cache-Control", "no-store");
   const pricing = await commercePricing();
   const discounted = Number(pricing.base_price) < Number(pricing.regular_price);
   return res.status(200).json({
@@ -547,7 +548,7 @@ async function handlePayPalCreateOrder(res, body, session) {
   }
 
   const offer = await resolveCheckoutOffer(body, session, trip);
-  if (body.expected_amount != null && String(body.expected_amount) !== money(offer.amount)) {
+  if (typeof body.expected_amount !== "string" || body.expected_amount !== money(offer.amount)) {
     return res.status(409).json({ ok: false, error: 'PRICE_CHANGED' });
   }
   const payment = await createPaymentRow({
@@ -904,7 +905,7 @@ export default async function handler(req, res) {
         : req.body || {};
 
     const action = String(body.action || "").trim().toLowerCase();
-    if (["creator_summary", "creator_create", "creator_enroll", "creator_payment_history"].includes(action)) {
+    if (["creator_summary", "creator_create", "creator_enroll", "creator_payment_history", "creator_web_offer"].includes(action)) {
       return await creatorPortal(req, res, { ...body, action });
     }
     if (["creator_payout_balances", "creator_payout_prepare", "creator_payout_submit", "creator_payout_reconcile", "creator_payout_sandbox_run"].includes(action)) {

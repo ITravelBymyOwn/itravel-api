@@ -7,12 +7,12 @@
 <title>I Travel By My Own · Colaboradores</title>
 <link rel="icon" href="/assets/img/favicon-32.png">
 <link rel="stylesheet" href="/assets/css/itbmo-growth.css?v=297.7">
-<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css?v=9">
+<link rel="stylesheet" href="/assets/css/itbmo-creator-portal.css?v=10">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap">
 
-<script src="/assets/js/itbmo-creator-portal.js?v=13" defer></script>
+<script src="/assets/js/itbmo-creator-portal.js?v=14" defer></script>
 </head>
 <body>
 <header class="g-header"><div class="g-header__inner creator-header">
@@ -100,6 +100,14 @@
 </ul>
 <section id="dashboard" aria-label="Estado de cuenta" hidden></section>
 <section id="admin" class="card" hidden>
+<h2 id="web-offer-title">Promoción de la web</h2>
+<form id="web-offer-form">
+<label><span id="regular-label">Precio regular (USD)</span><input name="regular" type="number" min="0.01" max="999999.99" step="0.01" required></label>
+<label><span id="promotion-label">Precio promocional (USD)</span><input name="promotion" type="number" min="0.01" max="999999.99" step="0.01" aria-describedby="promotion-help"></label>
+<p id="promotion-help">Deja el precio promocional vacío para quitar la oferta general.</p>
+<button class="g-button g-button--primary" type="submit" id="save-web-offer">Guardar precios en Preview</button>
+<p id="web-offer-status" role="status"></p>
+</form>
 <h2 id="admin-title">Convenios de colaboradores</h2>
 <form id="creator-form">
 <label><span data-field="operation">Acción</span><select name="operation"><option value="create" data-field="create">Crear colaborador</option><option value="edit" data-field="edit">Cambiar convenio por código</option></select></label>
