@@ -160,14 +160,15 @@
     el('dashboard').replaceChildren();
     el('dashboard').hidden = false;
     const balance = section(summary.name);
+    balance.classList.add('creator-balance');
     const stats = document.createElement('div');
     stats.className = 'stats';
     for (const [label, value] of [
       [t('Comisión acumulada', 'Total commission'), summary.total_commission_cents],
       [t('Pendiente de pago', 'Unpaid'), Math.max(0, Number(summary.total_commission_cents) - Number(summary.paid_cents))],
-      [t('En período de espera', 'On hold'), summary.pending_cents],
+      [t('Pagado', 'Paid'), summary.paid_cents],
       [t('Disponible', 'Available'), summary.available_cents],
-      [t('Pagado', 'Paid'), summary.paid_cents]
+      [t('En período de espera', 'On hold'), summary.pending_cents]
     ]) {
       const item = document.createElement('div');
       const amount = document.createElement('strong');
@@ -177,6 +178,7 @@
     }
     const reload = document.createElement('button');
     reload.type = 'button';
+    reload.className = 'g-button g-button--ghost g-button--compact';
     reload.textContent = t('Actualizar saldo', 'Refresh balance');
     reload.addEventListener('click', async () => {
       reload.disabled = true;
@@ -222,6 +224,7 @@
     if (summary.payouts.length === 24 && cursor?.created_at && cursor.id) {
       const more = document.createElement('button');
       more.type = 'button';
+      more.className = 'g-button g-button--ghost g-button--compact';
       more.textContent = t('Ver pagos anteriores', 'Show earlier payments');
       const status = document.createElement('p');
       status.setAttribute('role', 'status');
