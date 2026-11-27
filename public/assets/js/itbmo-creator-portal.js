@@ -260,7 +260,9 @@
     RESEND_RATE_LIMITED: t('Espera al menos un minuto antes de volver a solicitar el correo.', 'Wait at least one minute before requesting another email.'),
     CREATOR_OR_CODE_EXISTS: t('El colaborador o el código ya existe.', 'The creator or code already exists.'),
     VERIFIED_PROFILE_OR_MARGIN_REQUIRED: t('Verifica que la cuenta esté registrada y que la comisión sea menor que el precio con descuento.', 'Check that the account is verified and the commission is below the discounted price.'),
-    INVALID_CREATOR_AGREEMENT: t('Revisa los datos del colaborador.', 'Check the creator details.')
+    CREATOR_CODE_NOT_FOUND: t('No se encontró el código del colaborador.', 'Creator code not found.'),
+    ADMIN_ACCESS_REQUIRED: t('Esta cuenta no tiene acceso a convenios.', 'This account cannot manage agreements.'),
+    INVALID_CREATOR_AGREEMENT: t('El descuento debe dejar un precio mayor que la comisión. Revisa también los datos del convenio.', 'The discounted price must exceed the commission. Check the agreement details.')
   };
   const unavailable = t('No pudimos cargar el portal.', 'We could not load the portal.');
 
@@ -402,9 +404,12 @@
   if (en) {
     for (const [key, label] of Object.entries({
       name: 'Display name', code: 'Code', email: 'Verified ITBMO account email',
-      payout_email: 'Creator PayPal Sandbox email', discount: 'Discount (%)', commission: 'Fixed commission (USD cents)'
+      payout_email: 'Creator PayPal Sandbox email', discount: 'Discount', commission: 'Fixed commission per purchase (USD)',
+      operation: 'Action', create: 'Create creator', edit: 'Update agreement by code',
+      discount_mode: 'Discount type', percent: 'Percentage', fixed: 'Amount in USD'
     })) document.querySelector('[data-field="' + key + '"]').textContent = label;
-    el('save').textContent = el('admin-title').textContent = 'Create creator';
+    el('admin-title').textContent = 'Creator agreements';
+    el('save').textContent = 'Save agreement';
   }
 
   el('enroll-form').addEventListener('submit', async event => {
@@ -426,16 +431,27 @@
     }
   });
 
-  el('creator-form').addEventListener('submit', async event => {
+  const creatorForm = el('creator-form');
+  function updateCreatorOperation() {
+    const edit = creatorForm.elements.operation.value === 'edit';
+    el('creator-account-fields').hidden = el('creator-account-fields').disabled = edit;
+  }
+  creatorForm.elements.operation.addEventListener('change', updateCreatorOperation);
+  creatorForm.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
     el('save').disabled = true;
     try {
       const result = await request('creator_create', Object.fromEntries(new FormData(form)));
       el('admin-result').textContent = result.ok
-        ? t('Colaborador creado. Código ', 'Creator created. Code ') + result.code
+        ? t('Convenio guardado', 'Agreement saved') + ` · ${result.code} · ` +
+          t('Precio con código', 'Code price') + ` ${usd(result.final_cents)} · ` +
+          t('Comisión', 'Commission') + ` ${usd(result.commission_cents)}`
         : errors[result.code] || unavailable;
-      if (result.ok) form.reset();
+      if (result.ok) {
+        form.reset();
+        updateCreatorOperation();
+      }
     } catch {
       el('admin-result').textContent = unavailable;
     } finally {

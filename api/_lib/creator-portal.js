@@ -30,7 +30,10 @@ export async function creatorPortal(req, res, body) {
     return res.status(401).json({ ok: false, code: 'REGISTERED_SESSION_REQUIRED' });
   }
 
-  const isAdmin = session.user_id === process.env.ITBMO_ADMIN_USER_ID;
+  const isAdmin = ['creator_summary', 'creator_create'].includes(body.action) &&
+    await supabaseFetch('/rpc/itbmo_accounting_admin', {
+      method: 'POST', body: JSON.stringify({ p_profile: session.user_id })
+    }) === true;
   if (body.action === 'creator_summary') {
     const summary = await supabaseFetch('/rpc/itbmo_creator_summary', {
       method: 'POST',
@@ -73,32 +76,36 @@ export async function creatorPortal(req, res, body) {
   }
 
   const code = String(body.code || '').trim().toUpperCase();
+  const operation = body.operation || 'create';
+  const mode = body.discount_mode || 'percentage';
   const name = String(body.name || '').trim();
   const email = String(body.email || '').trim().toLowerCase();
   const payoutEmail = String(body.payout_email || '').trim().toLowerCase();
-  const discount = Number(body.discount);
-  const commission = Number(body.commission);
-  if (!codePattern.test(code) || !name || name.length > 100 ||
-      !emailPattern.test(email) || !emailPattern.test(payoutEmail) ||
-      email.length > 254 || payoutEmail.length > 254 ||
-      !Number.isSafeInteger(discount) || discount < 1 || discount > 99 ||
-      !Number.isSafeInteger(commission) || commission < 1 || commission > 798) {
+  const discount = String(body.discount || '').trim();
+  const commission = String(body.commission || '').trim();
+  if (!codePattern.test(code) || !['create', 'edit'].includes(operation) ||
+      !['percentage', 'fixed'].includes(mode) || !/^\d{1,6}(\.\d{1,2})?$/.test(discount) ||
+      !/^\d{1,6}(\.\d{1,2})?$/.test(commission) ||
+      (operation === 'create' && (!name || name.length > 100 ||
+        !emailPattern.test(email) || !emailPattern.test(payoutEmail) || email.length > 254 || payoutEmail.length > 254))) {
     return res.status(400).json({ ok: false, code: 'INVALID_CREATOR_AGREEMENT' });
   }
-
-  try {
-    const result = await supabaseFetch('/rpc/itbmo_create_creator', {
-      method: 'POST',
-      body: JSON.stringify({
-        p_code: code, p_name: name, p_email: email, p_payout_email: payoutEmail,
-        p_discount: discount, p_commission_cents: commission
-      })
-    });
-    return result
-      ? res.status(201).json({ ok: true, code })
-      : res.status(409).json({ ok: false, code: 'VERIFIED_PROFILE_OR_MARGIN_REQUIRED' });
-  } catch (error) {
-    if (error.status === 409) return res.status(409).json({ ok: false, code: 'CREATOR_OR_CODE_EXISTS' });
-    throw error;
-  }
+  const [units, fraction = ''] = commission.split('.');
+  const result = await supabaseFetch('/rpc/itbmo_admin_creator_deal', {
+    method: 'POST',
+    body: JSON.stringify({
+      p_admin: session.user_id, p_code: code, p_mode: mode, p_discount: discount,
+      p_commission_cents: Number(units) * 100 + Number(fraction.padEnd(2, '0')),
+      p_name: operation === 'create' ? name : null,
+      p_email: operation === 'create' ? email : null,
+      p_payout_email: operation === 'create' ? payoutEmail : null
+    })
+  });
+  if (result?.outcome === 'saved') return res.status(200).json({ ok: true, ...result });
+  const errors = {
+    forbidden: [403, 'ADMIN_ACCESS_REQUIRED'], not_found: [404, 'CREATOR_CODE_NOT_FOUND'],
+    exists: [409, 'CREATOR_OR_CODE_EXISTS'], account_required: [409, 'VERIFIED_PROFILE_OR_MARGIN_REQUIRED']
+  };
+  const [status, error] = errors[result?.outcome] || [400, 'INVALID_CREATOR_AGREEMENT'];
+  return res.status(status).json({ ok: false, code: error });
 }

@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap">
 
-<script src="/assets/js/itbmo-creator-portal.js?v=12" defer></script>
+<script src="/assets/js/itbmo-creator-portal.js?v=13" defer></script>
 </head>
 <body>
 <header class="g-header"><div class="g-header__inner creator-header">
@@ -100,15 +100,19 @@
 </ul>
 <section id="dashboard" aria-label="Estado de cuenta" hidden></section>
 <section id="admin" class="card" hidden>
-<h2 id="admin-title">Crear colaborador</h2>
+<h2 id="admin-title">Convenios de colaboradores</h2>
 <form id="creator-form">
-<label><span data-field="name">Nombre visible</span><input name="name" maxlength="100" required></label>
+<label><span data-field="operation">Acción</span><select name="operation"><option value="create" data-field="create">Crear colaborador</option><option value="edit" data-field="edit">Cambiar convenio por código</option></select></label>
 <label><span data-field="code">Código</span><input name="code" autocomplete="off" minlength="3" maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{2,39}" required></label>
+<fieldset id="creator-account-fields">
+<label><span data-field="name">Nombre visible</span><input name="name" maxlength="100" required></label>
 <label><span data-field="email">Correo de la cuenta ITBMO verificada</span><input name="email" type="email" required></label>
 <label><span data-field="payout_email">Correo PayPal Sandbox del colaborador</span><input name="payout_email" type="email" required></label>
-<label><span data-field="discount">Descuento (%)</span><input name="discount" type="number" min="1" max="99" required></label>
-<label><span data-field="commission">Comisión fija (centavos de USD)</span><input name="commission" type="number" min="1" max="798" required></label>
-<button id="save" class="g-button g-button--primary">Crear colaborador</button>
+</fieldset>
+<label><span data-field="discount_mode">Tipo de descuento</span><select name="discount_mode"><option value="percentage" data-field="percent">Porcentaje</option><option value="fixed" data-field="fixed">Importe en USD</option></select></label>
+<label><span data-field="discount">Descuento</span><input name="discount" type="number" min="0.01" step="0.01" required></label>
+<label><span data-field="commission">Comisión fija por compra (USD)</span><input name="commission" type="number" min="0" step="0.01" required></label>
+<button id="save" class="g-button g-button--primary">Guardar convenio</button>
 <p id="admin-result" role="status"></p>
 </form>
 </section>
