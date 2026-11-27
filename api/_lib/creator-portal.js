@@ -39,6 +39,20 @@ export async function creatorPortal(req, res, body) {
     return res.status(200).json({ ok: true, summary, is_admin: isAdmin });
   }
 
+  if (body.action === 'creator_payment_history') {
+    const before = body.before;
+    const id = body.before_id;
+    if (typeof before !== 'string' || before.length > 40 || !Number.isFinite(Date.parse(before)) ||
+        typeof id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)) {
+      return res.status(400).json({ ok: false, code: 'INVALID_HISTORY_CURSOR' });
+    }
+    const rows = await supabaseFetch('/rpc/itbmo_creator_payment_history', {
+      method: 'POST',
+      body: JSON.stringify({ p_profile: session.user_id, p_environment: 'sandbox', p_before: before, p_before_id: id })
+    });
+    return res.status(200).json({ ok: true, payments: rows.slice(0, 24), more: rows.length > 24 });
+  }
+
   if (body.action === 'creator_enroll') {
     const name = String(body.name || '').trim();
     const payoutEmail = String(body.payout_email || '').trim().toLowerCase();

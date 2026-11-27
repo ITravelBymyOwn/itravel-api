@@ -125,6 +125,18 @@
       header.append(cell);
     }
     const body = tableNode.createTBody();
+    addTableRows(body, rows);
+    if (!rows.length) {
+      const cell = body.insertRow().insertCell();
+      cell.colSpan = labels.length;
+      cell.textContent = t('Aún no hay registros.', 'No records yet.');
+    }
+    wrap.append(tableNode);
+    container.append(wrap);
+    return body;
+  }
+
+  function addTableRows(body, rows) {
     for (const values of rows) {
       const row = body.insertRow();
       for (const value of values) {
@@ -133,13 +145,6 @@
         else cell.textContent = value;
       }
     }
-    if (!rows.length) {
-      const cell = body.insertRow().insertCell();
-      cell.colSpan = labels.length;
-      cell.textContent = t('Aún no hay registros.', 'No records yet.');
-    }
-    wrap.append(tableNode);
-    container.append(wrap);
   }
 
   function creatorLink(code) {
@@ -159,7 +164,8 @@
     stats.className = 'stats';
     for (const [label, value] of [
       [t('Comisión acumulada', 'Total commission'), summary.total_commission_cents],
-      [t('Pendiente', 'Pending'), summary.pending_cents],
+      [t('Pendiente de pago', 'Unpaid'), Math.max(0, Number(summary.total_commission_cents) - Number(summary.paid_cents))],
+      [t('En período de espera', 'On hold'), summary.pending_cents],
       [t('Disponible', 'Available'), summary.available_cents],
       [t('Pagado', 'Paid'), summary.paid_cents]
     ]) {
@@ -169,7 +175,15 @@
       item.append(label, amount);
       stats.append(item);
     }
-    balance.append(stats);
+    const reload = document.createElement('button');
+    reload.type = 'button';
+    reload.textContent = t('Actualizar saldo', 'Refresh balance');
+    reload.addEventListener('click', async () => {
+      reload.disabled = true;
+      try { await init(); }
+      finally { reload.disabled = false; }
+    });
+    balance.append(stats, reload);
 
     table(section(t('Códigos', 'Codes')), [
       t('Código', 'Code'), t('Descuento', 'Discount'), t('Estado', 'Status'),
@@ -193,11 +207,42 @@
       processing: t('Procesando', 'Processing'), paid: t('Pagado', 'Paid'),
       failed: t('Fallido', 'Failed'), returned: t('Devuelto', 'Returned'), review: t('En revisión', 'Under review')
     };
-    table(section(t('Últimas 24 liquidaciones', 'Latest 24 payouts')), [
-      t('Período', 'Period'), t('Importe', 'Amount'), t('Estado', 'Status'), t('Referencia PayPal', 'PayPal reference')
-    ], summary.payouts.map(payout => [
-      payout.period.slice(0, 7), usd(payout.amount_cents), labels[payout.state], payout.provider_batch_id || '—'
-    ]));
+    const payments = section(t('Historial de pagos', 'Payment history'));
+    const method = { bank: t('Transferencia', 'Bank transfer'), paypal: 'PayPal', other: t('Otro', 'Other') };
+    const paymentCells = payout => [
+      payout.payment_date ? date(payout.payment_date) : payout.period.slice(0, 7), payout.creator_code || '—',
+      usd(payout.amount_cents), labels[payout.state], method[payout.method] || '—',
+      payout.reference || payout.provider_batch_id || '—'
+    ];
+    const history = table(payments, [
+      t('Fecha o período', 'Date or period'), t('Código', 'Code'), t('Importe', 'Amount'),
+      t('Estado', 'Status'), t('Medio', 'Method'), t('Referencia', 'Reference')
+    ], summary.payouts.map(paymentCells));
+    let cursor = summary.payouts.at(-1);
+    if (summary.payouts.length === 24 && cursor?.created_at && cursor.id) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.textContent = t('Ver pagos anteriores', 'Show earlier payments');
+      const status = document.createElement('p');
+      status.setAttribute('role', 'status');
+      payments.append(more, status);
+      more.addEventListener('click', async () => {
+        more.disabled = true;
+        status.textContent = '';
+        try {
+          const data = await request('creator_payment_history', { before: cursor.created_at, before_id: cursor.id });
+          if (!data.ok) throw new Error();
+          addTableRows(history, data.payments.map(paymentCells));
+          cursor = data.payments.at(-1) || cursor;
+          more.hidden = !data.more;
+          if (!data.more) status.textContent = t('Fin del historial.', 'End of payment history.');
+        } catch {
+          status.textContent = t('No se pudo cargar el historial. Intenta de nuevo.', 'Could not load payment history. Try again.');
+        } finally {
+          more.disabled = false;
+        }
+      });
+    }
   }
 
   const errors = {
