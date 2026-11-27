@@ -27,6 +27,10 @@ const errorMessages = {
   INVALID_FILE: 'El archivo no coincide con su formato o está dañado.',
   INVALID_DOCUMENT: 'Revisa la fecha, los importes y la información del comprobante.',
   INVALID_AFFILIATE_SETTLEMENT: 'Confirma una liquidación pagada y revisa el programa, la fecha, la referencia y la comisión bruta. Omio y Airalo corresponden a Impact.',
+  INVALID_CREATOR_PAYMENT: 'Revisa el código, la fecha, el importe, el medio y la referencia del pago.',
+  CREATOR_CODE_NOT_FOUND: 'No se encontró este código de colaborador.',
+  CREATOR_REFERENCE_CONFLICT: 'Esa referencia ya está registrada para otro pago.',
+  CREATOR_BALANCE_CHANGED: 'El importe supera el saldo disponible. Vuelve a consultar el código.',
   INVALID_PAYPAL_CSV: 'Usa el CSV de actividad de PayPal en inglés con código de evento, hasta 1.000 filas y el orden de fechas correcto.',
   INVALID_BILLING_REVIEW: 'Revisa la clasificación y la evidencia. Si la venta ya fue revisada, vuelve a consultar.',
   ACCOUNTING_STORAGE_ERROR: 'No pudimos guardar o consultar el archivo. Si estabas cargándolo, conserva esta selección y vuelve a intentar.'
@@ -536,6 +540,72 @@ affiliateIntake.addEventListener('submit', async event => {
     affiliateStatus.textContent = error.message;
   } finally {
     for (const control of controls) control.disabled = false;
+  }
+});
+
+const creatorPayment = byId('creator-payment');
+const creatorDetails = byId('creator-payment-details');
+const creatorResult = byId('creator-result');
+const creatorPaymentStatus = byId('creator-payment-status');
+const creatorLookup = byId('creator-lookup');
+const creatorCode = creatorPayment.elements.code;
+const creatorDate = creatorPayment.elements.date;
+const today = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'America/Costa_Rica' }).formatToParts(new Date());
+const todayParts = Object.fromEntries(today.map(({ type, value }) => [type, value]));
+creatorDate.max = [todayParts.year, todayParts.month, todayParts.day].join('-');
+
+function closeCreatorDetails() {
+  creatorDetails.hidden = true;
+  creatorDetails.disabled = true;
+  creatorPayment.elements.confirmed.checked = false;
+}
+creatorCode.addEventListener('input', () => {
+  closeCreatorDetails();
+  creatorResult.textContent = '';
+  creatorPaymentStatus.textContent = '';
+});
+creatorLookup.addEventListener('click', async () => {
+  const code = creatorCode.value.trim();
+  if (!creatorCode.reportValidity()) return;
+  closeCreatorDetails();
+  creatorLookup.disabled = true;
+  creatorResult.textContent = 'Consultando saldo…';
+  creatorPaymentStatus.textContent = '';
+  try {
+    const { creator } = await request('creator_balance', { code });
+    if (creatorCode.value.trim() !== code) return;
+    const balance = new Intl.NumberFormat('es-CR', { style: 'currency', currency: creator.currency }).format(creator.available_cents / 100);
+    creatorCode.value = creator.code;
+    creatorResult.textContent = `${creator.name} · ${creator.code} · Disponible ${balance}`;
+    creatorDetails.hidden = false;
+    creatorDetails.disabled = false;
+  } catch (error) {
+    if (creatorCode.value.trim() === code) creatorResult.textContent = error.message;
+  } finally {
+    creatorLookup.disabled = false;
+  }
+});
+creatorPayment.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (creatorDetails.disabled) return;
+  const form = Object.fromEntries(new FormData(creatorPayment));
+  creatorDetails.disabled = creatorLookup.disabled = creatorCode.disabled = true;
+  creatorPaymentStatus.textContent = 'Registrando pago…';
+  try {
+    const data = await request('creator_payment', form);
+    creatorPayment.reset();
+    closeCreatorDetails();
+    creatorResult.textContent = '';
+    period.elements.year.value = form.date.slice(0, 4);
+    period.elements.month.value = String(Number(form.date.slice(5, 7)));
+    await loadJournal();
+    creatorPaymentStatus.textContent = data.duplicate ? 'Este pago ya estaba registrado.' :
+      'Pago registrado en el libro y en el historial del colaborador.';
+  } catch (error) {
+    creatorDetails.disabled = false;
+    creatorPaymentStatus.textContent = error.message;
+  } finally {
+    creatorLookup.disabled = creatorCode.disabled = false;
   }
 });
 

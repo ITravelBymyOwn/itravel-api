@@ -117,3 +117,16 @@ test('affiliate document intake distinguishes gross commission from the net PayP
     document_number: 'V-998', paypal_reference: 'ABC123', total: '14.35' });
   assert.equal(suggestAffiliateSettlement('GetYourGuide\nNet amount: USD 13.90').total, '');
 });
+
+test('creator payments preserve exact cents and require an explicitly confirmed payment', async () => {
+  const { parseCreatorPayment } = await accounting;
+  const input = { code: ' test-01 ', amount: '31.05', date: '2026-11-26', method: 'bank',
+    reference: ' REF-342 ', confirmed: 'on' };
+  assert.deepEqual(parseCreatorPayment(input), {
+    p_code: 'TEST-01', p_amount: 3105, p_date: '2026-11-26', p_method: 'bank', p_reference: 'REF-342'
+  });
+  for (const changes of [{ amount: '1.001' }, { amount: '0' }, { amount: '21474836.48' },
+    { date: '2026-02-29' }, { confirmed: '' }, { method: 'card' }, { reference: '' }]) {
+    assert.throws(() => parseCreatorPayment({ ...input, ...changes }), { message: 'INVALID_CREATOR_PAYMENT' });
+  }
+});

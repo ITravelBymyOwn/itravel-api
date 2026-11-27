@@ -7,6 +7,7 @@ import { receiveImpactAction } from './accounting-impact.js';
 const QA_PROJECT = 'https://gpfoqnnznncqisunmrlc.supabase.co';
 const BUCKET = 'itbmo-accounting';
 const MAX_BYTES = 3 * 1024 * 1024;
+const CREATOR_CODE = /^[A-Z0-9][A-Z0-9_-]{2,39}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FISCAL = ['pending', 'eligible', 'ineligible', 'partial', 'not_applicable'];
 const FILE_TYPES = {
@@ -214,6 +215,21 @@ async function downloadDocument(body) {
   return { url: url.href };
 }
 
+export function parseCreatorPayment(body) {
+  const code = field(body.code, 41).toUpperCase();
+  const amount = field(body.amount, 15);
+  const reference = field(body.reference, 91);
+  const date = field(body.date, 11);
+  requireValue(CREATOR_CODE.test(code) && /^\d{1,8}(\.\d{1,2})?$/.test(amount) &&
+    validDate(date) && ['bank', 'paypal', 'other'].includes(body.method) &&
+    reference && reference.length <= 90 && !/[\x00-\x1f\x7f]/.test(reference) &&
+    body.confirmed === 'on', 'INVALID_CREATOR_PAYMENT');
+  const [units, decimals = ''] = amount.split('.');
+  const cents = Number(units) * 100 + Number(decimals.padEnd(2, '0'));
+  requireValue(cents > 0 && cents <= 2147483647, 'INVALID_CREATOR_PAYMENT');
+  return { p_code: code, p_amount: cents, p_date: date, p_method: body.method, p_reference: reference };
+}
+
 export default async function accounting(req, res, impactPostback = false) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -239,6 +255,28 @@ export default async function accounting(req, res, impactPostback = false) {
       }
       case 'upload': result = await saveDocument(session.user_id, parseAccountingUpload(body)); break;
       case 'affiliate_settlement': result = await saveDocument(session.user_id, parseAffiliateSettlement(body)); break;
+      case 'creator_balance': {
+        const code = field(body.code, 41).toUpperCase();
+        requireValue(CREATOR_CODE.test(code), 'INVALID_CREATOR_PAYMENT');
+        const creator = await rest('/rpc/itbmo_accounting_creator_balance', {
+          method: 'POST', body: JSON.stringify({ p_code: code })
+        });
+        if (!creator) throw new AccountingError(404, 'CREATOR_CODE_NOT_FOUND');
+        result = { creator };
+        break;
+      }
+      case 'creator_payment': {
+        const recorded = await rest('/rpc/itbmo_accounting_record_creator_payment', {
+          method: 'POST', body: JSON.stringify({ p_profile: session.user_id, ...parseCreatorPayment(body) })
+        });
+        if (recorded?.outcome === 'forbidden') throw new AccountingError(403, 'ACCOUNTING_FORBIDDEN');
+        if (recorded?.outcome === 'unknown_code') throw new AccountingError(404, 'CREATOR_CODE_NOT_FOUND');
+        if (recorded?.outcome === 'reference_conflict') throw new AccountingError(409, 'CREATOR_REFERENCE_CONFLICT');
+        if (recorded?.outcome === 'insufficient_balance') throw new AccountingError(409, 'CREATOR_BALANCE_CHANGED');
+        if (!['recorded', 'existing'].includes(recorded?.outcome)) throw new AccountingError(400, 'INVALID_CREATOR_PAYMENT');
+        result = { id: recorded.id, duplicate: recorded.outcome === 'existing' };
+        break;
+      }
       case 'journal': {
         const query = listPeriod(body, 'entry_date');
         query.set('select', 'entry_id,entry_date,source,description,reference,currency,amount::text,direction,category,review_status');
